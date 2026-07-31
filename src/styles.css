@@ -90,6 +90,25 @@ body {
   box-shadow: 0 2px 0 #1f1a10;
 }
 
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-confirm {
+  background: #dcedc4;
+  border-color: #7f9f5f;
+  box-shadow: 0 2px 0 #7f9f5f;
+}
+
+.btn-cancel {
+  background: #f8ded9;
+  border-color: #c98a80;
+  box-shadow: 0 2px 0 #c98a80;
+}
+
 /* ---------- board ---------- */
 
 .board-wrap {
@@ -112,6 +131,61 @@ body {
   height: var(--cell);
   background: #f7f0dc;
   position: relative;
+}
+
+.cell.has-arrows:hover {
+  background: #fdf6e0;
+  box-shadow: inset 0 0 0 2px #e0b62e;
+}
+
+.cell.is-anchor {
+  background: #fff4cf;
+  box-shadow: inset 0 0 0 2px #e0b62e;
+}
+
+/* ---------- direction arrows ---------- */
+
+.cell-arrow {
+  position: absolute;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  z-index: 4;
+  font-size: 11px;
+  line-height: 1;
+  color: #6b5a1e;
+  background: #ffd84d;
+  border: 1px solid #c9a52c;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* Kept inside the cell so hovering an arrow doesn't break the cell's :hover. */
+.cell-arrow-across {
+  right: 1px;
+  top: 50%;
+  margin-top: -9px;
+}
+
+.cell-arrow-down {
+  bottom: 1px;
+  left: 50%;
+  margin-left: -9px;
+  transform: rotate(90deg);
+}
+
+.cell.has-arrows:hover .cell-arrow,
+.cell.is-anchor .cell-arrow {
+  display: flex;
+}
+
+.cell-arrow:hover {
+  background: #3d3524;
+  border-color: #3d3524;
+  color: #ffd84d;
 }
 
 /* ---------- tiles ---------- */
@@ -139,6 +213,7 @@ body {
 }
 
 .rack-tile {
+  position: relative;
   width: calc(var(--cell) - 4px);
   height: calc(var(--cell) - 4px);
   flex-shrink: 0;
@@ -146,6 +221,31 @@ body {
 
 .tile-hidden {
   visibility: hidden;
+}
+
+.tile-preview {
+  background: #fff6d6;
+  border-style: dashed;
+  border-color: #c9a52c;
+  color: #8a6210;
+  opacity: 0.85;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.rack-tile.is-picked {
+  background: #ffd84d;
+  border-color: #c9a52c;
+  transform: translateY(-4px);
+}
+
+.pick-order {
+  position: absolute;
+  top: -2px;
+  right: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.6;
 }
 
 .t-valid {
@@ -175,6 +275,130 @@ body {
   pointer-events: none;
   opacity: 0.92;
   cursor: grabbing;
+}
+
+/* ---------- word controls ---------- */
+
+.board-tile.is-in-word {
+  background: #ffd84d;
+  border-color: #c9a52c;
+  box-shadow: 0 2px 4px rgba(61, 53, 36, 0.35);
+}
+
+.is-word-tile {
+  cursor: pointer;
+}
+
+.word-controls {
+  position: absolute;
+  /* Overlaps its own tile slightly so there is no gap for the pointer to
+     cross on the way from the tile to these controls. */
+  bottom: calc(100% - 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  background: #fffbea;
+  border: 2px solid #c9a52c;
+  border-radius: 9px;
+  box-shadow: 0 3px 8px rgba(61, 53, 36, 0.3);
+}
+
+.word-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 2px;
+  border-radius: 5px;
+}
+
+.word-controls-row:hover {
+  background: #fff2c8;
+}
+
+.word-controls-name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px 0 2px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.word-controls-dir {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.word-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink);
+  background: #fff3c4;
+  border: 1px solid #c9a52c;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.word-btn:hover:not(:disabled) {
+  background: #3d3524;
+  border-color: #3d3524;
+  color: #ffd84d;
+}
+
+.word-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.word-btn-grab {
+  font-size: 15px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.word-btn-turn {
+  font-size: 11px;
+}
+
+.word-btn-remove:hover:not(:disabled) {
+  background: #a33025;
+  border-color: #a33025;
+  color: #fff;
+}
+
+.word-ghost {
+  position: fixed;
+  left: calc(var(--cell) / -2);
+  top: calc(var(--cell) / -2);
+  z-index: 1000;
+  display: flex;
+  gap: 2px;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+.word-ghost-down {
+  flex-direction: column;
+}
+
+.word-ghost .tile {
+  width: calc(var(--cell) - 4px);
+  height: calc(var(--cell) - 4px);
+  flex-shrink: 0;
 }
 
 /* ---------- status bar ---------- */
@@ -211,6 +435,95 @@ body {
   opacity: 0.65;
   font-weight: 500;
   white-space: nowrap;
+}
+
+/* ---------- word bar ---------- */
+
+.word-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px;
+  background: #fbf3d8;
+  border-top: 1px solid var(--cell-line);
+}
+
+.word-bar-bad {
+  background: #fbe4e1;
+}
+
+.word-bar-good {
+  background: #e9f2dc;
+}
+
+.word-verdict {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 3px 9px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.word-verdict-good {
+  color: #3f5c22;
+  background: #d3e6b5;
+}
+
+.word-verdict-bad {
+  color: #a33025;
+  background: #f9d2cd;
+}
+
+.word-bar-letters {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-height: calc(var(--cell) - 10px);
+}
+
+.word-tile {
+  width: calc(var(--cell) - 10px);
+  height: calc(var(--cell) - 10px);
+  padding: 0;
+  font-size: 17px;
+  font-family: inherit;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* `.t-valid` alone only tints the border, which is too subtle at this size. */
+.word-tile.t-valid {
+  background: #dcedc4;
+  border-color: #7f9f5f;
+  color: #3f5c22;
+}
+
+.word-tile:hover {
+  background: #f8ded9;
+  border-color: #c98a80;
+  color: #a33025;
+}
+
+.word-bar-placeholder {
+  font-size: 13px;
+  opacity: 0.5;
+}
+
+.word-bar-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.word-bar-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 /* ---------- rack ---------- */
