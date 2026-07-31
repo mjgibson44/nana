@@ -1,0 +1,28 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+# A fresh workspace only needs dependencies: every asset the app loads at
+# runtime (including the 1.7MB public/dictionary.txt) is committed, and there
+# are no .env files or generated sources to set up.
+#
+# `npm ci` rather than `npm install` — it installs exactly what
+# package-lock.json pins, and fails loudly if the lockfile has drifted out of
+# sync with package.json instead of silently rewriting it.
+setup = "npm ci"
+
+# Each workspace serves Vite on its own CONDUCTOR_PORT and the game keeps all
+# state in the browser, so there is no shared port, database, or Docker stack
+# to serialize on — workspaces can run side by side.
+run_mode = "concurrent"
+
+[scripts.run.dev]
+# CONDUCTOR_PORT is only set on the Mac, so this entry is local-only. Vite
+# defaults to 5173, which would collide as soon as a second workspace started.
+#
+# Deliberately no --strictPort: if the port is busy Vite steps to the next one
+# (still inside the ten ports the workspace owns) and prints the URL it landed
+# on, rather than refusing to boot.
+available_in = [ "local" ]
+command = "npm run dev -- --port $CONDUCTOR_PORT"
+default = true
+icon = "play"
