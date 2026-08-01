@@ -14,10 +14,10 @@ import {
 import {
   ENDLESS_CLEAR_TILES,
   ENDLESS_CONNECT_BONUS,
-  ENDLESS_DRIP_SECONDS,
   ENDLESS_DRIP_TILES,
   ENDLESS_INITIAL_SECONDS,
   ENDLESS_LOOSE_LIMIT,
+  endlessDripSeconds,
   timedLevelSeconds,
   type GameMode,
 } from './game/modes';
@@ -39,7 +39,7 @@ import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
 import { HomeScreen } from './components/HomeScreen';
 import { HowToModal } from './components/HowToModal';
-import { LevelSplash } from './components/LevelSplash';
+import { LevelSplash, type Splash } from './components/LevelSplash';
 import { Menu } from './components/Menu';
 import { PileTools } from './components/PileTools';
 import { Rack } from './components/Rack';
@@ -208,9 +208,12 @@ export default function App() {
   /** Endless: 'initial' is the opening two minutes; 'drip' is ever after,
    * when batches arrive on the clock and the health bar is live. */
   const [endlessPhase, setEndlessPhase] = useState<'initial' | 'drip'>('initial');
+  /** Endless: how many drip intervals have run out (the opening phase isn't
+   * one), which sets how long the wait for the next batch is. */
+  const [dripsElapsed, setDripsElapsed] = useState(0);
   /** How the finished game ended, for the summary's headline. */
   const [endReason, setEndReason] = useState<EndReason | null>(null);
-  /** The banner riding over the board ("+3 tiles!"), keyed so repeats replay. */
+  /** The banner riding over the board ("+5 tiles!"), keyed so repeats replay. */
   const [toast, setToast] = useState<{ text: string; serial: number } | null>(null);
   /** How many just-dealt tiles at the pile's end should play their landing
    * animation, keyed like the toast. */
@@ -258,8 +261,8 @@ export default function App() {
    * changing level or starting over wipes it, so undo never rewinds a level.
    */
   const [history, setHistory] = useState<Array<{ board: TileMap; rack: string[] }>>([]);
-  /** The level the splash is announcing, or null while nothing is showing. */
-  const [splashLevel, setSplashLevel] = useState<number | null>(null);
+  /** What the splash card is announcing, or null while nothing is showing. */
+  const [splash, setSplash] = useState<Splash | null>(null);
   /** Set when leaving a level early needs an answer first. */
   const [confirmSkip, setConfirmSkip] = useState<string | null>(null);
   /** Cell size in px, driven by pinch on touch devices. */
@@ -319,9 +322,10 @@ export default function App() {
     setShowSummary(false);
     setHistory([]);
     setConfirmSkip(null);
-    setSplashLevel(1);
+    setSplash({ kind: 'level', level: 1 });
     setEndReason(null);
     setEndlessPhase('initial');
+    setDripsElapsed(0);
     setToast(null);
     setTileDrop(null);
     setZoom(1);
@@ -367,7 +371,7 @@ export default function App() {
     setCountdown(null);
     setShowSummary(false);
     setConfirmSkip(null);
-    setSplashLevel(null);
+    setSplash(null);
   }, []);
 
   /**
@@ -786,7 +790,7 @@ export default function App() {
     const dealt = extendPuzzle(board, bounds, COMMON_WORDS, tilesAddedForLevel(next));
     setRack((prev) => [...prev, ...dealt.letters]);
     setLevel(next);
-    setSplashLevel(next);
+    setSplash({ kind: 'level', level: next });
     // Each timed level gets its own, shorter clock. It starts paused behind
     // the splash; the pause effect below releases it when the splash goes.
     if (mode === 'timed') setCountdown(runningCountdown(timedLevelSeconds(next)));
@@ -841,15 +845,15 @@ export default function App() {
 
   // The splash announces and then gets out of the way.
   useEffect(() => {
-    if (splashLevel === null) return;
-    const timer = window.setTimeout(() => setSplashLevel(null), SPLASH_MS);
+    if (splash === null) return;
+    const timer = window.setTimeout(() => setSplash(null), SPLASH_MS);
     return () => window.clearTimeout(timer);
-  }, [splashLevel]);
+  }, [splash]);
 
   /* ------------------------------- the clock -------------------------------- */
 
   // Anything worth reading over the board stops the clock while it's up.
-  const clockPaused = showHowTo || splashLevel !== null;
+  const clockPaused = showHowTo || splash !== null;
 
   // Flip the clock between running and paused as overlays come and go. Written
   // as normalization (rather than one effect per transition) so a countdown
@@ -918,10 +922,29 @@ export default function App() {
     }
     if (mode === 'endless') {
       dealBonusTiles(ENDLESS_DRIP_TILES, `+${ENDLESS_DRIP_TILES} tiles!`);
+      // The opening clock running out starts the drip phase; every expiry after
+      // that is one drip interval gone. Each few of them the wait gets shorter,
+      // and a splash says so — holding the new clock until it's been read, the
+      // same way a level-up splash does.
+      const elapsed = endlessPhase === 'drip' ? dripsElapsed + 1 : 0;
+      const seconds = endlessDripSeconds(elapsed);
+      if (elapsed > 0 && seconds < endlessDripSeconds(elapsed - 1)) {
+        setSplash({ kind: 'speedup', seconds });
+      }
       setEndlessPhase('drip');
-      setCountdown(runningCountdown(ENDLESS_DRIP_SECONDS));
+      setDripsElapsed(elapsed);
+      setCountdown(runningCountdown(seconds));
     }
-  }, [clockNow, countdown, complete, mode, finishGame, dealBonusTiles]);
+  }, [
+    clockNow,
+    countdown,
+    complete,
+    mode,
+    endlessPhase,
+    dripsElapsed,
+    finishGame,
+    dealBonusTiles,
+  ]);
 
   /* -------------------------------- endless --------------------------------- */
 
@@ -1858,7 +1881,7 @@ export default function App() {
         </div>
       )}
 
-      <LevelSplash level={splashLevel} mode={mode} onDismiss={() => setSplashLevel(null)} />
+      <LevelSplash splash={splash} mode={mode} onDismiss={() => setSplash(null)} />
 
       {showSummary && (
         <GameSummary

@@ -7,8 +7,9 @@
  *  - Solo Timed: the same climb, but each level must be finished before its
  *    clock runs out — 3:00 for the first, 2:00 for the second, and 15 seconds
  *    less for every level after that.
- *  - Endless: no levels. New tiles keep arriving on a clock (and as a reward
- *    for clearing the pile); let too many pile up loose and the game ends.
+ *  - Endless: no levels. New tiles keep arriving on a clock that speeds up as
+ *    you last (and as a reward for clearing the pile); let too many pile up
+ *    loose and the game ends.
  */
 
 export type GameMode = 'puzzle' | 'timed' | 'endless';
@@ -44,7 +45,7 @@ export const MODES: ModeInfo[] = [
     tagline: 'Survive the ever-growing pile.',
     details: [
       '2:00 to place your first 20 tiles',
-      '+3 tiles a minute from then on',
+      '+5 tiles a minute, and it speeds up',
       '20 loose tiles and you’re buried',
     ],
   },
@@ -73,15 +74,32 @@ export function timedLevelSeconds(level: number): number {
  * arriving — and before the health bar switches on. */
 export const ENDLESS_INITIAL_SECONDS = 120;
 
-/** After the opening phase, a fresh batch lands this often. */
-export const ENDLESS_DRIP_SECONDS = 60;
+/**
+ * After the opening phase, batches land on a clock that keeps tightening: the
+ * first few arrive a minute apart, then every 45 seconds, then every 30 —
+ * where it stays until the pile buries the player.
+ */
+export const ENDLESS_DRIP_STAGES = [60, 45, 30];
+
+/** How many drip intervals each stage lasts before the next one takes over. */
+export const ENDLESS_INTERVALS_PER_STAGE = 3;
+
+/**
+ * How long the wait for the next batch is, given how many drip intervals have
+ * already run out. The opening phase isn't one of them, so the first three
+ * waits after it are all the opening stage's length.
+ */
+export function endlessDripSeconds(intervalsElapsed: number): number {
+  const stage = Math.floor(intervalsElapsed / ENDLESS_INTERVALS_PER_STAGE);
+  return ENDLESS_DRIP_STAGES[Math.min(stage, ENDLESS_DRIP_STAGES.length - 1)];
+}
 
 /** How many tiles each timed batch brings. */
-export const ENDLESS_DRIP_TILES = 3;
+export const ENDLESS_DRIP_TILES = 5;
 
 /** Clearing the pile — every tile placed and connected — feeds the board the
  * same size batch as a timed drop. */
-export const ENDLESS_CLEAR_TILES = 3;
+export const ENDLESS_CLEAR_TILES = 5;
 
 /** Points for having every tile placed on a fully connected, valid board. */
 export const ENDLESS_CONNECT_BONUS = 25;
