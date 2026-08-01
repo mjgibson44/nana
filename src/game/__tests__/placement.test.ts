@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   GAP,
+  anchorForGapTarget,
   cursorCell,
   findAvailable,
   impliedDirections,
@@ -84,6 +85,62 @@ describe('planPlacement with gap tiles', () => {
     );
     expect(plan.complete).toBe(true);
     expect(plan.steps.map((s) => s.key)).toEqual(['2,2', '2,3', '2,5', '2,6']);
+  });
+});
+
+describe('anchorForGapTarget', () => {
+  it('starts the word so the gap lands on the clicked letter', () => {
+    // SOLAR with a hole for the L, aimed at an L already at 2,4: the word has
+    // to start two squares back so S and O land in front of it.
+    const board: TileMap = { '2,4': 'l' };
+    const anchor = anchorForGapTarget(board, 10, { row: 2, col: 4 }, 'across', picksWithGaps('so.ar'));
+    expect(anchor).toEqual({ row: 2, col: 2 });
+    // And planning from there really does put the gap on the L.
+    const plan = planPlacement(board, 10, anchor!, 'across', picksWithGaps('so.ar'));
+    expect(plan.complete).toBe(true);
+    expect(plan.steps.map((s) => s.key)).toEqual(['2,2', '2,3', '2,5', '2,6']);
+  });
+
+  it('is the clicked cell itself when the gap comes first', () => {
+    expect(anchorForGapTarget({}, 10, { row: 3, col: 3 }, 'down', picksWithGaps('.at'))).toEqual({
+      row: 3,
+      col: 3,
+    });
+  });
+
+  it('aims only the first of several gaps at the click', () => {
+    const anchor = anchorForGapTarget({}, 10, { row: 2, col: 4 }, 'across', picksWithGaps('s.a.r'));
+    expect(anchor).toEqual({ row: 2, col: 3 });
+  });
+
+  it('flows the leading letters back over words already on the board', () => {
+    // CAT sits at 2,2-2,4. The two letters before the gap flow back over it,
+    // so the first lands at 2,1 and the second right before the target.
+    const board: TileMap = { '2,2': 'c', '2,3': 'a', '2,4': 't', '2,6': 'x' };
+    const anchor = anchorForGapTarget(board, 10, { row: 2, col: 6 }, 'across', picksWithGaps('ab.d'));
+    expect(anchor).toEqual({ row: 2, col: 1 });
+    const plan = planPlacement(board, 10, anchor!, 'across', picksWithGaps('ab.d'));
+    expect(plan.complete).toBe(true);
+    expect(plan.steps.map((s) => s.key)).toEqual(['2,1', '2,5', '2,7']);
+  });
+
+  it('refuses when the square right before the gap is taken', () => {
+    // A gap claims the very next square after the letter before it, so that
+    // letter has nowhere to go when 2,5 (right before the target) is occupied.
+    const board: TileMap = { '2,5': 'x', '2,6': 'l' };
+    expect(
+      anchorForGapTarget(board, 10, { row: 2, col: 6 }, 'across', picksWithGaps('so.ar')),
+    ).toBeNull();
+  });
+
+  it('refuses when the leading letters run off the grid', () => {
+    expect(
+      anchorForGapTarget({}, 10, { row: 0, col: 1 }, 'across', picksWithGaps('so.ar')),
+    ).toBeNull();
+  });
+
+  it('returns null when the picks have no gap', () => {
+    expect(anchorForGapTarget({}, 10, { row: 2, col: 2 }, 'across', picksFrom('cat'))).toBeNull();
   });
 });
 

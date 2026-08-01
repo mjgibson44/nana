@@ -2,6 +2,10 @@ import type { Direction } from '../game/types';
 import { BackspaceIcon, GapIcon, RotateIcon, ShuffleIcon } from './icons';
 
 interface PileToolsProps {
+  /** Take back the last move, wherever it happened. */
+  onUndo: () => void;
+  /** False when there is no move recorded to take back. */
+  canUndo: boolean;
   /** Backspace: takes back the last staged letter, or eats into a selected
    * word on the board — same as the Backspace key. */
   onBackspace: () => void;
@@ -20,9 +24,12 @@ interface PileToolsProps {
 /**
  * The tools that act on the pile and the word being built. They share the word
  * bar's row with confirm and cancel, since all of them are used in the same
- * breath while building a word.
+ * breath while building a word: undo, then shuffle, then the word's own tools,
+ * each group fenced off by a divider.
  */
 export function PileTools({
+  onUndo,
+  canUndo,
   onBackspace,
   canBackspace,
   onRotate,
@@ -35,12 +42,43 @@ export function PileTools({
     <div className="pile-tools">
       <button
         type="button"
+        className="icon-btn icon-btn-text"
+        title="Undo the last move"
+        aria-label="Undo the last move"
+        disabled={!canUndo}
+        // A click leaves the button focused, which would steal Space and Enter
+        // from the word being built.
+        onClick={(e) => {
+          e.currentTarget.blur();
+          onUndo();
+        }}
+      >
+        Undo
+      </button>
+
+      <span className="word-bar-divider" aria-hidden="true" />
+
+      <button
+        type="button"
+        className="icon-btn"
+        title="Shuffle the pile"
+        aria-label="Shuffle the pile"
+        onClick={(e) => {
+          e.currentTarget.blur();
+          onShuffle();
+        }}
+      >
+        <ShuffleIcon />
+      </button>
+
+      <span className="word-bar-divider" aria-hidden="true" />
+
+      <button
+        type="button"
         className="icon-btn"
         title="Remove the last letter (or press Backspace)"
         aria-label="Remove the last letter"
         disabled={!canBackspace}
-        // A click leaves the button focused, which would steal Space and Enter
-        // from the word being built.
         onClick={(e) => {
           e.currentTarget.blur();
           onBackspace();
@@ -61,19 +99,6 @@ export function PileTools({
         }}
       >
         <RotateIcon to={rotateTo} />
-      </button>
-
-      <button
-        type="button"
-        className="icon-btn"
-        title="Shuffle the pile"
-        aria-label="Shuffle the pile"
-        onClick={(e) => {
-          e.currentTarget.blur();
-          onShuffle();
-        }}
-      >
-        <ShuffleIcon />
       </button>
 
       <button

@@ -13,6 +13,7 @@ import {
 } from './game/levels';
 import {
   GAP,
+  anchorForGapTarget,
   cursorCell,
   findAvailable,
   impliedDirections,
@@ -26,12 +27,11 @@ import { keyOf, parseKey } from './game/types';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
-import { UndoIcon } from './components/icons';
 import { LevelSplash } from './components/LevelSplash';
 import { Menu } from './components/Menu';
 import { PileTools } from './components/PileTools';
 import { Rack } from './components/Rack';
-import { Scoreboard } from './components/Scoreboard';
+import { Scoreboard, type ScorePop } from './components/Scoreboard';
 import { StatsPage } from './components/StatsPage';
 import { WordBar } from './components/WordBar';
 
@@ -455,6 +455,32 @@ export default function App() {
   const totalScore = complete ? finalScore : runningScore;
 
   /**
+   * Every change to the score announces itself: a little "+12" (or "−12")
+   * floats off the scoreboard whenever a move lands, loses or wins points —
+   * placing a word, taking letters back, earning a bonus. Watched from the
+   * score itself rather than raised by each action, so every way of changing
+   * the board reports the same way. Pops clear themselves as their animation
+   * ends.
+   */
+  const [scorePops, setScorePops] = useState<ScorePop[]>([]);
+  const popSerial = useRef(0);
+  const scoreTrail = useRef({ gameId: 0, score: 0 });
+
+  useEffect(() => {
+    const trail = scoreTrail.current;
+    const from = trail.gameId === gameId ? trail.score : null;
+    scoreTrail.current = { gameId, score: totalScore };
+    // A new deal resets the score; that's not a move worth announcing.
+    if (from === null || from === totalScore) return;
+    const pop = { id: ++popSerial.current, delta: totalScore - from };
+    setScorePops((pops) => [...pops, pop]);
+  }, [gameId, totalScore]);
+
+  const endScorePop = useCallback((id: number) => {
+    setScorePops((pops) => pops.filter((pop) => pop.id !== id));
+  }, []);
+
+  /**
    * Move up a level: keep the board exactly as it stands and add the next batch
    * of tiles to the pile. Available any time, so a level can be skipped.
    *
@@ -690,34 +716,6 @@ export default function App() {
   /* ---------------------------- tile selection ------------------------------ */
 
   /**
-   * Single-tap a placed tile to pick it out for deletion.
-   *
-   * Ignored while letters are waiting to be placed — that word owns the board
-   * until it's confirmed, and a stray tap shouldn't throw it away.
-   */
-  const selectTile = useCallback(
-    (key: CellKey) => {
-      if (picksOf(interaction).length > 0) return;
-      const runs = wordsByCell.get(key);
-      // Delete walks along the word this tile reads in. A crossing tile belongs
-      // to two, and across wins: it matches reading order, and selecting the
-      // other direction's next letter is only a click away.
-      const dir: Direction = runs?.some((run) => run.direction === 'across')
-        ? 'across'
-        : 'down';
-      setSelection({ key, dir });
-      // Anchoring it too means one click on a letter surfaces everything that
-      // letter can do: its word's controls, and a direction for carrying a new
-      // word on from it. A boxed-in letter can't start one, so it just selects.
-      const startDir = assumeDir(key);
-      setInteraction(
-        startDir === null ? IDLE : { kind: 'place', anchor: key, dir: startDir, picks: [] },
-      );
-    },
-    [interaction, wordsByCell, assumeDir],
-  );
-
-  /**
    * Send the selected tile back to the pile and step onto its neighbour, so
    * holding the key eats the rest of the word. Stops when it runs out of word.
    *
@@ -815,6 +813,90 @@ export default function App() {
       setInteraction(IDLE);
     },
     [board, bounds, pickList, remember],
+  );
+
+  /**
+   * Place the staged word so its first gap sits on the letter at `key` — the
+   * click-a-letter way of aiming a gap. With more than one gap it's the first
+   * that lands on the click; the rest still have to find letters of their own.
+   * Returns false when the picks have no gap or the word fits neither way.
+   */
+  const commitThroughLetter = useCallback(
+    (key: CellKey): boolean => {
+      if (board[key] === undefined) return false;
+      if (!pickList.some((pick) => pick.letter === null)) return false;
+
+      const cell = parseKey(key);
+      // Crossing the word the clicked letter already reads in is the likelier
+      // intent, so that direction goes first. A letter in both words — or in
+      // none — settles nothing, so fall back to the way the last word went.
+      const runDirs = new Set((wordsByCell.get(key) ?? []).map((run) => run.direction));
+      const ordered: Direction[] =
+        runDirs.has('across') === runDirs.has('down')
+          ? lastDir === 'across'
+            ? ['across', 'down']
+            : ['down', 'across']
+          : runDirs.has('across')
+            ? ['down', 'across']
+            : ['across', 'down'];
+
+      const fits = ordered.flatMap((dir) => {
+        const anchor = anchorForGapTarget(board, bounds, cell, dir, pickList);
+        if (!anchor) return [];
+        const plan = planPlacement(board, bounds, anchor, dir, pickList);
+        return plan.complete && plan.steps.length > 0 ? [{ anchor, dir, plan }] : [];
+      });
+      if (fits.length === 0) return false;
+
+      // When the word fits both ways, prefer the way that spells real words.
+      const best =
+        fits.find(({ plan }) => {
+          if (!dictionary) return false;
+          const next = { ...board };
+          for (const step of plan.steps) next[step.key] = step.letter;
+          const placed = new Set(plan.steps.map((step) => step.key));
+          placed.add(key);
+          return extractRuns(next)
+            .filter((run) => run.cells.some((c) => placed.has(c)))
+            .every((run) => run.word.length >= MIN_WORD_LENGTH && dictionary.has(run.word));
+        }) ?? fits[0];
+
+      commit(keyOf(best.anchor.row, best.anchor.col), best.dir);
+      return true;
+    },
+    [board, pickList, wordsByCell, lastDir, bounds, dictionary, commit],
+  );
+
+  /**
+   * Single-tap a placed tile to pick it out for deletion.
+   *
+   * While letters are waiting to be placed the tap doesn't select: a word
+   * staged with a gap lands here instead, the clicked letter filling its first
+   * gap — and a word without one stays put, so a stray tap can't throw it away.
+   */
+  const selectTile = useCallback(
+    (key: CellKey) => {
+      if (picksOf(interaction).length > 0) {
+        commitThroughLetter(key);
+        return;
+      }
+      const runs = wordsByCell.get(key);
+      // Delete walks along the word this tile reads in. A crossing tile belongs
+      // to two, and across wins: it matches reading order, and selecting the
+      // other direction's next letter is only a click away.
+      const dir: Direction = runs?.some((run) => run.direction === 'across')
+        ? 'across'
+        : 'down';
+      setSelection({ key, dir });
+      // Anchoring it too means one click on a letter surfaces everything that
+      // letter can do: its word's controls, and a direction for carrying a new
+      // word on from it. A boxed-in letter can't start one, so it just selects.
+      const startDir = assumeDir(key);
+      setInteraction(
+        startDir === null ? IDLE : { kind: 'place', anchor: key, dir: startDir, picks: [] },
+      );
+    },
+    [interaction, commitThroughLetter, wordsByCell, assumeDir],
   );
 
   /** Flip the chosen cell between across and down, and remember the new way. */
@@ -1192,25 +1274,10 @@ export default function App() {
           level={level}
           bonusEarned={boardScore.bonusEarned && !complete}
           complete={complete}
+          pops={scorePops}
+          onPopEnd={endScorePop}
         />
         <div className="header-actions">
-          {!complete && (
-            <button
-              type="button"
-              className="icon-btn"
-              title="Undo the last move"
-              aria-label="Undo the last move"
-              disabled={history.length === 0}
-              // A click leaves the button focused, which would steal Space and
-              // Enter from the word being built.
-              onClick={(e) => {
-                e.currentTarget.blur();
-                undo();
-              }}
-            >
-              <UndoIcon />
-            </button>
-          )}
           {complete ? (
             <button
               className="btn btn-primary"
@@ -1293,14 +1360,21 @@ export default function App() {
         mode={interaction.kind}
         overflowed={plan !== null && !plan.complete}
         verdict={verdict}
+        canConfirm={
+          interaction.kind === 'place' &&
+          plan !== null &&
+          plan.complete &&
+          plan.steps.length > 0
+        }
         onRemove={(position) => setPicks(picks.filter((_, i) => i !== position))}
-        onClear={cancelWord}
         onCancel={cancelWord}
         onConfirm={() => {
           if (target) commit(target.key, target.dir);
         }}
         tools={
           <PileTools
+            onUndo={undo}
+            canUndo={history.length > 0}
             onBackspace={backspace}
             canBackspace={selectedKey !== null || picks.length > 0}
             onRotate={rotateDirection}
