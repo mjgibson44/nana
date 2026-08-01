@@ -15,7 +15,7 @@ export function HomeScreen({ onPlay, onShowHowTo, onShowStats }: HomeScreenProps
     <div className="home">
       <div className="home-inner">
         <header className="home-header">
-          <h1 className="home-title">🍌 Nana</h1>
+          <h1 className="home-title">Word</h1>
           <p className="home-tagline">Race to weave every tile into one crossword.</p>
         </header>
 
