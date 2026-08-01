@@ -262,10 +262,21 @@ export default function App() {
    * changing level or starting over wipes it, so undo never rewinds a level.
    */
   const [history, setHistory] = useState<Array<{ board: TileMap; rack: string[] }>>([]);
+  /**
+   * Moves taken back and waiting to be redone, most recent last. Any fresh
+   * move forks the timeline and empties it — see remember — so redo is only
+   * offered while going forward again still makes sense.
+   */
+  const [future, setFuture] = useState<Array<{ board: TileMap; rack: string[] }>>([]);
   /** What the splash card is announcing, or null while nothing is showing. */
   const [splash, setSplash] = useState<Splash | null>(null);
   /** Set when leaving a level early needs an answer first. */
   const [confirmSkip, setConfirmSkip] = useState<string | null>(null);
+  /**
+   * Endless: the player's last move pushed them to the loose-tile limit. The
+   * game pauses on this dialog — take the move back, or accept the burial.
+   */
+  const [confirmLoss, setConfirmLoss] = useState(false);
   /** Cell size in px, driven by pinch on touch devices. */
   const [zoom, setZoom] = useState(1);
   /**
@@ -322,7 +333,10 @@ export default function App() {
     setFinalWords(null);
     setShowSummary(false);
     setHistory([]);
+    setFuture([]);
     setConfirmSkip(null);
+    setConfirmLoss(false);
+    moveJustMade.current = false;
     setSplash({ kind: 'level', level: 1 });
     setEndReason(null);
     setEndlessPhase('initial');
@@ -372,6 +386,7 @@ export default function App() {
     setCountdown(null);
     setShowSummary(false);
     setConfirmSkip(null);
+    setConfirmLoss(false);
     setSplash(null);
   }, []);
 
@@ -379,22 +394,54 @@ export default function App() {
    * Remember the board and pile as they are, so the change about to be made can
    * be taken back. Called before a move, never after.
    */
+  /**
+   * Whether the latest change to the board or pile was a player's move, as
+   * opposed to the clock dealing tiles. Endless reads this when the loose-tile
+   * limit is hit: a move can be taken back, so it asks first — a timed drop
+   * can't, so it can't.
+   */
+  const moveJustMade = useRef(false);
+
   const remember = useCallback(() => {
     setHistory((past) => [...past.slice(-UNDO_DEPTH + 1), { board, rack }]);
+    // A new move forks the timeline; the moves undone before it can't come
+    // back any more.
+    setFuture([]);
+    moveJustMade.current = true;
   }, [board, rack]);
 
   const undo = useCallback(() => {
-    setHistory((past) => {
-      const last = past[past.length - 1];
-      if (!last) return past;
-      setBoard(last.board);
-      setRack(last.rack);
-      setInteraction(IDLE);
-      setSelection(null);
-      setHighlightedWord(null);
-      return past.slice(0, -1);
-    });
-  }, []);
+    const last = history[history.length - 1];
+    if (!last) return;
+    // The state being left is exactly what redo comes back to.
+    setFuture((ahead) => [...ahead, { board, rack }]);
+    setHistory(history.slice(0, -1));
+    setBoard(last.board);
+    setRack(last.rack);
+    setInteraction(IDLE);
+    setSelection(null);
+    setHighlightedWord(null);
+    // Undo only ever restores states that were already survivable.
+    moveJustMade.current = false;
+  }, [history, board, rack]);
+
+  /** Walk forward again through the moves undo took back. */
+  const redo = useCallback(() => {
+    const next = future[future.length - 1];
+    if (!next) return;
+    setFuture(future.slice(0, -1));
+    // Straight onto the history stack rather than via remember — redoing a
+    // move mustn't wipe the rest of the way forward.
+    setHistory((past) => [...past.slice(-UNDO_DEPTH + 1), { board, rack }]);
+    setBoard(next.board);
+    setRack(next.rack);
+    setInteraction(IDLE);
+    setSelection(null);
+    setHighlightedWord(null);
+    // Redoing re-makes the move — including one that loses the game, which
+    // should ask again just like the first time.
+    moveJustMade.current = true;
+  }, [future, board, rack]);
 
   useEffect(() => {
     let cancelled = false;
@@ -781,6 +828,7 @@ export default function App() {
     setConfirmSkip(null);
     // Undo works within a level; it shouldn't reach back across a deal.
     setHistory([]);
+    setFuture([]);
 
     if (level >= LEVEL_COUNT) {
       finishGame('won');
@@ -854,7 +902,7 @@ export default function App() {
   /* ------------------------------- the clock -------------------------------- */
 
   // Anything worth reading over the board stops the clock while it's up.
-  const clockPaused = showHowTo || splash !== null;
+  const clockPaused = showHowTo || splash !== null || confirmLoss;
 
   // Flip the clock between running and paused as overlays come and go. Written
   // as normalization (rather than one effect per transition) so a countdown
@@ -897,6 +945,15 @@ export default function App() {
     (count: number, message: string) => {
       const dealt = extendPuzzle(board, bounds, COMMON_WORDS, count);
       setRack((prev) => [...prev, ...dealt.letters]);
+      // The dealt tiles join every remembered pile too: undoing a move must
+      // take back the move alone, never disappear tiles the clock has dealt.
+      setHistory((past) =>
+        past.map((snap) => ({ ...snap, rack: [...snap.rack, ...dealt.letters] })),
+      );
+      setFuture((ahead) =>
+        ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...dealt.letters] })),
+      );
+      moveJustMade.current = false;
       const serial = ++dropSerial.current;
       setTileDrop({ count: dealt.letters.length, serial });
       setToast({ text: message, serial });
@@ -982,9 +1039,25 @@ export default function App() {
   }, [cellStatus, rack.length]);
 
   useEffect(() => {
-    if (mode !== 'endless' || complete || endlessPhase !== 'drip') return;
-    if (looseTiles >= ENDLESS_LOOSE_LIMIT) finishGame('buried');
-  }, [mode, complete, endlessPhase, looseTiles, finishGame]);
+    if (mode !== 'endless' || complete || endlessPhase !== 'drip' || confirmLoss) return;
+    if (looseTiles < ENDLESS_LOOSE_LIMIT) return;
+    // A move did this and can be taken back, so the game pauses and asks
+    // before it ends. Tiles the clock dealt can't be taken back — that loss
+    // just happens.
+    if (moveJustMade.current && history.length > 0) setConfirmLoss(true);
+    else finishGame('buried');
+  }, [mode, complete, endlessPhase, confirmLoss, looseTiles, history.length, finishGame]);
+
+  /** Take back the move the burial warning is holding the game on. */
+  const undoLosingMove = useCallback(() => {
+    setConfirmLoss(false);
+    undo();
+  }, [undo]);
+
+  const acceptLoss = useCallback(() => {
+    setConfirmLoss(false);
+    finishGame('buried');
+  }, [finishGame]);
 
   // Banners and landing animations clean themselves up.
   useEffect(() => {
@@ -1381,7 +1454,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       // The board owns the keyboard only while it's actually being played.
-      if (screen !== 'game' || showHowTo) return;
+      if (screen !== 'game' || showHowTo || confirmLoss) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
@@ -1455,6 +1528,7 @@ export default function App() {
   }, [
     screen,
     showHowTo,
+    confirmLoss,
     interaction,
     picks,
     typeLetter,
@@ -1831,6 +1905,8 @@ export default function App() {
           <PileTools
             onUndo={undo}
             canUndo={history.length > 0}
+            onRedo={redo}
+            canRedo={future.length > 0}
             onBackspace={backspace}
             canBackspace={selectedKey !== null || picks.length > 0}
             onRotate={rotateDirection}
@@ -1916,6 +1992,21 @@ export default function App() {
         confirmLabel={level >= LEVEL_COUNT ? 'Finish anyway' : 'Move on anyway'}
         onConfirm={advanceLevel}
         onCancel={() => setConfirmSkip(null)}
+      />
+
+      {/* Endless holds its breath here: the last move hit the loose-tile
+          limit, and the clock waits while the player decides. */}
+      <ConfirmDialog
+        message={
+          confirmLoss
+            ? `That move leaves you with ${looseTiles} loose tiles — at ` +
+              `${ENDLESS_LOOSE_LIMIT} you're buried. Take it back to stay in the game.`
+            : null
+        }
+        confirmLabel="Accept defeat"
+        cancelLabel="Undo move"
+        onConfirm={acceptLoss}
+        onCancel={undoLosingMove}
       />
     </div>
   );

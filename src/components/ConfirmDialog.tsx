@@ -2,6 +2,8 @@ interface ConfirmDialogProps {
   /** Null when nothing is being asked. */
   message: string | null;
   confirmLabel: string;
+  /** The safe way out — also what clicking the backdrop does. */
+  cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -9,6 +11,7 @@ interface ConfirmDialogProps {
 export function ConfirmDialog({
   message,
   confirmLabel,
+  cancelLabel = 'Keep playing',
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -26,7 +29,7 @@ export function ConfirmDialog({
         <p className="dialog-message">{message}</p>
         <div className="dialog-actions">
           <button type="button" className="btn btn-cancel" onClick={onCancel}>
-            Keep playing
+            {cancelLabel}
           </button>
           <button type="button" className="btn btn-primary" onClick={onConfirm}>
             {confirmLabel}
