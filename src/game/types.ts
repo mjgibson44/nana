@@ -18,6 +18,34 @@ export interface Cell {
   col: number;
 }
 
+/**
+ * The rectangle of cells currently in play, inclusive on all four sides.
+ * The board grows as tiles near its edge, so it can run into negative
+ * rows and columns — cell keys handle that fine.
+ */
+export interface Bounds {
+  minRow: number;
+  minCol: number;
+  maxRow: number;
+  maxCol: number;
+}
+
+/**
+ * Accept the old "board is size × size from the origin" shorthand anywhere a
+ * Bounds is wanted, so callers (and tests) with a plain square can stay simple.
+ */
+export function asBounds(size: number | Bounds): Bounds {
+  return typeof size === 'number'
+    ? { minRow: 0, minCol: 0, maxRow: size - 1, maxCol: size - 1 }
+    : size;
+}
+
+export function inBounds(bounds: Bounds, row: number, col: number): boolean {
+  return (
+    row >= bounds.minRow && col >= bounds.minCol && row <= bounds.maxRow && col <= bounds.maxCol
+  );
+}
+
 export function keyOf(row: number, col: number): CellKey {
   return `${row},${col}`;
 }

@@ -1,5 +1,5 @@
-import type { Direction, TileMap } from './types';
-import { keyOf } from './types';
+import type { Bounds, Direction, TileMap } from './types';
+import { asBounds, keyOf } from './types';
 
 /**
  * Puzzle generation.
@@ -228,15 +228,20 @@ function fallbackSample(
 }
 
 /** Would a word laid from here stay on the board? */
-function inBounds(
+function fitsBoard(
   start: { row: number; col: number },
   length: number,
   dir: Direction,
-  size: number,
+  bounds: Bounds,
 ): boolean {
   const endRow = dir === 'down' ? start.row + length - 1 : start.row;
   const endCol = dir === 'across' ? start.col + length - 1 : start.col;
-  return start.row >= 0 && start.col >= 0 && endRow < size && endCol < size;
+  return (
+    start.row >= bounds.minRow &&
+    start.col >= bounds.minCol &&
+    endRow <= bounds.maxRow &&
+    endCol <= bounds.maxCol
+  );
 }
 
 /**
@@ -245,7 +250,7 @@ function inBounds(
  */
 function tryExtend(
   initial: TileMap,
-  size: number,
+  bounds: Bounds,
   byLetter: Map<string, string[]>,
   tileCount: number,
   rng: () => number,
@@ -285,7 +290,7 @@ function tryExtend(
     const dir: Direction = rng() < 0.5 ? 'across' : 'down';
 
     const start = canPlace(state.grid, word, anchorRow, anchorCol, crossIndex, dir);
-    if (!start || !inBounds(start, word.length, dir, size)) {
+    if (!start || !fitsBoard(start, word.length, dir, bounds)) {
       failures++;
       continue;
     }
@@ -308,7 +313,7 @@ function tryExtend(
  */
 export function extendPuzzle(
   board: TileMap,
-  size: number,
+  size: number | Bounds,
   wordPool: string[],
   tileCount: number,
   rng: () => number = Math.random,
@@ -328,8 +333,9 @@ export function extendPuzzle(
     }
   }
 
+  const bounds = asBounds(size);
   for (let attempt = 0; attempt < 200; attempt++) {
-    const built = tryExtend(board, size, byLetter, tileCount, rng);
+    const built = tryExtend(board, bounds, byLetter, tileCount, rng);
     if (!built) continue;
     const letters = Object.keys(built.grid)
       .filter((key) => !(key in board))

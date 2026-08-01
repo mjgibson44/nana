@@ -82,6 +82,16 @@ export function UndoIcon(props: IconProps) {
   );
 }
 
+/** The keyboard backspace key: a left-pointing key cap with an × inside. */
+export function BackspaceIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6-7 6-7z" />
+      <path d="M11.5 9.5l5 5M16.5 9.5l-5 5" />
+    </Svg>
+  );
+}
+
 export function ShuffleIcon(props: IconProps) {
   return (
     <Svg {...props}>

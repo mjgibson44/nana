@@ -246,9 +246,19 @@ body {
   -webkit-user-select: none;
 }
 
+/*
+ * Board tiles fill their whole cell, flat — no frame, no rounding, no shadow.
+ * Zoomed out, the rounded frames inside every cell turned into rings of noise
+ * around the letters; a solid cell of colour stays readable at any size. The
+ * letter scales with the cell for the same reason.
+ */
 .board-tile {
   position: absolute;
-  inset: 2px;
+  inset: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: calc(var(--cell) * 0.52);
 }
 
 .rack-tile {
@@ -264,8 +274,7 @@ body {
 
 .tile-preview {
   background: #fff6d6;
-  border-style: dashed;
-  border-color: #c9a52c;
+  border: 2px dashed #c9a52c;
   color: #8a6210;
   opacity: 0.85;
   box-shadow: none;
@@ -321,6 +330,29 @@ body {
   box-shadow: 0 2px 3px rgba(154, 79, 13, 0.3);
 }
 
+/* On the board the whole cell carries the colour — border tints alone vanish
+   once the frame is gone, so each status gets a solid fill instead. */
+.board-tile.t-valid {
+  background: #dcedc4;
+  color: #3f5c22;
+}
+
+.board-tile.t-invalid {
+  background: #f5c6bf;
+  color: #a33025;
+}
+
+.board-tile.t-isolated {
+  background: #ffeebb;
+  color: #8a6210;
+}
+
+.board-tile.t-disconnected {
+  background: #ffd9a6;
+  color: #9a4f0d;
+  box-shadow: none;
+}
+
 .ghost {
   position: fixed;
   left: calc(var(--cell) / -2);
@@ -337,20 +369,17 @@ body {
 
 .board-tile.is-in-word {
   background: #ffd84d;
-  border-color: #c9a52c;
-  box-shadow: 0 2px 4px rgba(61, 53, 36, 0.35);
+  box-shadow: inset 0 0 0 2px #c9a52c;
 }
 
 .is-word-tile {
   cursor: pointer;
 }
 
-/* The tile Delete will take next. */
+/* The tile Delete will take next. The ring sits inside the cell, since the
+   tile now reaches all the way to its neighbours. */
 .board-tile.is-selected {
-  border-color: var(--ink);
-  box-shadow:
-    0 0 0 3px #ffd84d,
-    0 2px 5px rgba(61, 53, 36, 0.4);
+  box-shadow: inset 0 0 0 3px var(--ink);
   z-index: 2;
 }
 
@@ -689,6 +718,169 @@ body {
   opacity: 0.75;
 }
 
+/* ---------- finish summary & stats page ---------- */
+
+/* A whole screen, not a card: the game's closing report and the stats page. */
+.summary {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  overflow-y: auto;
+  background: var(--bg);
+  animation: splash-in 180ms ease-out;
+}
+
+.summary-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 36px 22px calc(36px + env(safe-area-inset-bottom));
+}
+
+.summary-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.summary-title {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.summary-totals {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  max-width: 190px;
+  padding: 14px 18px;
+  background: #ffd84d;
+  border: 3px solid #c9a52c;
+  border-radius: 16px;
+}
+
+.summary-stat-value {
+  font-size: 34px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  opacity: 0.65;
+}
+
+.summary-section-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.summary-lengths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-length {
+  padding: 6px 13px;
+  font-size: 14px;
+  font-weight: 700;
+  background: #fff3c4;
+  border: 2px solid #c9a52c;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.summary-length-count {
+  color: #8a6210;
+}
+
+.summary-words {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-word {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  font-weight: 700;
+  background: #fffbea;
+  border: 2px solid var(--tile-edge);
+  border-radius: 10px;
+}
+
+.summary-word-text {
+  letter-spacing: 0.06em;
+}
+
+.summary-word-points {
+  padding: 2px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #3f5c22;
+  background: #dcedc4;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.summary-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.summary-empty {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+/* Recent-games rows on the stats page. */
+.stats-game-when {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stats-game-words {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
 .dialog {
   max-width: 380px;
   padding: 22px;
@@ -774,20 +966,28 @@ body {
     display: none;
   }
 
+  /* The word being typed gets a row of its own; the buttons drop to a second
+     row underneath, where thumbs can reach them without crowding the word. */
   .word-bar {
+    flex-wrap: wrap;
     padding: 8px 12px;
-    gap: 8px;
+    gap: 6px 8px;
   }
 
-  /* Five buttons on one row is tight on a phone, so they close ranks. */
+  .word-bar-letters {
+    flex-basis: 100%;
+  }
+
   .word-bar-actions {
-    gap: 4px;
+    width: 100%;
+    gap: 6px;
   }
 
+  /* Confirm and cancel sit left; the pile's tools keep to the right. */
   .pile-tools {
-    margin-left: 2px;
+    margin-left: auto;
     padding-left: 6px;
-    gap: 4px;
+    gap: 6px;
   }
 
   .rack {
@@ -801,5 +1001,14 @@ body {
 
   .splash-name {
     font-size: 25px;
+  }
+
+  .summary-inner {
+    padding-top: 26px;
+    gap: 20px;
+  }
+
+  .summary-title {
+    font-size: 28px;
   }
 }

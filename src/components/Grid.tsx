@@ -1,11 +1,12 @@
 import { memo } from 'react';
-import type { CellKey, Direction, TileMap } from '../game/types';
+import type { Bounds, CellKey, Direction, TileMap } from '../game/types';
 import { keyOf } from '../game/types';
 import type { BoardWord, CellStatus } from '../App';
 import { WordControls } from './WordControls';
 
 interface GridProps {
-  size: number;
+  /** The rectangle of cells in play. Grows as tiles near its edges. */
+  bounds: Bounds;
   board: TileMap;
   cellStatus: Map<CellKey, CellStatus>;
   /** Tiles being dragged, hidden in place while the ghost follows the pointer. */
@@ -44,7 +45,7 @@ const GLYPH: Record<Direction, string> = { across: '➜', down: '⬇' };
 const NAME: Record<Direction, string> = { across: 'across', down: 'down' };
 
 export const Grid = memo(function Grid({
-  size,
+  bounds,
   board,
   cellStatus,
   hiddenKeys,
@@ -68,8 +69,8 @@ export const Grid = memo(function Grid({
   onWordRemove,
 }: GridProps) {
   const cells = [];
-  for (let row = 0; row < size; row++) {
-    for (let col = 0; col < size; col++) {
+  for (let row = bounds.minRow; row <= bounds.maxRow; row++) {
+    for (let col = bounds.minCol; col <= bounds.maxCol; col++) {
       const key = keyOf(row, col);
       const letter = board[key];
       const status = cellStatus.get(key);
@@ -152,7 +153,9 @@ export const Grid = memo(function Grid({
   return (
     <div
       className="board"
-      style={{ gridTemplateColumns: `repeat(${size}, var(--cell))` }}
+      style={{
+        gridTemplateColumns: `repeat(${bounds.maxCol - bounds.minCol + 1}, var(--cell))`,
+      }}
       // Delegated rather than a handler per cell: at 33 squares square that's a
       // thousand listeners saved, and the event tells us the cell anyway.
       onPointerOver={(e) => {
