@@ -452,8 +452,9 @@ export default function App() {
   }, [boardScore.bonusEarned, runningScore, level, board, clearFocus]);
 
   /**
-   * Leaving a level by hand. With tiles still in the pile that's giving up on
-   * points rather than finishing, so it asks first.
+   * Leaving a level by hand. Doing that while the bonus isn't earned is giving
+   * up on points rather than finishing, so it asks first — whether the shortfall
+   * is tiles still in the pile or a board that doesn't qualify yet.
    */
   const requestAdvance = useCallback(() => {
     if (rack.length > 0) {
@@ -464,8 +465,25 @@ export default function App() {
       );
       return;
     }
+    if (!boardScore.bonusEarned) {
+      // Every tile is down but the board doesn't earn the bonus. Words that
+      // aren't right are the more urgent problem to name; only a board whose
+      // words all check out gets the connectedness explanation.
+      const wordsAllGood =
+        validation !== null &&
+        validation.invalidRuns.length === 0 &&
+        validation.isolatedTiles.length === 0;
+      setConfirmSkip(
+        wordsAllGood
+          ? `Your words aren't all joined into one crossword. Moving on gives up the ` +
+              `${ALL_TILES_BONUS}-point bonus.`
+          : `Your board isn't a valid crossword yet. Moving on gives up the ` +
+              `${ALL_TILES_BONUS}-point bonus.`,
+      );
+      return;
+    }
     advanceLevel();
-  }, [rack.length, advanceLevel]);
+  }, [rack.length, boardScore.bonusEarned, validation, advanceLevel]);
 
   /**
    * Finishing a level is the whole goal, so it carries the player onward by
