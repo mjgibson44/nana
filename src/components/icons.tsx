@@ -94,6 +94,14 @@ export function MenuIcon(props: IconProps) {
   );
 }
 
+export function CheckIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M5 13l4.5 4.5L19 6.5" />
+    </Svg>
+  );
+}
+
 export function CloseIcon(props: IconProps) {
   return (
     <Svg {...props}>

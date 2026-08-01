@@ -1,4 +1,5 @@
 import type { WordVerdict } from '../App';
+import { CheckIcon, CloseIcon } from './icons';
 
 interface WordBarProps {
   /** Staged letters in the order they were typed; null for a gap tile. */
@@ -18,6 +19,8 @@ interface WordBarProps {
   onClear: () => void;
   onConfirm: () => void;
   onCancel: () => void;
+  /** The pile's own tools, sharing this row rather than having one of their own. */
+  tools?: React.ReactNode;
 }
 
 export function WordBar({
@@ -29,6 +32,7 @@ export function WordBar({
   onClear,
   onConfirm,
   onCancel,
+  tools,
 }: WordBarProps) {
   // Overflow is the more urgent problem, so it owns the bar's colour.
   const tone = overflowed ? 'bad' : verdict === null ? '' : verdict.ok ? 'good' : 'bad';
@@ -66,33 +70,37 @@ export function WordBar({
           <>
             <button
               type="button"
-              className="btn btn-confirm"
+              className="icon-btn icon-btn-confirm"
               disabled={letters.length === 0 || overflowed}
               onClick={onConfirm}
-              aria-label="Confirm word"
+              title="Place this word (or press Enter)"
+              aria-label="Place this word"
             >
-              ✓<span className="btn-label"> Confirm</span>
+              <CheckIcon />
             </button>
             <button
               type="button"
-              className="btn btn-cancel"
+              className="icon-btn icon-btn-cancel"
               onClick={onCancel}
-              aria-label="Cancel word"
+              title="Cancel this word (or press Escape)"
+              aria-label="Cancel this word"
             >
-              ✕<span className="btn-label"> Cancel</span>
+              <CloseIcon />
             </button>
           </>
         ) : (
           <button
             type="button"
-            className="btn btn-cancel"
+            className="icon-btn icon-btn-cancel"
             disabled={letters.length === 0}
             onClick={onClear}
-            aria-label="Clear letters"
+            title="Clear these letters (or press Escape)"
+            aria-label="Clear these letters"
           >
-            ✕<span className="btn-label"> Clear</span>
+            <CloseIcon />
           </button>
         )}
+        {tools}
       </div>
     </div>
   );

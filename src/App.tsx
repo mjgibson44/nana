@@ -615,29 +615,38 @@ export default function App() {
   );
 
   /**
-   * Send the selected tile back to the pile and step onto the next letter of
-   * its word, so holding Delete eats the rest of the word. Stops at the end.
+   * Send the selected tile back to the pile and step onto its neighbour, so
+   * holding the key eats the rest of the word. Stops when it runs out of word.
+   *
+   * `step` is which way along the word to carry on. Backspace goes 'back' — the
+   * letter before this one, as it does in any text field — and Delete goes
+   * 'forward', so a word can be unpicked from either end.
    */
-  const deleteSelected = useCallback(() => {
-    if (!selection) return;
-    const { key, dir } = selection;
-    const letter = board[key];
-    if (letter === undefined) {
-      setSelection(null);
-      return;
-    }
-    const { row, col } = parseKey(key);
-    const nextKey = dir === 'across' ? keyOf(row, col + 1) : keyOf(row + 1, col);
+  const deleteSelected = useCallback(
+    (step: 'back' | 'forward') => {
+      if (!selection) return;
+      const { key, dir } = selection;
+      const letter = board[key];
+      if (letter === undefined) {
+        setSelection(null);
+        return;
+      }
+      const { row, col } = parseKey(key);
+      const delta = step === 'back' ? -1 : 1;
+      const nextKey =
+        dir === 'across' ? keyOf(row, col + delta) : keyOf(row + delta, col);
 
-    remember();
-    setBoard((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-    setRack((prev) => [...prev, letter]);
-    setSelection(board[nextKey] !== undefined ? { key: nextKey, dir } : null);
-  }, [selection, board, remember]);
+      remember();
+      setBoard((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setRack((prev) => [...prev, letter]);
+      setSelection(board[nextKey] !== undefined ? { key: nextKey, dir } : null);
+    },
+    [selection, board, remember],
+  );
 
   /* ------------------------------ word building ----------------------------- */
 
@@ -773,10 +782,11 @@ export default function App() {
       }
 
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        // A selected tile is the thing being edited, so it goes first.
+        // A selected tile is the thing being edited, so it goes first. Backspace
+        // works back through the word from where it started, Delete works on.
         if (selection) {
           e.preventDefault();
-          deleteSelected();
+          deleteSelected(e.key === 'Backspace' ? 'back' : 'forward');
           return;
         }
         if (e.key === 'Delete' || picks.length === 0) return;
@@ -1149,22 +1159,22 @@ export default function App() {
         onConfirm={() => {
           if (target) commit(target.key, target.dir);
         }}
+        tools={
+          <PileTools
+            onUndo={undo}
+            canUndo={history.length > 0}
+            onShuffle={shufflePile}
+            onAddGap={addGap}
+          />
+        }
       />
 
-      <div className="pile">
-        <PileTools
-          onUndo={undo}
-          canUndo={history.length > 0}
-          onShuffle={shufflePile}
-          onAddGap={addGap}
-        />
-        <Rack
-          letters={rack}
-          hiddenIndex={drag?.source.type === 'rack' ? drag.source.index : null}
-          picks={picks}
-          onTilePointerDown={(index, letter, e) => startDrag(letter, { type: 'rack', index }, e)}
-        />
-      </div>
+      <Rack
+        letters={rack}
+        hiddenIndex={drag?.source.type === 'rack' ? drag.source.index : null}
+        picks={picks}
+        onTilePointerDown={(index, letter, e) => startDrag(letter, { type: 'rack', index }, e)}
+      />
 
       {drag && (
         <div

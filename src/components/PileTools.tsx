@@ -9,9 +9,8 @@ interface PileToolsProps {
 }
 
 /**
- * The tools that act on the pile, kept down beside it rather than up in the
- * header — they're used constantly while building a word, and the header is for
- * the run as a whole.
+ * The tools that act on the pile. They share the word bar's row with confirm and
+ * cancel, since all five are used in the same breath while building a word.
  */
 export function PileTools({ onUndo, canUndo, onShuffle, onAddGap }: PileToolsProps) {
   return (
