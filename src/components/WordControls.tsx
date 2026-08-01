@@ -1,5 +1,6 @@
 import type { Direction } from '../game/types';
 import type { BoardWord } from '../App';
+import { CloseIcon, CompassIcon, RotateIcon } from './icons';
 
 interface WordControlsProps {
   /** Every word whose first letter sits in this cell (across and/or down). */
@@ -10,8 +11,6 @@ interface WordControlsProps {
   onRotate: (word: BoardWord) => void;
   onRemove: (word: BoardWord) => void;
   onHighlight: (word: BoardWord | null) => void;
-  onPointerEnter: () => void;
-  onPointerLeave: () => void;
 }
 
 const GLYPH = { across: '➜', down: '⬇' } as const;
@@ -25,14 +24,10 @@ export function WordControls({
   onRotate,
   onRemove,
   onHighlight,
-  onPointerEnter,
-  onPointerLeave,
 }: WordControlsProps) {
   return (
     <div
       className="word-controls"
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
       // The popover sits over its own tile; don't let clicks start a tile drag.
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -58,11 +53,9 @@ export function WordControls({
               onGrab(word, e);
             }}
           >
-            ⠿
+            <CompassIcon />
           </button>
 
-          {/* Shows the direction the word will read after turning, which is
-              clearer at this size than a rotate glyph. */}
           <button
             type="button"
             className="word-btn word-btn-turn"
@@ -78,7 +71,7 @@ export function WordControls({
               onRotate(word);
             }}
           >
-            {GLYPH[flipped(word.direction)]}
+            <RotateIcon to={flipped(word.direction)} />
           </button>
 
           <button
@@ -91,7 +84,7 @@ export function WordControls({
               onRemove(word);
             }}
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
       ))}

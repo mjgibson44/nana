@@ -227,14 +227,134 @@ function fallbackSample(
   return null;
 }
 
+/** Would a word laid from here stay on the board? */
+function inBounds(
+  start: { row: number; col: number },
+  length: number,
+  dir: Direction,
+  size: number,
+): boolean {
+  const endRow = dir === 'down' ? start.row + length - 1 : start.row;
+  const endCol = dir === 'across' ? start.col + length - 1 : start.col;
+  return start.row >= 0 && start.col >= 0 && endRow < size && endCol < size;
+}
+
+/**
+ * One attempt at growing exactly `tileCount` *new* tiles onto tiles that are
+ * already there, every added word crossing something already on the board.
+ */
+function tryExtend(
+  initial: TileMap,
+  size: number,
+  byLetter: Map<string, string[]>,
+  tileCount: number,
+  rng: () => number,
+): BuildState | null {
+  const state: BuildState = { grid: { ...initial }, words: [] };
+  const before = Object.keys(initial).length;
+  let added = 0;
+  let failures = 0;
+
+  while (added < tileCount && failures < 800) {
+    const lengths = usableLengths(tileCount - added);
+    if (lengths.length === 0) return null;
+
+    const anchorKey = pick(Object.keys(state.grid), rng);
+    const comma = anchorKey.indexOf(',');
+    const anchorRow = Number(anchorKey.slice(0, comma));
+    const anchorCol = Number(anchorKey.slice(comma + 1));
+    const anchorLetter = state.grid[anchorKey];
+
+    const candidates = byLetter.get(anchorLetter);
+    if (!candidates || candidates.length === 0) {
+      failures++;
+      continue;
+    }
+
+    const word = pick(candidates, rng);
+    if (!lengths.includes(word.length)) {
+      failures++;
+      continue;
+    }
+
+    const positions: number[] = [];
+    for (let i = 0; i < word.length; i++) {
+      if (word[i] === anchorLetter) positions.push(i);
+    }
+    const crossIndex = pick(positions, rng);
+    const dir: Direction = rng() < 0.5 ? 'across' : 'down';
+
+    const start = canPlace(state.grid, word, anchorRow, anchorCol, crossIndex, dir);
+    if (!start || !inBounds(start, word.length, dir, size)) {
+      failures++;
+      continue;
+    }
+
+    place(state, word, start.row, start.col, dir);
+    added = Object.keys(state.grid).length - before;
+  }
+
+  return added === tileCount ? state : null;
+}
+
+/**
+ * Deal `tileCount` more letters for a board that's already been built on.
+ *
+ * The letters come from words grown off the tiles already down, so — exactly as
+ * for a fresh puzzle — at least one way to play every one of them onto the board
+ * as it stands is known to exist by construction. `solution` is that
+ * arrangement; it is null only if no extension could be found and the letters
+ * fall back to a standalone sample.
+ */
+export function extendPuzzle(
+  board: TileMap,
+  size: number,
+  wordPool: string[],
+  tileCount: number,
+  rng: () => number = Math.random,
+): { letters: string[]; words: string[]; solution: TileMap | null } {
+  // Nothing to grow from: this is just a fresh little puzzle of its own.
+  if (Object.keys(board).length === 0) {
+    const puzzle = generatePuzzle(wordPool, tileCount, rng);
+    return { letters: puzzle.letters, words: puzzle.sourceWords, solution: null };
+  }
+
+  const byLetter = new Map<string, string[]>();
+  for (const word of usableWords(wordPool)) {
+    for (const letter of new Set(word)) {
+      let bucket = byLetter.get(letter);
+      if (!bucket) byLetter.set(letter, (bucket = []));
+      bucket.push(word);
+    }
+  }
+
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const built = tryExtend(board, size, byLetter, tileCount, rng);
+    if (!built) continue;
+    const letters = Object.keys(built.grid)
+      .filter((key) => !(key in board))
+      .map((key) => built.grid[key]);
+    return { letters: shuffle(letters, rng), words: built.words, solution: built.grid };
+  }
+
+  // A board too congested to grow off of. The letters still spell real words;
+  // the player just isn't handed a guaranteed home for them.
+  const puzzle = generatePuzzle(wordPool, tileCount, rng);
+  return { letters: puzzle.letters, words: puzzle.sourceWords, solution: null };
+}
+
+function usableWords(wordPool: string[]): string[] {
+  return wordPool.filter(
+    (w) => w.length >= MIN_WORD_LEN && w.length <= MAX_WORD_LEN && /^[a-z]+$/.test(w),
+  );
+}
+
 export function generatePuzzle(
   wordPool: string[],
   tileCount = 20,
   rng: () => number = Math.random,
 ): Puzzle {
-  const usable = wordPool.filter(
-    (w) => w.length >= MIN_WORD_LEN && w.length <= MAX_WORD_LEN && /^[a-z]+$/.test(w),
-  );
+  const usable = usableWords(wordPool);
   if (usable.length === 0) throw new Error('word pool is empty');
   if (tileCount < MIN_WORD_LEN) throw new Error(`tileCount must be at least ${MIN_WORD_LEN}`);
 

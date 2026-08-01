@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractRuns, isConnected, validateBoard } from '../board';
+import { components, extractRuns, isConnected, validateBoard } from '../board';
 import type { TileMap } from '../types';
 import { keyOf } from '../types';
 
@@ -90,5 +90,41 @@ describe('validateBoard', () => {
     const v = validateBoard({}, dict);
     expect(v.ok).toBe(false);
     expect(v.tileCount).toBe(0);
+  });
+
+  it('rejects two-letter runs even when the dictionary has them', () => {
+    // AT is in the test dictionary, but two-letter words are banned outright.
+    const v = validateBoard(boardFrom(['at']), dict);
+    expect(dict.has('at')).toBe(true);
+    expect(v.invalidRuns.map((r) => r.word)).toEqual(['at']);
+    expect(v.ok).toBe(false);
+  });
+
+  it('names the tiles adrift from the main body of the board', () => {
+    // CAT is the bigger group, so the far-off DOG is what's adrift.
+    const v = validateBoard(boardFrom(['cat', '...', 'dog']), dict);
+    expect(v.disconnectedTiles.sort()).toEqual([keyOf(2, 0), keyOf(2, 1), keyOf(2, 2)]);
+  });
+
+  it('leaves nothing adrift when the board is one group', () => {
+    const v = validateBoard(boardFrom(['cat', '.t.', '.e.']), dict);
+    expect(v.disconnectedTiles).toEqual([]);
+  });
+});
+
+describe('components', () => {
+  it('returns one group for a joined-up board', () => {
+    expect(components(boardFrom(['cat', '.t.', '.e.']))).toHaveLength(1);
+  });
+
+  it('orders groups largest first, so the main board comes out on top', () => {
+    // A four-tile word and a lone tile, far apart.
+    const groups = components(boardFrom(['cats', '....', 'x...']));
+    expect(groups.map((g) => g.length)).toEqual([4, 1]);
+    expect(groups[1]).toEqual([keyOf(2, 0)]);
+  });
+
+  it('has no groups at all on an empty board', () => {
+    expect(components({})).toEqual([]);
   });
 });

@@ -12,34 +12,36 @@ interface GridProps {
   hiddenKeys: Set<CellKey>;
   /** Letters that would land if the current word were committed. */
   preview: Map<CellKey, string>;
-  /** The cell a word is being built from, if any. */
-  anchorKey: CellKey | null;
-  /** Reveal direction arrows on whichever cell the pointer is over. */
-  hoverArrows: boolean;
-  /** Keep direction arrows pinned to the anchor cell (it was clicked). */
-  anchorArrows: boolean;
+  /** Squares a gap tile is holding open, still waiting for a letter under it. */
+  previewGaps: Set<CellKey>;
+  /** The square the next letter will land on, if a word is being built. */
+  cursorKey: CellKey | null;
+  /** The direction that word is being laid in. */
+  cursorDir: Direction | null;
+  /** Offer the rotate button — only when the cell could go either way. */
+  showRotate: boolean;
   /** Words on the board, keyed by every cell they occupy. */
   wordsByCell: Map<CellKey, BoardWord[]>;
   /** The cell whose word controls are open. */
   openWordCell: CellKey | null;
   /** Cells of the word currently called out by the controls. */
   highlighted: Set<CellKey>;
+  /** The placed tile picked out for deletion, if any. */
+  selectedKey: CellKey | null;
   canRotate: (word: BoardWord) => boolean;
   onTilePointerDown: (key: CellKey, letter: string, e: React.PointerEvent) => void;
   onCellClick: (key: CellKey) => void;
-  onArrow: (key: CellKey, dir: Direction) => void;
-  onArrowHover: (key: CellKey, dir: Direction, entering: boolean) => void;
-  onWordHover: (key: CellKey, entering: boolean) => void;
+  /** The cell under the pointer, or null once it leaves the board. */
+  onCellHover: (key: CellKey | null) => void;
+  onRotateDirection: () => void;
   onWordHighlight: (word: BoardWord | null) => void;
   onWordGrab: (word: BoardWord, e: React.PointerEvent) => void;
   onWordRotate: (word: BoardWord) => void;
   onWordRemove: (word: BoardWord) => void;
 }
 
-const ARROWS: Array<{ dir: Direction; glyph: string; label: string }> = [
-  { dir: 'across', glyph: '➜', label: 'Place across' },
-  { dir: 'down', glyph: '➜', label: 'Place down' },
-];
+const GLYPH: Record<Direction, string> = { across: '➜', down: '⬇' };
+const NAME: Record<Direction, string> = { across: 'across', down: 'down' };
 
 export const Grid = memo(function Grid({
   size,
@@ -47,18 +49,19 @@ export const Grid = memo(function Grid({
   cellStatus,
   hiddenKeys,
   preview,
-  anchorKey,
-  hoverArrows,
-  anchorArrows,
+  previewGaps,
+  cursorKey,
+  cursorDir,
+  showRotate,
   wordsByCell,
   openWordCell,
   highlighted,
+  selectedKey,
   canRotate,
   onTilePointerDown,
   onCellClick,
-  onArrow,
-  onArrowHover,
-  onWordHover,
+  onCellHover,
+  onRotateDirection,
   onWordHighlight,
   onWordGrab,
   onWordRotate,
@@ -71,35 +74,16 @@ export const Grid = memo(function Grid({
       const letter = board[key];
       const status = cellStatus.get(key);
       const ghost = preview.get(key);
-      const isAnchor = key === anchorKey;
-      const empty = letter === undefined;
+      const isCursor = key === cursorKey;
       const inWords = wordsByCell.get(key);
-
-      // Which directions this cell can start a word in.
-      //
-      // An empty cell offers both: the first letter lands right here, and
-      // anything already further along is simply flowed over.
-      //
-      // A cell that already holds a letter offers a direction only when the
-      // very next cell is free. That existing letter becomes the word's first
-      // letter — but if its neighbour is occupied too, the first letter you
-      // typed would leapfrog past it and land somewhere unexpected.
-      const dirs: Direction[] = [];
-      if (hoverArrows || (anchorArrows && isAnchor)) {
-        if (empty) {
-          dirs.push('across', 'down');
-        } else {
-          if (col + 1 < size && board[keyOf(row, col + 1)] === undefined) dirs.push('across');
-          if (row + 1 < size && board[keyOf(row + 1, col)] === undefined) dirs.push('down');
-        }
-      }
+      // The turn button travels with the focus square, and only shows up when
+      // that square has a real choice of direction.
+      const rotateDir = isCursor && showRotate ? cursorDir : null;
 
       cells.push(
         <div
           key={key}
-          className={`cell${isAnchor ? ' is-anchor' : ''}${
-            dirs.length > 0 ? ' has-arrows' : ''
-          }`}
+          className={`cell${isCursor ? ' is-cursor' : ''}`}
           data-cell
           data-row={row}
           data-col={col}
@@ -111,10 +95,8 @@ export const Grid = memo(function Grid({
                 hiddenKeys.has(key) ? ' tile-hidden' : ''
               }${inWords ? ' is-word-tile' : ''}${
                 highlighted.has(key) ? ' is-in-word' : ''
-              }`}
+              }${key === selectedKey ? ' is-selected' : ''}`}
               onPointerDown={(e) => onTilePointerDown(key, letter, e)}
-              onPointerEnter={inWords ? () => onWordHover(key, true) : undefined}
-              onPointerLeave={inWords ? () => onWordHover(key, false) : undefined}
             >
               {letter}
             </div>
@@ -122,6 +104,12 @@ export const Grid = memo(function Grid({
 
           {letter === undefined && ghost !== undefined && (
             <div className="tile board-tile tile-preview">{ghost}</div>
+          )}
+
+          {/* A gap waiting on a letter: drawn as the hole it is, so the word's
+              whole shape is visible while it's being lined up. */}
+          {letter === undefined && ghost === undefined && previewGaps.has(key) && (
+            <div className="tile board-tile tile-preview tile-preview-gap" />
           )}
 
           {inWords && key === openWordCell && (
@@ -132,29 +120,30 @@ export const Grid = memo(function Grid({
               onRotate={onWordRotate}
               onRemove={onWordRemove}
               onHighlight={onWordHighlight}
-              onPointerEnter={() => onWordHover(key, true)}
-              onPointerLeave={() => onWordHover(key, false)}
             />
           )}
 
-          {ARROWS.filter(({ dir }) => dirs.includes(dir)).map(({ dir, glyph, label }) => (
+          {/* Shows the way the word will read, so it doubles as the only sign
+              of which direction was assumed. Tapping it turns the cell. */}
+          {rotateDir !== null && (
             <button
-              key={dir}
               type="button"
-              className={`cell-arrow cell-arrow-${dir}`}
-              title={label}
-              aria-label={label}
+              className="cell-rotate"
+              title={`Placing ${NAME[rotateDir]} — click to place ${
+                NAME[rotateDir === 'across' ? 'down' : 'across']
+              }`}
+              aria-label={`Placing ${NAME[rotateDir]}. Click to place ${
+                NAME[rotateDir === 'across' ? 'down' : 'across']
+              }`}
               onPointerDown={(e) => e.stopPropagation()}
-              onPointerEnter={() => onArrowHover(key, dir, true)}
-              onPointerLeave={() => onArrowHover(key, dir, false)}
               onClick={(e) => {
                 e.stopPropagation();
-                onArrow(key, dir);
+                onRotateDirection();
               }}
             >
-              {glyph}
+              {GLYPH[rotateDir]}
             </button>
-          ))}
+          )}
         </div>,
       );
     }
@@ -164,6 +153,15 @@ export const Grid = memo(function Grid({
     <div
       className="board"
       style={{ gridTemplateColumns: `repeat(${size}, var(--cell))` }}
+      // Delegated rather than a handler per cell: at 33 squares square that's a
+      // thousand listeners saved, and the event tells us the cell anyway.
+      onPointerOver={(e) => {
+        const cell = (e.target as HTMLElement).closest('[data-cell]') as HTMLElement | null;
+        onCellHover(
+          cell ? keyOf(Number(cell.dataset.row), Number(cell.dataset.col)) : null,
+        );
+      }}
+      onPointerLeave={() => onCellHover(null)}
     >
       {cells}
     </div>

@@ -1,6 +1,9 @@
 import type { CellKey, Direction, TileMap } from './types';
 import { keyOf, parseKey } from './types';
 
+/** Shortest word the game will accept. Two-letter runs never count. */
+export const MIN_WORD_LENGTH = 3;
+
 /** A maximal horizontal or vertical run of 2+ adjacent letters. */
 export interface WordRun {
   word: string;
@@ -11,16 +14,19 @@ export interface WordRun {
 
 export interface BoardValidation {
   runs: WordRun[];
-  /** Runs whose word is not in the dictionary. */
+  /** Runs that aren't a legal word: too short, or not in the dictionary. */
   invalidRuns: WordRun[];
   /** Tiles that are not part of any 2+ letter run. */
   isolatedTiles: CellKey[];
+  /** Tiles cut off from the main body of the board — every one of these has to
+   * be joined up before the board counts as finished. */
+  disconnectedTiles: CellKey[];
   /** True when every placed tile is orthogonally connected into one group
    * (vacuously true for an empty board). */
   connected: boolean;
   tileCount: number;
   /** Board is a fully legal crossword: at least one tile, every run is a
-   * dictionary word, no isolated tiles, and everything is connected. */
+   * legal word, no isolated tiles, and everything is connected. */
   ok: boolean;
 }
 
@@ -68,33 +74,53 @@ export function extractRuns(tiles: TileMap): Array<Omit<WordRun, 'valid'>> {
   return runs;
 }
 
-/** True when all tiles form a single orthogonally-connected component. */
-export function isConnected(tiles: TileMap): boolean {
-  const keys = Object.keys(tiles);
-  if (keys.length <= 1) return true;
+/**
+ * Split the board into orthogonally-connected groups of tiles, largest first.
+ * A finished board is a single group; anything else is islands to be joined up.
+ */
+export function components(tiles: TileMap): CellKey[][] {
+  const seen = new Set<CellKey>();
+  const groups: CellKey[][] = [];
 
-  const seen = new Set<CellKey>([keys[0]]);
-  const queue: CellKey[] = [keys[0]];
-  while (queue.length > 0) {
-    const { row, col } = parseKey(queue.pop()!);
-    for (const nk of [
-      keyOf(row - 1, col),
-      keyOf(row + 1, col),
-      keyOf(row, col - 1),
-      keyOf(row, col + 1),
-    ]) {
-      if (nk in tiles && !seen.has(nk)) {
-        seen.add(nk);
-        queue.push(nk);
+  for (const start of Object.keys(tiles)) {
+    if (seen.has(start)) continue;
+    const group: CellKey[] = [];
+    const queue: CellKey[] = [start];
+    seen.add(start);
+    while (queue.length > 0) {
+      const key = queue.pop()!;
+      group.push(key);
+      const { row, col } = parseKey(key);
+      for (const nk of [
+        keyOf(row - 1, col),
+        keyOf(row + 1, col),
+        keyOf(row, col - 1),
+        keyOf(row, col + 1),
+      ]) {
+        if (nk in tiles && !seen.has(nk)) {
+          seen.add(nk);
+          queue.push(nk);
+        }
       }
     }
+    groups.push(group);
   }
-  return seen.size === keys.length;
+
+  return groups.sort((a, b) => b.length - a.length);
+}
+
+/** True when all tiles form a single orthogonally-connected component. */
+export function isConnected(tiles: TileMap): boolean {
+  return components(tiles).length <= 1;
 }
 
 export function validateBoard(tiles: TileMap, dictionary: Set<string>): BoardValidation {
   const bareRuns = extractRuns(tiles);
-  const runs: WordRun[] = bareRuns.map((r) => ({ ...r, valid: dictionary.has(r.word) }));
+  const runs: WordRun[] = bareRuns.map((r) => ({
+    ...r,
+    // Two-letter runs are out regardless of the dictionary.
+    valid: r.word.length >= MIN_WORD_LENGTH && dictionary.has(r.word),
+  }));
   const invalidRuns = runs.filter((r) => !r.valid);
 
   const covered = new Set<CellKey>();
@@ -103,15 +129,23 @@ export function validateBoard(tiles: TileMap, dictionary: Set<string>): BoardVal
   }
   const isolatedTiles = Object.keys(tiles).filter((k) => !covered.has(k));
 
-  const connected = isConnected(tiles);
+  // Everything outside the biggest group is adrift from the main board.
+  const groups = components(tiles);
+  const disconnectedTiles = groups.slice(1).flat();
+
   const tileCount = Object.keys(tiles).length;
 
   return {
     runs,
     invalidRuns,
     isolatedTiles,
-    connected,
+    disconnectedTiles,
+    connected: groups.length <= 1,
     tileCount,
-    ok: tileCount > 0 && invalidRuns.length === 0 && isolatedTiles.length === 0 && connected,
+    ok:
+      tileCount > 0 &&
+      invalidRuns.length === 0 &&
+      isolatedTiles.length === 0 &&
+      disconnectedTiles.length === 0,
   };
 }
