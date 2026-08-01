@@ -56,9 +56,26 @@ plain serializable data. When multiplayer arrives, the same modules can run
 on the server: deal one shared pile, validate each player's board
 authoritatively, and sync boards as plain `TileMap` objects over a socket.
 
+## Game modes
+
+Picked from the splash screen (`src/components/HomeScreen.tsx`); the rules live
+in `src/game/modes.ts`.
+
+- **Solo Puzzle** — the classic five-level climb, no clock.
+- **Solo Timed** — the same climb against the clock: 3:00 for level 1, 2:00
+  for level 2, and 15 seconds less for each level after. Out of time is game
+  over.
+- **Endless** — no levels. 2:00 to work the starting 20 tiles, then 3 more
+  tiles arrive every minute. Clearing the pile pays a 25-point bonus and more
+  tiles (10 the first time, 3 after). Loose tiles — unplaced or not validly
+  connected — are your health bar: reach 20 and you're buried.
+
+A first-run "How to play" tutorial pops up on entering a game and then stays
+out of the way (a localStorage flag remembers it's been seen).
+
 ## Roadmap
 
 - [x] Single-player: 20-tile solvable deal, drag & drop, live validation
-- [ ] "Peel" (draw a tile when your board is complete) / timed modes
+- [x] Timed and endless ("peel"-style) modes
 - [ ] Hints powered by the generator's known solution
 - [ ] Multiplayer: shared pile, live opponent boards, first-to-finish wins

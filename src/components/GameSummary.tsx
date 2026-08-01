@@ -10,6 +10,9 @@ interface GameSummaryProps {
   /** Null while the game is still going — nothing renders. */
   words: ScoredWord[] | null;
   score: number;
+  /** How the game ended — headline text varies by mode and outcome. */
+  eyebrow?: string;
+  title?: string;
   onPlayAgain: () => void;
   onClose: () => void;
 }
@@ -19,7 +22,14 @@ interface GameSummaryProps {
  * count up top, then how the words broke down by length, then every word
  * with what it was worth.
  */
-export function GameSummary({ words, score, onPlayAgain, onClose }: GameSummaryProps) {
+export function GameSummary({
+  words,
+  score,
+  eyebrow = 'Game finished',
+  title = '🍌 Well played!',
+  onPlayAgain,
+  onClose,
+}: GameSummaryProps) {
   // Longest first: the lengths that earned the most, and within the word list
   // the proudest words at the top.
   const byLength = useMemo(() => {
@@ -45,8 +55,8 @@ export function GameSummary({ words, score, onPlayAgain, onClose }: GameSummaryP
     <div className="summary" role="dialog" aria-modal="true" aria-label="Game finished">
       <div className="summary-inner">
         <header className="summary-header">
-          <span className="splash-eyebrow">Game finished</span>
-          <h1 className="summary-title">🍌 Well played!</h1>
+          <span className="splash-eyebrow">{eyebrow}</span>
+          <h1 className="summary-title">{title}</h1>
         </header>
 
         <div className="summary-totals">

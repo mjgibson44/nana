@@ -2,14 +2,24 @@ import { useEffect, useRef, useState } from 'react';
 import { MenuIcon } from './icons';
 
 interface MenuProps {
-  onNewGame: () => void;
+  /** Start the current mode over from scratch. */
+  onResetGame: () => void;
+  onShowHowTo: () => void;
   onShowStats: () => void;
   /** Reopen the final-score breakdown; null while the game is still going. */
   onShowSummary: (() => void) | null;
+  /** Leave the game and go back to the mode-picking splash screen. */
+  onReturnHome: () => void;
 }
 
 /** Header menu for the actions that aren't part of playing a turn. */
-export function Menu({ onNewGame, onShowStats, onShowSummary }: MenuProps) {
+export function Menu({
+  onResetGame,
+  onShowHowTo,
+  onShowStats,
+  onShowSummary,
+  onReturnHome,
+}: MenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -30,6 +40,20 @@ export function Menu({ onNewGame, onShowStats, onShowSummary }: MenuProps) {
     };
   }, [open]);
 
+  const item = (label: string, action: () => void) => (
+    <button
+      type="button"
+      className="menu-item"
+      role="menuitem"
+      onClick={() => {
+        setOpen(false);
+        action();
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div className="menu" ref={ref}>
       <button
@@ -48,41 +72,11 @@ export function Menu({ onNewGame, onShowStats, onShowSummary }: MenuProps) {
 
       {open && (
         <div className="menu-panel" role="menu">
-          <button
-            type="button"
-            className="menu-item"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onNewGame();
-            }}
-          >
-            New game
-          </button>
-          {onShowSummary && (
-            <button
-              type="button"
-              className="menu-item"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                onShowSummary();
-              }}
-            >
-              Final score
-            </button>
-          )}
-          <button
-            type="button"
-            className="menu-item"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onShowStats();
-            }}
-          >
-            Stats
-          </button>
+          {item('Reset game', onResetGame)}
+          {onShowSummary && item('Final score', onShowSummary)}
+          {item('How to play', onShowHowTo)}
+          {item('Stats', onShowStats)}
+          {item('Return home', onReturnHome)}
         </div>
       )}
     </div>

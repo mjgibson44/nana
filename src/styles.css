@@ -166,6 +166,101 @@ body {
   }
 }
 
+/* ---------- header clock & health ---------- */
+
+.score-timer {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The last seconds of a timed level: hard to miss, easy to panic. */
+.score-timer-urgent {
+  color: #a33025;
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+@keyframes timer-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.score-block-health {
+  gap: 3px;
+}
+
+.health-bar {
+  width: 88px;
+  height: 10px;
+  margin-top: 2px;
+  background: #e8ddbd;
+  border: 1px solid #c9a52c;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.health-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 300ms ease;
+}
+
+.health-ok {
+  background: #8fb573;
+}
+
+.health-warn {
+  background: #e08a3c;
+}
+
+.health-low {
+  background: #a33025;
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+.health-count {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+/* ---------- tile-drop banner ---------- */
+
+/* Floats just under the header so it never hides the score or the board's
+   working area for long. */
+.game-toast {
+  position: fixed;
+  top: 68px;
+  left: 50%;
+  z-index: 150;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #ffd84d;
+  background: #3d3524;
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(61, 53, 36, 0.35);
+  pointer-events: none;
+  animation: toast-in-out 2400ms ease forwards;
+}
+
+@keyframes toast-in-out {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  10%,
+  82% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+}
+
 .header-actions {
   display: flex;
   gap: 8px;
@@ -1018,6 +1113,275 @@ body {
   align-self: center;
 }
 
+/* Fresh Endless tiles drop into the pile one after another. */
+.rack-tile-new {
+  animation: tile-drop-in 600ms cubic-bezier(0.2, 0.9, 0.3, 1.35) backwards;
+}
+
+@keyframes tile-drop-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-22px) scale(0.55);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(2px) scale(1.08);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ---------- home screen ---------- */
+
+.home {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.home-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 22px calc(40px + env(safe-area-inset-bottom));
+}
+
+.home-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.home-title {
+  margin: 0;
+  font-size: 52px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.home-tagline {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.home-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px 18px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: #fffbea;
+  border: 3px solid #c9a52c;
+  border-radius: 16px;
+  box-shadow: 0 3px 0 #c9a52c;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.mode-card:hover {
+  background: #fff3c4;
+  transform: translateY(-2px);
+  box-shadow: 0 5px 0 #c9a52c;
+}
+
+.mode-card:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 0 #c9a52c;
+}
+
+.mode-card-name {
+  font-size: 21px;
+  font-weight: 800;
+}
+
+.mode-card-tagline {
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.mode-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.mode-card-detail {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.65;
+}
+
+.mode-card-detail::before {
+  content: '· ';
+  color: #c9a52c;
+}
+
+.mode-card-play {
+  margin-top: auto;
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffd84d;
+  background: #3d3524;
+  border-radius: 999px;
+}
+
+.home-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* ---------- how-to modal ---------- */
+
+.howto {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  overflow-y: auto;
+  background: var(--bg);
+  animation: splash-in 180ms ease-out;
+}
+
+/* The X rides the viewport, not the page — always in reach however far the
+   tutorial has been scrolled. */
+.howto-close {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 410;
+}
+
+.howto-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 36px 22px calc(36px + env(safe-area-inset-bottom));
+}
+
+.howto-goal {
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.howto-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.howto-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  background: #fffbea;
+  border: 2px solid var(--tile-edge);
+  border-radius: 12px;
+}
+
+.howto-tiles {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+/* A game tile in miniature, in each of the board's states — same colours the
+   real board uses. */
+.howto-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: var(--tile-face);
+  border: 2px solid var(--tile-edge);
+  border-radius: 8px;
+  box-shadow: 0 2px 3px rgba(61, 53, 36, 0.25);
+}
+
+.howto-tile-valid {
+  background: #dcedc4;
+  border-color: #8fb573;
+  color: #3f5c22;
+}
+
+.howto-tile-disconnected {
+  background: #ffd9a6;
+  border-color: #e08a3c;
+  color: #9a4f0d;
+}
+
+.howto-tile-invalid {
+  background: #f5c6bf;
+  border-color: #de7c72;
+  color: #a33025;
+}
+
+.howto-tile-gap {
+  background: #f3ead2;
+  border-style: dashed;
+  border-color: #b9a469;
+  box-shadow: none;
+}
+
+.howto-tile-cursor {
+  background: #fff4cf;
+  border-color: #e0b62e;
+  box-shadow: inset 0 0 0 3px #e0b62e;
+}
+
+/* Game buttons shown as pictures — the same classes the live ones wear, made
+   inert. */
+.howto-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  pointer-events: none;
+  cursor: default;
+}
+
+.howto kbd {
+  padding: 1px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  background: #fff3c4;
+  border: 1px solid #c9a52c;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
 @media (max-width: 600px) {
   :root {
     --cell-base: 38px;
@@ -1103,5 +1467,44 @@ body {
 
   .summary-title {
     font-size: 28px;
+  }
+
+  /* The endless header carries score, clock and health — tighten up. */
+  .scoreboard {
+    gap: 10px;
+  }
+
+  .health-bar {
+    width: 64px;
+  }
+
+  .health-count {
+    display: none;
+  }
+
+  .game-toast {
+    top: 58px;
+    max-width: calc(100vw - 24px);
+    white-space: normal;
+    text-align: center;
+  }
+
+  .home-inner {
+    padding-top: 32px;
+    gap: 22px;
+  }
+
+  .home-title {
+    font-size: 40px;
+  }
+
+  .howto-inner {
+    padding-top: 30px;
+  }
+
+  .howto-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
 }
