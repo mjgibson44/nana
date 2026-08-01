@@ -1916,7 +1916,6 @@ export default function App() {
             rotateTo={
               interaction.kind === 'place' && interaction.dir === 'across' ? 'down' : 'across'
             }
-            onShuffle={shufflePile}
             onAddGap={addGap}
           />
         }
@@ -1927,6 +1926,7 @@ export default function App() {
         hiddenIndex={drag?.source.type === 'rack' ? drag.source.index : null}
         picks={picks}
         justAdded={tileDrop?.count ?? 0}
+        onShuffle={shufflePile}
         onTilePointerDown={(index, letter, e) => startDrag(letter, { type: 'rack', index }, e)}
       />
 

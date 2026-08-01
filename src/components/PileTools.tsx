@@ -1,5 +1,5 @@
 import type { Direction } from '../game/types';
-import { BackspaceIcon, GapIcon, RotateIcon, ShuffleIcon } from './icons';
+import { BackspaceIcon, GapIcon, RotateIcon } from './icons';
 
 interface PileToolsProps {
   /** Take back the last move, wherever it happened. */
@@ -22,15 +22,14 @@ interface PileToolsProps {
   canRotate: boolean;
   /** The direction rotating would switch to — drawn on the button. */
   rotateTo: Direction;
-  onShuffle: () => void;
   onAddGap: () => void;
 }
 
 /**
- * The tools that act on the pile and the word being built. They share the word
- * bar's row with confirm, since all of them are used in the same breath while
- * building a word: undo, then shuffle, then the gap, then the word's own tools
- * closest to confirm, each group fenced off by a divider.
+ * The tools that act on the word being built. They share the word bar's row
+ * with confirm, since all of them are used in the same breath while building
+ * a word: undo, then the gap, then the word's own tools closest to confirm,
+ * each group fenced off by a divider. (Shuffle lives on the pile itself.)
  */
 export function PileTools({
   onUndo,
@@ -42,7 +41,6 @@ export function PileTools({
   onRotate,
   canRotate,
   rotateTo,
-  onShuffle,
   onAddGap,
 }: PileToolsProps) {
   return (
@@ -78,21 +76,6 @@ export function PileTools({
         }}
       >
         Undo
-      </button>
-
-      <span className="word-bar-divider" aria-hidden="true" />
-
-      <button
-        type="button"
-        className="icon-btn"
-        title="Shuffle the pile"
-        aria-label="Shuffle the pile"
-        onClick={(e) => {
-          e.currentTarget.blur();
-          onShuffle();
-        }}
-      >
-        <ShuffleIcon />
       </button>
 
       <span className="word-bar-divider" aria-hidden="true" />

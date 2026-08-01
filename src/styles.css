@@ -749,6 +749,12 @@ body {
   flex-shrink: 0;
 }
 
+/* Squeezed for space: only when the buttons genuinely can't share one row do
+   the dividers go — WordBar measures and sets this, never a blanket rule. */
+.word-bar-actions-slim .word-bar-divider {
+  display: none;
+}
+
 /* ---------- pile tools ---------- */
 
 /* Sits in the word bar with confirm and cancel at its right-hand end. Hairline
@@ -1087,19 +1093,33 @@ body {
 
 /* ---------- rack ---------- */
 
+/* The pile's frame carries the chrome, so the shuffle button can pin to its
+   corner while the tiles scroll underneath. */
+.rack-wrap {
+  position: relative;
+  background: #f2e9d2;
+  border-top: 3px solid #e0b62e;
+}
+
 .rack {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-content: flex-start;
-  padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
+  /* Right padding keeps the last tile of a row out from under shuffle. */
+  padding: 12px 56px calc(12px + env(safe-area-inset-bottom)) 18px;
   min-height: 76px;
   /* Later levels deal up to 60 tiles — let the pile scroll rather than
      squeezing the board off the screen. */
   max-height: 28vh;
   overflow-y: auto;
-  background: #f2e9d2;
-  border-top: 3px solid #e0b62e;
+}
+
+.rack-shuffle {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 5;
 }
 
 .rack-empty {
@@ -1444,7 +1464,8 @@ body {
 
   .rack {
     padding-left: 12px;
-    padding-right: 12px;
+    /* Still clear of the pinned shuffle button. */
+    padding-right: 50px;
   }
 
   .splash {

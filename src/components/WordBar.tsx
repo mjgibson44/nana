@@ -1,3 +1,4 @@
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { WordVerdict } from '../App';
 import { CheckIcon, CloseIcon } from './icons';
 
@@ -44,6 +45,52 @@ export function WordBar({
   // Overflow is the more urgent problem, so it owns the bar's colour.
   const tone = overflowed ? 'bad' : verdict === null ? '' : verdict.ok ? 'good' : 'bad';
 
+  const actionsRef = useRef<HTMLDivElement>(null);
+  /** True while the toolbar has had to drop its dividers to stay on one row. */
+  const [slim, setSlim] = useState(false);
+
+  /**
+   * The dividers go only when the buttons genuinely can't share one row.
+   * Always measured with the dividers showing — so the verdict doesn't depend
+   * on what's currently hidden — by peeling the class off, reading the layout,
+   * and putting the answer back before the browser paints any of it.
+   */
+  const fitDividers = useCallback(() => {
+    const row = actionsRef.current;
+    if (!row) return;
+    row.classList.remove('word-bar-actions-slim');
+    // Dividers stretch to the row's full height, so their tops don't say
+    // which line they're on — the uniform-height buttons and groups do.
+    const kids = [...row.children].filter(
+      (el): el is HTMLElement =>
+        el instanceof HTMLElement && !el.classList.contains('word-bar-divider'),
+    );
+    const firstTop = kids[0]?.offsetTop ?? 0;
+    const wrapped = kids.some((el) => el.offsetTop > firstTop + 1);
+    // A row that can't wrap (desktop) spills out of the bar instead.
+    const bar = row.parentElement;
+    const spilled =
+      row.scrollWidth > row.clientWidth + 1 ||
+      (bar !== null && row.getBoundingClientRect().right > bar.getBoundingClientRect().right + 1);
+    const cramped = wrapped || spilled;
+    row.classList.toggle('word-bar-actions-slim', cramped);
+    setSlim(cramped);
+  }, []);
+
+  // Buttons come and go (redo, the staged word's state), so re-check after
+  // every render — and whenever the row itself changes size.
+  useLayoutEffect(() => {
+    fitDividers();
+  });
+
+  useLayoutEffect(() => {
+    const row = actionsRef.current;
+    if (!row) return;
+    const observer = new ResizeObserver(fitDividers);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [fitDividers]);
+
   return (
     <div className={`word-bar${tone ? ` word-bar-${tone}` : ''}`}>
       <div className="word-bar-letters">
@@ -72,7 +119,10 @@ export function WordBar({
         ))}
       </div>
 
-      <div className="word-bar-actions">
+      <div
+        ref={actionsRef}
+        className={`word-bar-actions${slim ? ' word-bar-actions-slim' : ''}`}
+      >
         {tools}
         <span className="word-bar-divider" aria-hidden="true" />
         <button
