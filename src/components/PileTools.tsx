@@ -6,6 +6,11 @@ interface PileToolsProps {
   onUndo: () => void;
   /** False when there is no move recorded to take back. */
   canUndo: boolean;
+  /** Put back the move undo just took away. */
+  onRedo: () => void;
+  /** True only while there are undone moves to walk forward through — the
+   * redo button isn't shown at all otherwise. */
+  canRedo: boolean;
   /** Backspace: takes back the last staged letter, or eats into a selected
    * word on the board — same as the Backspace key. */
   onBackspace: () => void;
@@ -30,6 +35,8 @@ interface PileToolsProps {
 export function PileTools({
   onUndo,
   canUndo,
+  onRedo,
+  canRedo,
   onBackspace,
   canBackspace,
   onRotate,
@@ -40,14 +47,31 @@ export function PileTools({
 }: PileToolsProps) {
   return (
     <div className="pile-tools">
+      {/* Only exists while undo has left something to walk forward into, so
+          the row doesn't carry a dead button the rest of the time. */}
+      {canRedo && (
+        <button
+          type="button"
+          className="icon-btn icon-btn-text"
+          title="Redo the move you just took back"
+          aria-label="Redo the move you just took back"
+          // A click leaves the button focused, which would steal Space and
+          // Enter from the word being built.
+          onClick={(e) => {
+            e.currentTarget.blur();
+            onRedo();
+          }}
+        >
+          Redo
+        </button>
+      )}
+
       <button
         type="button"
         className="icon-btn icon-btn-text"
         title="Undo the last move"
         aria-label="Undo the last move"
         disabled={!canUndo}
-        // A click leaves the button focused, which would steal Space and Enter
-        // from the word being built.
         onClick={(e) => {
           e.currentTarget.blur();
           onUndo();

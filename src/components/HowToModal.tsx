@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { CheckIcon, CloseIcon, CompassIcon, GapIcon, RotateIcon } from './icons';
+import { CheckIcon, CloseIcon, CompassIcon, GapIcon, RotateIcon, TrashIcon } from './icons';
 
 interface HowToModalProps {
   onClose: () => void;
@@ -196,11 +196,11 @@ export function HowToModal({ onClose }: HowToModalProps) {
             </li>
             <li className="howto-row">
               <DemoButton>
-                <CloseIcon />
+                <TrashIcon />
               </DemoButton>
               <span>
-                The word&rsquo;s ✕ sends all its letters back to your pile. Single tiles can also
-                be dragged anywhere — or double-tapped to send them back.
+                The word&rsquo;s trash button sends all its letters back to your pile. Single
+                tiles can also be dragged anywhere — or double-tapped to send them back.
               </span>
             </li>
           </ul>

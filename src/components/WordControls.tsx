@@ -1,6 +1,6 @@
 import type { Direction } from '../game/types';
 import type { BoardWord } from '../App';
-import { CloseIcon, CompassIcon, RotateIcon } from './icons';
+import { CompassIcon, RotateIcon, TrashIcon } from './icons';
 
 interface WordControlsProps {
   /** Every word whose first letter sits in this cell (across and/or down). */
@@ -84,7 +84,7 @@ export function WordControls({
               onRemove(word);
             }}
           >
-            <CloseIcon />
+            <TrashIcon />
           </button>
         </div>
       ))}
