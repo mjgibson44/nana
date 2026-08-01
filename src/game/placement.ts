@@ -88,6 +88,48 @@ export function planPlacement(
 }
 
 /**
+ * Where a word has to start for its first gap pick to land exactly on `target`
+ * — the click-a-letter way of filling a gap: type SOLAR with a hole where the
+ * L goes, click an L on the board, and the word arranges itself around it.
+ *
+ * Walks planPlacement's rules backwards through the picks before the gap
+ * (all letters, since this is the first gap): letters flow back over occupied
+ * squares the same way they flow forward over them. The one square with no
+ * give is the one right before the gap — a gap claims the very next square
+ * after the letter before it, so that letter's square has to be free already.
+ *
+ * Returns null when the picks have no gap, a square a letter needs is taken,
+ * or the walk falls off the grid. A non-null anchor still needs its plan
+ * checked for completeness — later gaps may miss their letters.
+ */
+export function anchorForGapTarget(
+  board: TileMap,
+  size: number | Bounds,
+  target: Cell,
+  dir: Direction,
+  picks: Pick[],
+): Cell | null {
+  const bounds = asBounds(size);
+  const gapAt = picks.findIndex((pick) => pick.letter === null);
+  if (gapAt === -1) return null;
+
+  let { row, col } = target;
+  const back = () => {
+    if (dir === 'across') col--;
+    else row--;
+  };
+
+  for (let i = gapAt - 1; i >= 0; i--) {
+    back();
+    if (i < gapAt - 1) {
+      while (inBounds(bounds, row, col) && board[keyOf(row, col)] !== undefined) back();
+    }
+    if (!inBounds(bounds, row, col) || board[keyOf(row, col)] !== undefined) return null;
+  }
+  return { row, col };
+}
+
+/**
  * Work out where a whole word's tiles would sit if its first letter moved to
  * `start` and it read in `dir`.
  *

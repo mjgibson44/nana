@@ -15,8 +15,10 @@ interface WordBarProps {
    * Read for colour only — it tints the bar and the staged letters rather than
    * spelling the verdict out. */
   verdict: WordVerdict | null;
+  /** True when confirming would really place the word: a cell is chosen and
+   * every letter and gap has found its square. */
+  canConfirm: boolean;
   onRemove: (position: number) => void;
-  onClear: () => void;
   onConfirm: () => void;
   onCancel: () => void;
   /** The pile's own tools, sharing this row rather than having one of their own. */
@@ -28,8 +30,8 @@ export function WordBar({
   mode,
   overflowed,
   verdict,
+  canConfirm,
   onRemove,
-  onClear,
   onConfirm,
   onCancel,
   tools,
@@ -66,41 +68,28 @@ export function WordBar({
       </div>
 
       <div className="word-bar-actions">
-        {mode === 'place' ? (
-          <>
-            <button
-              type="button"
-              className="icon-btn icon-btn-confirm"
-              disabled={letters.length === 0 || overflowed}
-              onClick={onConfirm}
-              title="Place this word (or press Enter)"
-              aria-label="Place this word"
-            >
-              <CheckIcon />
-            </button>
-            <button
-              type="button"
-              className="icon-btn icon-btn-cancel"
-              onClick={onCancel}
-              title="Cancel this word (or press Escape)"
-              aria-label="Cancel this word"
-            >
-              <CloseIcon />
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="icon-btn icon-btn-cancel"
-            disabled={letters.length === 0}
-            onClick={onClear}
-            title="Clear these letters (or press Escape)"
-            aria-label="Clear these letters"
-          >
-            <CloseIcon />
-          </button>
-        )}
         {tools}
+        <span className="word-bar-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className="icon-btn icon-btn-cancel"
+          disabled={mode === 'idle'}
+          onClick={onCancel}
+          title="Cancel this word (or press Escape)"
+          aria-label="Cancel this word"
+        >
+          <CloseIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-btn icon-btn-confirm"
+          disabled={!canConfirm}
+          onClick={onConfirm}
+          title="Place this word (or press Enter)"
+          aria-label="Place this word"
+        >
+          <CheckIcon />
+        </button>
       </div>
     </div>
   );
