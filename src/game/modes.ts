@@ -79,10 +79,8 @@ export const ENDLESS_DRIP_SECONDS = 60;
 /** How many tiles each timed batch brings. */
 export const ENDLESS_DRIP_TILES = 3;
 
-/** The reward pile for the first time every tile is placed and connected. */
-export const ENDLESS_FIRST_CLEAR_TILES = 10;
-
-/** Later clears feed the board a smaller batch. */
+/** Clearing the pile — every tile placed and connected — feeds the board the
+ * same size batch as a timed drop. */
 export const ENDLESS_CLEAR_TILES = 3;
 
 /** Points for having every tile placed on a fully connected, valid board. */
