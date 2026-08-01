@@ -71,7 +71,7 @@ export function WordControls({
               onRotate(word);
             }}
           >
-            <RotateIcon />
+            <RotateIcon to={flipped(word.direction)} />
           </button>
 
           <button

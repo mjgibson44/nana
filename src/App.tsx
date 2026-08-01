@@ -543,9 +543,19 @@ export default function App() {
     [board, remember],
   );
 
+  /**
+   * Turn a word about its first letter, which stays put while the rest swing
+   * round. The word stays selected afterwards — it's still the one being worked
+   * on, and turning it is usually the first of several tries.
+   */
   const rotateWord = useCallback(
     (word: BoardWord) => {
-      moveWord(word, word.cells[0], word.direction === 'across' ? 'down' : 'across');
+      const pivot = word.cells[0];
+      const dir: Direction = word.direction === 'across' ? 'down' : 'across';
+      // moveWord drops the selection, since normally a moved word leaves the
+      // selected cell behind. Here the pivot doesn't move, so take it back.
+      if (!moveWord(word, pivot, dir)) return;
+      setSelection({ key: pivot, dir });
       setHighlightedWord(null);
     },
     [moveWord],

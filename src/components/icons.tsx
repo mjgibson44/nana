@@ -46,12 +46,29 @@ export function CompassIcon(props: IconProps) {
   );
 }
 
-/** An arrow bent through a right angle — the word turns, it doesn't just move. */
-export function RotateIcon(props: IconProps) {
+/**
+ * An arrow bent through a right angle — the word turns, it doesn't just move.
+ *
+ * `to` is the direction the word will end up reading, and the arrow is drawn to
+ * match: it sets off the way the word lies now and comes out pointing the way
+ * it's going, so the button shows the turn rather than just naming it.
+ */
+export function RotateIcon({ to, ...props }: IconProps & { to: 'across' | 'down' }) {
   return (
     <Svg {...props}>
-      <path d="M5 5h7a5 5 0 0 1 5 5v9" />
-      <path d="M13 15l4 4 4-4" />
+      {to === 'down' ? (
+        <>
+          {/* Runs across, then bends downward. */}
+          <path d="M5 5h7a5 5 0 0 1 5 5v9" />
+          <path d="M13 15l4 4 4-4" />
+        </>
+      ) : (
+        <>
+          {/* Runs down, then bends out to the right. */}
+          <path d="M5 5v7a5 5 0 0 0 5 5h9" />
+          <path d="M15 13l4 4-4 4" />
+        </>
+      )}
     </Svg>
   );
 }
