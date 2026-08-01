@@ -12,6 +12,17 @@ import {
   wordScore,
 } from './game/levels';
 import {
+  ENDLESS_CLEAR_TILES,
+  ENDLESS_CONNECT_BONUS,
+  ENDLESS_DRIP_SECONDS,
+  ENDLESS_DRIP_TILES,
+  ENDLESS_FIRST_CLEAR_TILES,
+  ENDLESS_INITIAL_SECONDS,
+  ENDLESS_LOOSE_LIMIT,
+  timedLevelSeconds,
+  type GameMode,
+} from './game/modes';
+import {
   GAP,
   anchorForGapTarget,
   cursorCell,
@@ -27,6 +38,8 @@ import { keyOf, parseKey } from './game/types';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
+import { HomeScreen } from './components/HomeScreen';
+import { HowToModal } from './components/HowToModal';
 import { LevelSplash } from './components/LevelSplash';
 import { Menu } from './components/Menu';
 import { PileTools } from './components/PileTools';
@@ -47,6 +60,24 @@ const SPLASH_MS = 1700;
 /** Pinch limits, as a multiple of the stylesheet's cell size. */
 const MIN_ZOOM = 0.55;
 const MAX_ZOOM = 1.6;
+
+/** Once set, the tutorial stays put — it only auto-opens on the first game. */
+const HOWTO_SEEN_KEY = 'nana.howto.v1';
+
+/** How the game came to an end — the summary's headline depends on it. */
+type EndReason = 'won' | 'timeout' | 'buried';
+
+/**
+ * The header clock. It's either counting toward a wall-clock deadline or
+ * holding a frozen remainder — frozen whenever something worth reading (the
+ * tutorial, a level splash) is covering the board, so the modes with a clock
+ * never charge for reading.
+ */
+type Countdown = { kind: 'running'; endsAt: number } | { kind: 'paused'; remainingMs: number };
+
+function runningCountdown(seconds: number): Countdown {
+  return { kind: 'running', endsAt: Date.now() + seconds * 1000 };
+}
 
 export type CellStatus = 'valid' | 'invalid' | 'isolated' | 'disconnected';
 
@@ -122,6 +153,28 @@ function shuffleArray<T>(items: T[]): T[] {
 }
 
 export default function App() {
+  /** Which screen is up: the mode-picking splash, or a game. */
+  const [screen, setScreen] = useState<'home' | 'game'>('home');
+  const [mode, setMode] = useState<GameMode>('puzzle');
+  /** Whether the how-to tutorial is up (auto on first game, or from a menu). */
+  const [showHowTo, setShowHowTo] = useState(false);
+  /** The clock, in modes that have one. Null in Solo Puzzle and once a game ends. */
+  const [countdown, setCountdown] = useState<Countdown | null>(null);
+  /** Endless: 'initial' is the opening two minutes; 'drip' is ever after,
+   * when batches arrive on the clock and the health bar is live. */
+  const [endlessPhase, setEndlessPhase] = useState<'initial' | 'drip'>('initial');
+  /** Endless: how many times the pile has been fully cleared — the first
+   * clear's reward is bigger than the rest. */
+  const [endlessClears, setEndlessClears] = useState(0);
+  /** How the finished game ended, for the summary's headline. */
+  const [endReason, setEndReason] = useState<EndReason | null>(null);
+  /** The banner riding over the board ("+3 tiles!"), keyed so repeats replay. */
+  const [toast, setToast] = useState<{ text: string; serial: number } | null>(null);
+  /** How many just-dealt tiles at the pile's end should play their landing
+   * animation, keyed like the toast. */
+  const [tileDrop, setTileDrop] = useState<{ count: number; serial: number } | null>(null);
+  const dropSerial = useRef(0);
+
   const [rack, setRack] = useState<string[]>([]);
   const [board, setBoard] = useState<TileMap>({});
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -204,7 +257,11 @@ export default function App() {
     timer = window.setTimeout(clear, 500);
   }, []);
 
-  const newGame = useCallback(() => {
+  /** A game already recorded to stats must not record again — see finishGame. */
+  const finished = useRef(false);
+
+  const newGame = useCallback((nextMode: GameMode) => {
+    setMode(nextMode);
     setRack(generatePuzzle(COMMON_WORDS, tilesAddedForLevel(1)).letters);
     setBoard({});
     setDrag(null);
@@ -221,7 +278,54 @@ export default function App() {
     setHistory([]);
     setConfirmSkip(null);
     setSplashLevel(1);
+    setEndReason(null);
+    setEndlessPhase('initial');
+    setEndlessClears(0);
+    setToast(null);
+    setTileDrop(null);
+    finished.current = false;
+    setCountdown(
+      nextMode === 'timed'
+        ? runningCountdown(timedLevelSeconds(1))
+        : nextMode === 'endless'
+          ? runningCountdown(ENDLESS_INITIAL_SECONDS)
+          : null,
+    );
     setGameId((id) => id + 1);
+  }, []);
+
+  /** Pick a mode on the splash screen and dive in. The tutorial fronts the
+   * very first game; after that a localStorage flag keeps it away. */
+  const startGame = useCallback(
+    (nextMode: GameMode) => {
+      newGame(nextMode);
+      setScreen('game');
+      let seen = false;
+      try {
+        seen = window.localStorage.getItem(HOWTO_SEEN_KEY) !== null;
+      } catch {
+        // Storage blocked — show it this time; there's nothing to remember by.
+      }
+      if (!seen) setShowHowTo(true);
+    },
+    [newGame],
+  );
+
+  const dismissHowTo = useCallback(() => {
+    setShowHowTo(false);
+    try {
+      window.localStorage.setItem(HOWTO_SEEN_KEY, String(Date.now()));
+    } catch {
+      // Storage full or blocked — it'll just show again next time.
+    }
+  }, []);
+
+  const returnHome = useCallback(() => {
+    setScreen('home');
+    setCountdown(null);
+    setShowSummary(false);
+    setConfirmSkip(null);
+    setSplashLevel(null);
   }, []);
 
   /**
@@ -244,10 +348,6 @@ export default function App() {
       return past.slice(0, -1);
     });
   }, []);
-
-  useEffect(() => {
-    newGame();
-  }, [newGame]);
 
   useEffect(() => {
     let cancelled = false;
@@ -470,8 +570,13 @@ export default function App() {
   // the bonus doesn't blink out of the scoreboard while a tile is mid-drag.
   const boardScore = useMemo(() => scoreBoard(validation, rack.length), [validation, rack.length]);
 
+  /** What "every tile placed and connected" pays right now — Endless clears
+   * are worth less than a level's all-tiles bonus, but come again and again. */
+  const allTilesBonus = mode === 'endless' ? ENDLESS_CONNECT_BONUS : ALL_TILES_BONUS;
+
   // The board's own words are counted live, so only bonuses need banking.
-  const runningScore = bankedBonus + boardScore.words + boardScore.bonus;
+  const runningScore =
+    bankedBonus + boardScore.words + (boardScore.bonusEarned ? allTilesBonus : 0);
   const totalScore = complete ? finalScore : runningScore;
 
   /**
@@ -501,8 +606,35 @@ export default function App() {
   }, []);
 
   /**
+   * The one way any game ends — win, clock, or tile overload. Freezes the
+   * board's words and score for the summary and records the game once; the
+   * ref guard keeps a double call (two effects racing) from double-counting.
+   */
+  const finishGame = useCallback(
+    (reason: EndReason) => {
+      if (finished.current) return;
+      finished.current = true;
+      // Freeze what the finished board actually said, for the summary screen.
+      const words = (validation?.runs ?? [])
+        .filter((run) => run.valid)
+        .map((run) => ({ word: run.word, points: wordScore(run.word) }));
+      setFinalScore(runningScore);
+      setFinalWords(words);
+      setComplete(true);
+      setShowSummary(true);
+      setEndReason(reason);
+      setCountdown(null);
+      setConfirmSkip(null);
+      recordGame(runningScore, words.length);
+      clearFocus();
+    },
+    [validation, runningScore, clearFocus],
+  );
+
+  /**
    * Move up a level: keep the board exactly as it stands and add the next batch
    * of tiles to the pile. Available any time, so a level can be skipped.
+   * (Solo Puzzle and Solo Timed only — Endless has no levels to move up.)
    *
    * The new letters are grown off the tiles already played, so they're known to
    * have somewhere to go on the board as it is right now.
@@ -516,16 +648,7 @@ export default function App() {
     setHistory([]);
 
     if (level >= LEVEL_COUNT) {
-      // Freeze what the finished board actually said, for the summary screen.
-      const words = (validation?.runs ?? [])
-        .filter((run) => run.valid)
-        .map((run) => ({ word: run.word, points: wordScore(run.word) }));
-      setFinalScore(runningScore);
-      setFinalWords(words);
-      setComplete(true);
-      setShowSummary(true);
-      recordGame(runningScore, words.length);
-      clearFocus();
+      finishGame('won');
       return;
     }
 
@@ -534,8 +657,11 @@ export default function App() {
     setRack((prev) => [...prev, ...dealt.letters]);
     setLevel(next);
     setSplashLevel(next);
+    // Each timed level gets its own, shorter clock. It starts paused behind
+    // the splash; the pause effect below releases it when the splash goes.
+    if (mode === 'timed') setCountdown(runningCountdown(timedLevelSeconds(next)));
     clearFocus();
-  }, [boardScore.bonusEarned, runningScore, level, board, bounds, validation, clearFocus]);
+  }, [boardScore.bonusEarned, level, board, bounds, mode, finishGame, clearFocus]);
 
   /**
    * Leaving a level by hand. Doing that while the bonus isn't earned is giving
@@ -574,14 +700,14 @@ export default function App() {
   /**
    * Finishing a level is the whole goal, so it carries the player onward by
    * itself rather than making them find a button. The short wait lets the bonus
-   * land on the scoreboard first.
+   * land on the scoreboard first. (Endless clears are handled below instead.)
    */
   useEffect(() => {
-    if (complete || !boardScore.bonusEarned) return;
+    if (mode === 'endless' || complete || !boardScore.bonusEarned) return;
     if (drag !== null || wordDrag !== null) return;
     const timer = window.setTimeout(advanceLevel, 900);
     return () => window.clearTimeout(timer);
-  }, [complete, boardScore.bonusEarned, drag, wordDrag, advanceLevel]);
+  }, [mode, complete, boardScore.bonusEarned, drag, wordDrag, advanceLevel]);
 
   // The splash announces and then gets out of the way.
   useEffect(() => {
@@ -589,6 +715,135 @@ export default function App() {
     const timer = window.setTimeout(() => setSplashLevel(null), SPLASH_MS);
     return () => window.clearTimeout(timer);
   }, [splashLevel]);
+
+  /* ------------------------------- the clock -------------------------------- */
+
+  // Anything worth reading over the board stops the clock while it's up.
+  const clockPaused = showHowTo || splashLevel !== null;
+
+  // Flip the clock between running and paused as overlays come and go. Written
+  // as normalization (rather than one effect per transition) so a countdown
+  // started behind an overlay also gets released the moment the board is clear.
+  useEffect(() => {
+    setCountdown((prev) => {
+      if (!prev) return prev;
+      if (clockPaused && prev.kind === 'running') {
+        return { kind: 'paused', remainingMs: Math.max(0, prev.endsAt - Date.now()) };
+      }
+      if (!clockPaused && prev.kind === 'paused') {
+        return { kind: 'running', endsAt: Date.now() + prev.remainingMs };
+      }
+      return prev;
+    });
+  }, [clockPaused, countdown]);
+
+  // The clock's own heartbeat: only ticks while genuinely counting down.
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (countdown?.kind !== 'running' || complete) return;
+    setClockNow(Date.now());
+    const timer = window.setInterval(() => setClockNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [countdown, complete]);
+
+  const remainingMs =
+    countdown === null
+      ? null
+      : countdown.kind === 'paused'
+        ? countdown.remainingMs
+        : Math.max(0, countdown.endsAt - clockNow);
+
+  /**
+   * Deal Endless bonus tiles into the pile — grown off the board where
+   * possible, so they always have somewhere to go — with their landing
+   * animation and a banner saying what just happened.
+   */
+  const dealBonusTiles = useCallback(
+    (count: number, message: string) => {
+      const dealt = extendPuzzle(board, bounds, COMMON_WORDS, count);
+      setRack((prev) => [...prev, ...dealt.letters]);
+      const serial = ++dropSerial.current;
+      setTileDrop({ count: dealt.letters.length, serial });
+      setToast({ text: message, serial });
+    },
+    [board, bounds],
+  );
+
+  /**
+   * The clock ran out. In Solo Timed that's the whole game; in Endless it's
+   * just the next batch of tiles arriving — and the first expiry is the end of
+   * the opening phase, which also switches the health bar on. The ref keeps
+   * one expiry from being handled twice while the new countdown state lands.
+   */
+  const expiryHandled = useRef<number | null>(null);
+  useEffect(() => {
+    if (complete || countdown?.kind !== 'running') return;
+    if (countdown.endsAt - clockNow > 0) return;
+    if (expiryHandled.current === countdown.endsAt) return;
+    expiryHandled.current = countdown.endsAt;
+
+    if (mode === 'timed') {
+      finishGame('timeout');
+      return;
+    }
+    if (mode === 'endless') {
+      dealBonusTiles(ENDLESS_DRIP_TILES, `+${ENDLESS_DRIP_TILES} tiles!`);
+      setEndlessPhase('drip');
+      setCountdown(runningCountdown(ENDLESS_DRIP_SECONDS));
+    }
+  }, [clockNow, countdown, complete, mode, finishGame, dealBonusTiles]);
+
+  /* -------------------------------- endless --------------------------------- */
+
+  /**
+   * Clearing the pile in Endless: the connect bonus banks (the live bonus
+   * swaps for it, so the score holds steady) and a reward batch arrives — a
+   * big one the first time, smaller ever after. Same short wait as a level-up,
+   * so the bonus lands on the scoreboard before the pile refills.
+   */
+  useEffect(() => {
+    if (mode !== 'endless' || complete || !boardScore.bonusEarned) return;
+    if (drag !== null || wordDrag !== null) return;
+    const timer = window.setTimeout(() => {
+      setBankedBonus((banked) => banked + ENDLESS_CONNECT_BONUS);
+      const first = endlessClears === 0;
+      setEndlessClears((clears) => clears + 1);
+      const count = first ? ENDLESS_FIRST_CLEAR_TILES : ENDLESS_CLEAR_TILES;
+      dealBonusTiles(count, `Board clear! +${ENDLESS_CONNECT_BONUS} points · +${count} tiles`);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [mode, complete, boardScore.bonusEarned, drag, wordDrag, endlessClears, dealBonusTiles]);
+
+  /**
+   * The health bar's measure: tiles not yet doing their job — still in the
+   * pile, or on the board but not part of a valid, connected word. Hit the
+   * limit once the opening phase is over and the game is lost.
+   */
+  const looseTiles = useMemo(() => {
+    let onBoard = 0;
+    for (const status of cellStatus.values()) {
+      if (status !== 'valid') onBoard++;
+    }
+    return rack.length + onBoard;
+  }, [cellStatus, rack.length]);
+
+  useEffect(() => {
+    if (mode !== 'endless' || complete || endlessPhase !== 'drip') return;
+    if (looseTiles >= ENDLESS_LOOSE_LIMIT) finishGame('buried');
+  }, [mode, complete, endlessPhase, looseTiles, finishGame]);
+
+  // Banners and landing animations clean themselves up.
+  useEffect(() => {
+    if (toast === null) return;
+    const timer = window.setTimeout(() => setToast(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    if (tileDrop === null) return;
+    const timer = window.setTimeout(() => setTileDrop(null), 1600);
+    return () => window.clearTimeout(timer);
+  }, [tileDrop]);
 
   /* ------------------------------ word controls ----------------------------- */
 
@@ -971,6 +1226,8 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // The board owns the keyboard only while it's actually being played.
+      if (screen !== 'game' || showHowTo) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
@@ -1042,6 +1299,8 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    screen,
+    showHowTo,
     interaction,
     picks,
     typeLetter,
@@ -1270,14 +1529,45 @@ export default function App() {
     };
   }, [zoom]);
 
+  const timerSeconds = remainingMs === null ? null : Math.ceil(remainingMs / 1000);
+
+  if (screen === 'home') {
+    return (
+      <div className="app">
+        <HomeScreen
+          onPlay={startGame}
+          onShowHowTo={() => setShowHowTo(true)}
+          onShowStats={() => setStatsView(loadStats())}
+        />
+        {showHowTo && <HowToModal onClose={dismissHowTo} />}
+        <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="header">
         <Scoreboard
           score={totalScore}
-          level={level}
+          level={mode === 'endless' ? null : level}
           bonusEarned={boardScore.bonusEarned && !complete}
+          bonusAmount={allTilesBonus}
           complete={complete}
+          timer={
+            timerSeconds !== null && !complete
+              ? {
+                  label: mode === 'endless' && endlessPhase === 'drip' ? 'Next tiles' : 'Time',
+                  seconds: timerSeconds,
+                  urgent: mode === 'timed' && timerSeconds <= 15,
+                }
+              : null
+          }
+          health={
+            mode === 'endless' && endlessPhase === 'drip' && !complete
+              ? { loose: looseTiles, limit: ENDLESS_LOOSE_LIMIT }
+              : null
+          }
           pops={scorePops}
           onPopEnd={endScorePop}
         />
@@ -1287,12 +1577,12 @@ export default function App() {
               className="btn btn-primary"
               onClick={(e) => {
                 e.currentTarget.blur();
-                newGame();
+                newGame(mode);
               }}
             >
               Play again
             </button>
-          ) : (
+          ) : mode !== 'endless' ? (
             <button
               className="btn btn-primary"
               onClick={(e) => {
@@ -1308,14 +1598,23 @@ export default function App() {
                 </>
               )}
             </button>
-          )}
+          ) : null}
           <Menu
-            onNewGame={newGame}
+            onResetGame={() => newGame(mode)}
+            onShowHowTo={() => setShowHowTo(true)}
             onShowStats={() => setStatsView(loadStats())}
             onShowSummary={complete ? () => setShowSummary(true) : null}
+            onReturnHome={returnHome}
           />
         </div>
       </header>
+
+      {/* The tile-drop banner: announces new tiles the moment they land. */}
+      {toast && (
+        <div key={toast.serial} className="game-toast" role="status">
+          {toast.text}
+        </div>
+      )}
 
       {/* The zoom rides on a CSS variable so only the tiles resize. */}
       <div
@@ -1396,6 +1695,7 @@ export default function App() {
         letters={rack}
         hiddenIndex={drag?.source.type === 'rack' ? drag.source.index : null}
         picks={picks}
+        justAdded={tileDrop?.count ?? 0}
         onTilePointerDown={(index, letter, e) => startDrag(letter, { type: 'rack', index }, e)}
       />
 
@@ -1428,16 +1728,32 @@ export default function App() {
         </div>
       )}
 
-      <LevelSplash level={splashLevel} onDismiss={() => setSplashLevel(null)} />
+      <LevelSplash level={splashLevel} mode={mode} onDismiss={() => setSplashLevel(null)} />
 
       {showSummary && (
         <GameSummary
           words={finalWords}
           score={totalScore}
-          onPlayAgain={newGame}
+          eyebrow={
+            endReason === 'timeout'
+              ? 'Time’s up'
+              : endReason === 'buried'
+                ? 'Game over'
+                : 'Game finished'
+          }
+          title={
+            endReason === 'timeout'
+              ? '⏱️ Out of time!'
+              : endReason === 'buried'
+                ? '🫠 Buried in tiles!'
+                : '🍌 Well played!'
+          }
+          onPlayAgain={() => newGame(mode)}
           onClose={() => setShowSummary(false)}
         />
       )}
+
+      {showHowTo && <HowToModal onClose={dismissHowTo} />}
 
       <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
 
