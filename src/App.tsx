@@ -807,9 +807,6 @@ export default function App() {
     setInteraction((prev) => withPicks(prev, [...picksOf(prev), GAP]));
   }, []);
 
-  const cancelWord = useCallback(() => {
-    setInteraction(IDLE);
-  }, []);
 
   /** Drop the planned tiles onto the board and spend the pile letters they used. */
   const commit = useCallback(
@@ -1013,16 +1010,11 @@ export default function App() {
       }
 
       if (e.key === 'Escape') {
-        // Selecting a letter also anchors its cell, so one press has to drop
-        // both — otherwise the arrows would linger after the ring went away.
-        if (selection) {
-          e.preventDefault();
-          clearFocus();
-          return;
-        }
-        if (interaction.kind === 'idle') return;
+        // One press drops everything at once — selection ring, anchored cell
+        // and staged word — so nothing lingers after the escape.
+        if (!selection && interaction.kind === 'idle') return;
         e.preventDefault();
-        cancelWord();
+        clearFocus();
         return;
       }
 
@@ -1054,7 +1046,6 @@ export default function App() {
     picks,
     typeLetter,
     setPicks,
-    cancelWord,
     commit,
     selection,
     deleteSelected,
@@ -1380,7 +1371,7 @@ export default function App() {
           plan.steps.length > 0
         }
         onRemove={(position) => setPicks(picks.filter((_, i) => i !== position))}
-        onCancel={cancelWord}
+        onCancel={clearFocus}
         onConfirm={() => {
           if (target) commit(target.key, target.dir);
         }}
