@@ -171,6 +171,13 @@ body {
   gap: 8px;
 }
 
+/* Match the menu button's height so the header row lines up. */
+.header-actions .btn {
+  height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .btn {
   border: 2px solid #c9a52c;
   background: #fff3c4;
