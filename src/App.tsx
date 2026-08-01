@@ -1897,10 +1897,12 @@ export default function App() {
           plan.complete &&
           plan.steps.length > 0
         }
+        canCancel={interaction.kind !== 'idle' || selectedKey !== null}
         onRemove={(position) => setPicks(picks.filter((_, i) => i !== position))}
         onConfirm={() => {
           if (target) commit(target.key, target.dir);
         }}
+        onCancel={clearFocus}
         tools={
           <PileTools
             onUndo={undo}

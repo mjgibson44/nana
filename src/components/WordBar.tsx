@@ -1,5 +1,5 @@
 import type { WordVerdict } from '../App';
-import { CheckIcon } from './icons';
+import { CheckIcon, CloseIcon } from './icons';
 
 interface WordBarProps {
   /** Staged letters in the order they were typed; null for a gap tile. */
@@ -18,8 +18,13 @@ interface WordBarProps {
   /** True when confirming would really place the word: a cell is chosen and
    * every letter and gap has found its square. */
   canConfirm: boolean;
+  /** True while there is anything to walk away from: staged letters, an
+   * anchored cell, or a selected tile on the board. */
+  canCancel: boolean;
   onRemove: (position: number) => void;
   onConfirm: () => void;
+  /** Drop everything in progress — staged word, cell focus and selection. */
+  onCancel: () => void;
   /** The pile's own tools, sharing this row rather than having one of their own. */
   tools?: React.ReactNode;
 }
@@ -30,8 +35,10 @@ export function WordBar({
   overflowed,
   verdict,
   canConfirm,
+  canCancel,
   onRemove,
   onConfirm,
+  onCancel,
   tools,
 }: WordBarProps) {
   // Overflow is the more urgent problem, so it owns the bar's colour.
@@ -67,6 +74,17 @@ export function WordBar({
 
       <div className="word-bar-actions">
         {tools}
+        <span className="word-bar-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className="icon-btn icon-btn-cancel"
+          disabled={!canCancel}
+          onClick={onCancel}
+          title="Cancel — clear the word and selection (or press Escape)"
+          aria-label="Cancel the word and selection"
+        >
+          <CloseIcon />
+        </button>
         <button
           type="button"
           className="icon-btn icon-btn-confirm"
