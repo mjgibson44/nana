@@ -1,5 +1,5 @@
 import type { WordVerdict } from '../App';
-import { CheckIcon, CloseIcon } from './icons';
+import { CheckIcon } from './icons';
 
 interface WordBarProps {
   /** Staged letters in the order they were typed; null for a gap tile. */
@@ -20,7 +20,6 @@ interface WordBarProps {
   canConfirm: boolean;
   onRemove: (position: number) => void;
   onConfirm: () => void;
-  onCancel: () => void;
   /** The pile's own tools, sharing this row rather than having one of their own. */
   tools?: React.ReactNode;
 }
@@ -33,7 +32,6 @@ export function WordBar({
   canConfirm,
   onRemove,
   onConfirm,
-  onCancel,
   tools,
 }: WordBarProps) {
   // Overflow is the more urgent problem, so it owns the bar's colour.
@@ -69,17 +67,6 @@ export function WordBar({
 
       <div className="word-bar-actions">
         {tools}
-        <span className="word-bar-divider" aria-hidden="true" />
-        <button
-          type="button"
-          className="icon-btn icon-btn-cancel"
-          disabled={mode === 'idle'}
-          onClick={onCancel}
-          title="Cancel this word (or press Escape)"
-          aria-label="Cancel this word"
-        >
-          <CloseIcon />
-        </button>
         <button
           type="button"
           className="icon-btn icon-btn-confirm"

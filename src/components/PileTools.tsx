@@ -23,9 +23,9 @@ interface PileToolsProps {
 
 /**
  * The tools that act on the pile and the word being built. They share the word
- * bar's row with confirm and cancel, since all of them are used in the same
- * breath while building a word: undo, then shuffle, then the word's own tools,
- * each group fenced off by a divider.
+ * bar's row with confirm, since all of them are used in the same breath while
+ * building a word: undo, then shuffle, then the gap, then the word's own tools
+ * closest to confirm, each group fenced off by a divider.
  */
 export function PileTools({
   onUndo,
@@ -76,16 +76,17 @@ export function PileTools({
       <button
         type="button"
         className="icon-btn"
-        title="Remove the last letter (or press Backspace)"
-        aria-label="Remove the last letter"
-        disabled={!canBackspace}
+        title="Add a gap tile (or press space) — it sits on a letter already on the board"
+        aria-label="Add a gap tile"
         onClick={(e) => {
           e.currentTarget.blur();
-          onBackspace();
+          onAddGap();
         }}
       >
-        <BackspaceIcon />
+        <GapIcon />
       </button>
+
+      <span className="word-bar-divider" aria-hidden="true" />
 
       <button
         type="button"
@@ -104,14 +105,15 @@ export function PileTools({
       <button
         type="button"
         className="icon-btn"
-        title="Add a gap tile (or press space) — it sits on a letter already on the board"
-        aria-label="Add a gap tile"
+        title="Remove the last letter (or press Backspace)"
+        aria-label="Remove the last letter"
+        disabled={!canBackspace}
         onClick={(e) => {
           e.currentTarget.blur();
-          onAddGap();
+          onBackspace();
         }}
       >
-        <GapIcon />
+        <BackspaceIcon />
       </button>
     </div>
   );
