@@ -1,4 +1,6 @@
 import { MIN_WORD_LENGTH, type BoardValidation } from './board';
+import type { Bounds, TileMap } from './types';
+import { parseKey } from './types';
 
 /**
  * Levels and scoring.
@@ -36,14 +38,38 @@ export function tilesAddedForLevel(level: number): number {
 }
 
 /**
- * One board, one size, for the whole game.
- *
- * It can't be sized per level any more: the board is never cleared, so it must
- * never shrink under tiles already played, and by level five it has to hold all
- * 60 of them. Generated 60-tile crosswords span up to 28 squares, so this
- * leaves room to spread wider than the tightest arrangement would.
+ * The board a game starts on. It never shrinks below this, but it isn't a
+ * hard limit either — see `boardBounds`.
  */
 export const BOARD_SIZE = 33;
+
+/**
+ * How much open board is kept beyond the outermost tile. Matches the longest
+ * word the generator deals, so a word laid from the very edge outward still
+ * has room to land.
+ */
+export const GROW_MARGIN = 8;
+
+/**
+ * The rectangle of cells in play: the starting board, grown wherever tiles
+ * have come within `GROW_MARGIN` of its edge. Play toward any side and the
+ * board quietly gets bigger there — running out of room stops being possible.
+ * Rows and columns can go negative; cell keys don't mind.
+ */
+export function boardBounds(board: TileMap): Bounds {
+  let minRow = 0;
+  let minCol = 0;
+  let maxRow = BOARD_SIZE - 1;
+  let maxCol = BOARD_SIZE - 1;
+  for (const key of Object.keys(board)) {
+    const { row, col } = parseKey(key);
+    if (row - GROW_MARGIN < minRow) minRow = row - GROW_MARGIN;
+    if (col - GROW_MARGIN < minCol) minCol = col - GROW_MARGIN;
+    if (row + GROW_MARGIN > maxRow) maxRow = row + GROW_MARGIN;
+    if (col + GROW_MARGIN > maxCol) maxCol = col + GROW_MARGIN;
+  }
+  return { minRow, minCol, maxRow, maxCol };
+}
 
 /**
  * Points for one word, triangular in its length so longer words are worth

@@ -4,6 +4,9 @@ import type { TileMap } from '../types';
 import { keyOf } from '../types';
 import {
   ALL_TILES_BONUS,
+  BOARD_SIZE,
+  GROW_MARGIN,
+  boardBounds,
   scoreBoard,
   tilesAddedForLevel,
   tilesForLevel,
@@ -25,6 +28,52 @@ describe('tilesForLevel', () => {
       dealt += tilesAddedForLevel(level);
       expect(dealt).toBe(tilesForLevel(level));
     }
+  });
+});
+
+describe('boardBounds', () => {
+  const START = {
+    minRow: 0,
+    minCol: 0,
+    maxRow: BOARD_SIZE - 1,
+    maxCol: BOARD_SIZE - 1,
+  };
+
+  it('is the starting board while it is empty', () => {
+    expect(boardBounds({})).toEqual(START);
+  });
+
+  it('stays put while tiles keep their distance from every edge', () => {
+    expect(boardBounds({ '16,16': 'a' })).toEqual(START);
+  });
+
+  it('grows past an edge a tile has come close to', () => {
+    // A tile on the top edge pushes the board GROW_MARGIN rows above it.
+    expect(boardBounds({ '0,16': 'a' })).toEqual({ ...START, minRow: -GROW_MARGIN });
+  });
+
+  it('keeps growing as tiles follow the edge outward', () => {
+    // Play onto the new rows and the board recedes again.
+    expect(boardBounds({ '-5,16': 'a' })).toEqual({ ...START, minRow: -5 - GROW_MARGIN });
+  });
+
+  it('grows in every direction at once', () => {
+    const board = { '0,0': 'a', [`${BOARD_SIZE - 1},${BOARD_SIZE - 1}`]: 'b' };
+    expect(boardBounds(board)).toEqual({
+      minRow: -GROW_MARGIN,
+      minCol: -GROW_MARGIN,
+      maxRow: BOARD_SIZE - 1 + GROW_MARGIN,
+      maxCol: BOARD_SIZE - 1 + GROW_MARGIN,
+    });
+  });
+
+  it('always leaves at least the margin of open board beyond every tile', () => {
+    const board = { '2,30': 'a', '31,4': 'b' };
+    const bounds = boardBounds(board);
+    expect(bounds.minRow).toBeLessThanOrEqual(2 - GROW_MARGIN);
+    expect(bounds.maxCol).toBeGreaterThanOrEqual(30 + GROW_MARGIN);
+    expect(bounds.maxRow).toBeGreaterThanOrEqual(31 + GROW_MARGIN);
+    expect(bounds.minCol).toBeLessThanOrEqual(4 - GROW_MARGIN);
   });
 });
 

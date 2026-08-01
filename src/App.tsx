@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MIN_WORD_LENGTH, extractRuns, validateBoard } from './game/board';
 import { COMMON_WORDS } from './game/commonWords';
 import { loadDictionary } from './game/dictionary';
 import { extendPuzzle, generatePuzzle } from './game/generator';
 import {
   ALL_TILES_BONUS,
-  BOARD_SIZE,
   LEVEL_COUNT,
+  boardBounds,
   scoreBoard,
   tilesAddedForLevel,
+  wordScore,
 } from './game/levels';
 import {
   GAP,
@@ -19,15 +20,19 @@ import {
   planWordCells,
   startableDirections,
 } from './game/placement';
+import { loadStats, recordGame, type Stats } from './game/stats';
 import type { CellKey, Direction, TileMap } from './game/types';
 import { keyOf, parseKey } from './game/types';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
+import { UndoIcon } from './components/icons';
 import { LevelSplash } from './components/LevelSplash';
 import { Menu } from './components/Menu';
 import { PileTools } from './components/PileTools';
 import { Rack } from './components/Rack';
 import { Scoreboard } from './components/Scoreboard';
+import { StatsPage } from './components/StatsPage';
 import { WordBar } from './components/WordBar';
 
 /** Pointer travel under this (px) counts as a tap, not a drag. */
@@ -147,6 +152,12 @@ export default function App() {
   const [complete, setComplete] = useState(false);
   /** Frozen at the moment the last level is finished, so "final" means final. */
   const [finalScore, setFinalScore] = useState(0);
+  /** The finished board's words and points, frozen alongside the score. */
+  const [finalWords, setFinalWords] = useState<ScoredWord[] | null>(null);
+  /** Whether the full-screen finish summary is up. */
+  const [showSummary, setShowSummary] = useState(false);
+  /** The stats being looked at, or null while the stats page is closed. */
+  const [statsView, setStatsView] = useState<Stats | null>(null);
   /**
    * Board-and-pile snapshots, oldest first, for undo. Only play is recorded —
    * changing level or starting over wipes it, so undo never rewinds a level.
@@ -184,6 +195,9 @@ export default function App() {
     setLevel(1);
     setBankedBonus(0);
     setComplete(false);
+    setFinalScore(0);
+    setFinalWords(null);
+    setShowSummary(false);
     setHistory([]);
     setConfirmSkip(null);
     setSplashLevel(1);
@@ -243,6 +257,26 @@ export default function App() {
     [board, dictionary],
   );
 
+  /** The cells in play. Grows whenever tiles come near an edge, so the board
+   * can never actually be run out of. */
+  const bounds = useMemo(() => boardBounds(board), [board]);
+
+  // Growing at the top or left prepends rows and columns, which would shove
+  // the tiles the player is looking at down and across the screen. Nudge the
+  // scroll by the same amount so the board doesn't appear to move at all.
+  const boardOrigin = useRef<{ row: number; col: number } | null>(null);
+  useLayoutEffect(() => {
+    const wrap = boardWrapRef.current;
+    const prev = boardOrigin.current;
+    boardOrigin.current = { row: bounds.minRow, col: bounds.minCol };
+    if (!wrap || !prev) return;
+    const cell = wrap.querySelector('[data-cell]') as HTMLElement | null;
+    if (!cell) return;
+    const step = cell.offsetWidth + 1; // +1 for the grid's hairline gap
+    if (prev.row !== bounds.minRow) wrap.scrollTop += (prev.row - bounds.minRow) * step;
+    if (prev.col !== bounds.minCol) wrap.scrollLeft += (prev.col - bounds.minCol) * step;
+  }, [bounds.minRow, bounds.minCol]);
+
   /**
    * What each tile should be showing. Worst problem wins, so a tile is only
    * shown as adrift once it actually spells something: not-a-word (red) beats
@@ -286,7 +320,7 @@ export default function App() {
   const assumeDir = useCallback(
     (key: CellKey): Direction | null => {
       const cell = parseKey(key);
-      const startable = startableDirections(board, BOARD_SIZE, cell);
+      const startable = startableDirections(board, bounds, cell);
       if (startable.length === 0) return null;
 
       const implied = impliedDirections(board, cell).filter((dir) => startable.includes(dir));
@@ -294,7 +328,7 @@ export default function App() {
       const choices = implied.length > 0 ? implied : startable;
       return choices.includes(lastDir) ? lastDir : choices[0];
     },
-    [board, lastDir],
+    [board, bounds, lastDir],
   );
 
   /**
@@ -332,12 +366,12 @@ export default function App() {
   /** Only offer to rotate when the cell genuinely could go either way. */
   const canRotateAnchor =
     interaction.kind === 'place' &&
-    startableDirections(board, BOARD_SIZE, parseKey(interaction.anchor)).length > 1;
+    startableDirections(board, bounds, parseKey(interaction.anchor)).length > 1;
 
   const plan = useMemo(() => {
     if (!target || pickList.length === 0) return null;
-    return planPlacement(board, BOARD_SIZE, parseKey(target.key), target.dir, pickList);
-  }, [target, board, pickList]);
+    return planPlacement(board, bounds, parseKey(target.key), target.dir, pickList);
+  }, [target, board, bounds, pickList]);
 
   const preview = useMemo(() => {
     const map = new Map<CellKey, string>();
@@ -359,9 +393,9 @@ export default function App() {
   const cursorKey = useMemo(
     () =>
       interaction.kind === 'place'
-        ? cursorCell(board, BOARD_SIZE, parseKey(interaction.anchor), interaction.dir, pickList)
+        ? cursorCell(board, bounds, parseKey(interaction.anchor), interaction.dir, pickList)
         : null,
-    [interaction, board, pickList],
+    [interaction, board, bounds, pickList],
   );
 
   /**
@@ -436,20 +470,26 @@ export default function App() {
     setHistory([]);
 
     if (level >= LEVEL_COUNT) {
+      // Freeze what the finished board actually said, for the summary screen.
+      const words = (validation?.runs ?? [])
+        .filter((run) => run.valid)
+        .map((run) => ({ word: run.word, points: wordScore(run.word) }));
       setFinalScore(runningScore);
+      setFinalWords(words);
       setComplete(true);
-      setSplashLevel(level);
+      setShowSummary(true);
+      recordGame(runningScore, words.length);
       clearFocus();
       return;
     }
 
     const next = level + 1;
-    const dealt = extendPuzzle(board, BOARD_SIZE, COMMON_WORDS, tilesAddedForLevel(next));
+    const dealt = extendPuzzle(board, bounds, COMMON_WORDS, tilesAddedForLevel(next));
     setRack((prev) => [...prev, ...dealt.letters]);
     setLevel(next);
     setSplashLevel(next);
     clearFocus();
-  }, [boardScore.bonusEarned, runningScore, level, board, clearFocus]);
+  }, [boardScore.bonusEarned, runningScore, level, board, bounds, validation, clearFocus]);
 
   /**
    * Leaving a level by hand. With tiles still in the pile that's giving up on
@@ -510,13 +550,13 @@ export default function App() {
     (word: BoardWord) =>
       planWordCells(
         board,
-        BOARD_SIZE,
+        bounds,
         word.cells.length,
         new Set(word.cells),
         word.direction === 'across' ? 'down' : 'across',
         parseKey(word.cells[0]),
       ) !== null,
-    [board],
+    [board, bounds],
   );
 
   /** Move a word's tiles so its first letter lands on `start`. */
@@ -525,7 +565,7 @@ export default function App() {
       const own = new Set(word.cells);
       const targets = planWordCells(
         board,
-        BOARD_SIZE,
+        bounds,
         word.cells.length,
         own,
         dir,
@@ -546,7 +586,7 @@ export default function App() {
       });
       return true;
     },
-    [board, remember],
+    [board, bounds, remember],
   );
 
   /**
@@ -742,7 +782,7 @@ export default function App() {
   const commit = useCallback(
     (anchor: CellKey, dir: Direction) => {
       if (pickList.length === 0) return;
-      const result = planPlacement(board, BOARD_SIZE, parseKey(anchor), dir, pickList);
+      const result = planPlacement(board, bounds, parseKey(anchor), dir, pickList);
       if (result.steps.length === 0 || !result.complete) return;
 
       remember();
@@ -756,7 +796,7 @@ export default function App() {
       setLastDir(dir);
       setInteraction(IDLE);
     },
-    [board, pickList, remember],
+    [board, bounds, pickList, remember],
   );
 
   /** Flip the chosen cell between across and down, and remember the new way. */
@@ -768,6 +808,19 @@ export default function App() {
       return { ...prev, dir };
     });
   }, []);
+
+  /**
+   * The Backspace key as a button, for players without one under their thumb:
+   * a selected tile on the board goes first, otherwise the last staged letter
+   * comes back.
+   */
+  const backspace = useCallback(() => {
+    if (selection && board[selection.key] !== undefined) {
+      deleteSelected('back');
+      return;
+    }
+    if (picks.length > 0) setPicks(picks.slice(0, -1));
+  }, [selection, board, deleteSelected, picks, setPicks]);
 
   const onCellClick = useCallback(
     (key: CellKey) => {
@@ -867,7 +920,7 @@ export default function App() {
       if (interaction.kind === 'place') {
         const dir: Direction | null =
           e.key === 'ArrowRight' ? 'across' : e.key === 'ArrowDown' ? 'down' : null;
-        if (dir && startableDirections(board, BOARD_SIZE, parseKey(interaction.anchor)).includes(dir)) {
+        if (dir && startableDirections(board, bounds, parseKey(interaction.anchor)).includes(dir)) {
           e.preventDefault();
           setLastDir(dir);
           setInteraction((prev) => (prev.kind === 'place' ? { ...prev, dir } : prev));
@@ -889,6 +942,7 @@ export default function App() {
     target,
     clearFocus,
     board,
+    bounds,
     addGap,
   ]);
 
@@ -1122,6 +1176,23 @@ export default function App() {
           complete={complete}
         />
         <div className="header-actions">
+          {!complete && (
+            <button
+              type="button"
+              className="icon-btn"
+              title="Undo the last move"
+              aria-label="Undo the last move"
+              disabled={history.length === 0}
+              // A click leaves the button focused, which would steal Space and
+              // Enter from the word being built.
+              onClick={(e) => {
+                e.currentTarget.blur();
+                undo();
+              }}
+            >
+              <UndoIcon />
+            </button>
+          )}
           {complete ? (
             <button
               className="btn btn-primary"
@@ -1149,7 +1220,11 @@ export default function App() {
               )}
             </button>
           )}
-          <Menu onNewGame={newGame} />
+          <Menu
+            onNewGame={newGame}
+            onShowStats={() => setStatsView(loadStats())}
+            onShowSummary={complete ? () => setShowSummary(true) : null}
+          />
         </div>
       </header>
 
@@ -1160,7 +1235,7 @@ export default function App() {
         style={{ '--zoom': zoom } as React.CSSProperties}
       >
         <Grid
-          size={BOARD_SIZE}
+          bounds={bounds}
           board={board}
           cellStatus={cellStatus}
           hiddenKeys={hiddenKeys}
@@ -1208,8 +1283,13 @@ export default function App() {
         }}
         tools={
           <PileTools
-            onUndo={undo}
-            canUndo={history.length > 0}
+            onBackspace={backspace}
+            canBackspace={selectedKey !== null || picks.length > 0}
+            onRotate={rotateDirection}
+            canRotate={canRotateAnchor}
+            rotateTo={
+              interaction.kind === 'place' && interaction.dir === 'across' ? 'down' : 'across'
+            }
             onShuffle={shufflePile}
             onAddGap={addGap}
           />
@@ -1252,12 +1332,18 @@ export default function App() {
         </div>
       )}
 
-      <LevelSplash
-        level={splashLevel}
-        complete={complete}
-        finalScore={totalScore}
-        onDismiss={() => setSplashLevel(null)}
-      />
+      <LevelSplash level={splashLevel} onDismiss={() => setSplashLevel(null)} />
+
+      {showSummary && (
+        <GameSummary
+          words={finalWords}
+          score={totalScore}
+          onPlayAgain={newGame}
+          onClose={() => setShowSummary(false)}
+        />
+      )}
+
+      <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
 
       <ConfirmDialog
         message={confirmSkip}

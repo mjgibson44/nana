@@ -3,10 +3,13 @@ import { MenuIcon } from './icons';
 
 interface MenuProps {
   onNewGame: () => void;
+  onShowStats: () => void;
+  /** Reopen the final-score breakdown; null while the game is still going. */
+  onShowSummary: (() => void) | null;
 }
 
 /** Header menu for the actions that aren't part of playing a turn. */
-export function Menu({ onNewGame }: MenuProps) {
+export function Menu({ onNewGame, onShowStats, onShowSummary }: MenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -55,6 +58,30 @@ export function Menu({ onNewGame }: MenuProps) {
             }}
           >
             New game
+          </button>
+          {onShowSummary && (
+            <button
+              type="button"
+              className="menu-item"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onShowSummary();
+              }}
+            >
+              Final score
+            </button>
+          )}
+          <button
+            type="button"
+            className="menu-item"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onShowStats();
+            }}
+          >
+            Stats
           </button>
         </div>
       )}

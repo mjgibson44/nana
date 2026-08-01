@@ -1,5 +1,5 @@
-import type { Cell, CellKey, Direction, TileMap } from './types';
-import { keyOf } from './types';
+import type { Bounds, Cell, CellKey, Direction, TileMap } from './types';
+import { asBounds, inBounds, keyOf } from './types';
 
 /** Rack index standing for a gap tile, which comes from no pile letter. */
 export const GAP = -1;
@@ -51,17 +51,18 @@ export interface PlacementPlan {
  */
 export function planPlacement(
   board: TileMap,
-  size: number,
+  size: number | Bounds,
   anchor: Cell,
   dir: Direction,
   picks: Pick[],
 ): PlacementPlan {
+  const bounds = asBounds(size);
   const steps: PlacementStep[] = [];
   const unfilledGaps: CellKey[] = [];
   let { row, col } = anchor;
   let i = 0;
 
-  while (i < picks.length && row >= 0 && col >= 0 && row < size && col < size) {
+  while (i < picks.length && inBounds(bounds, row, col)) {
     const key = keyOf(row, col);
     const occupied = board[key] !== undefined;
     const pick = picks[i];
@@ -97,17 +98,18 @@ export function planPlacement(
  */
 export function planWordCells(
   board: TileMap,
-  size: number,
+  size: number | Bounds,
   length: number,
   own: ReadonlySet<CellKey>,
   dir: Direction,
   start: Cell,
 ): CellKey[] | null {
+  const bounds = asBounds(size);
   const cells: CellKey[] = [];
   for (let i = 0; i < length; i++) {
     const row = dir === 'down' ? start.row + i : start.row;
     const col = dir === 'across' ? start.col + i : start.col;
-    if (row < 0 || col < 0 || row >= size || col >= size) return null;
+    if (!inBounds(bounds, row, col)) return null;
     const key = keyOf(row, col);
     if (board[key] !== undefined && !own.has(key)) return null;
     cells.push(key);
@@ -128,13 +130,18 @@ export function planWordCells(
  * land somewhere unexpected. Such a cell offers nothing, and can only be read
  * or emptied rather than built on.
  */
-export function startableDirections(board: TileMap, size: number, cell: Cell): Direction[] {
+export function startableDirections(
+  board: TileMap,
+  size: number | Bounds,
+  cell: Cell,
+): Direction[] {
+  const bounds = asBounds(size);
   const { row, col } = cell;
   if (board[keyOf(row, col)] === undefined) return ['across', 'down'];
 
   const dirs: Direction[] = [];
-  if (col + 1 < size && board[keyOf(row, col + 1)] === undefined) dirs.push('across');
-  if (row + 1 < size && board[keyOf(row + 1, col)] === undefined) dirs.push('down');
+  if (col + 1 <= bounds.maxCol && board[keyOf(row, col + 1)] === undefined) dirs.push('across');
+  if (row + 1 <= bounds.maxRow && board[keyOf(row + 1, col)] === undefined) dirs.push('down');
   return dirs;
 }
 
@@ -162,15 +169,16 @@ export function impliedDirections(board: TileMap, cell: Cell): Direction[] {
  */
 export function cursorCell(
   board: TileMap,
-  size: number,
+  size: number | Bounds,
   anchor: Cell,
   dir: Direction,
   picks: Pick[],
 ): CellKey | null {
+  const bounds = asBounds(size);
   let { row, col } = anchor;
   let i = 0;
 
-  while (row >= 0 && col >= 0 && row < size && col < size) {
+  while (inBounds(bounds, row, col)) {
     const key = keyOf(row, col);
     const occupied = board[key] !== undefined;
 
