@@ -23,7 +23,13 @@ export interface PlacementStep {
 
 export interface PlacementPlan {
   steps: PlacementStep[];
-  /** True when every pick found an empty cell before running off the grid. */
+  /**
+   * Cells where a gap tile came down on an empty square, with no letter under it
+   * to stand on. The word is still laid out around them so the player can see
+   * the shape they're aiming, but it can't be played until they're all covered.
+   */
+  unfilledGaps: CellKey[];
+  /** True when every pick found a home and the word stayed on the grid. */
   complete: boolean;
 }
 
@@ -35,10 +41,13 @@ export interface PlacementPlan {
  * That makes typing a word straight through an existing crossing work the way it
  * does on a real board.
  *
- * A gap pick is the explicit version of the same thing — it claims one tile
- * that's already there. If the cell it reaches is empty there is nothing for it
- * to stand on, so the plan stops short and comes back `complete: false`, as it
- * also does when the word runs off the edge of the grid.
+ * A gap pick is the explicit version of the same thing — it claims one square,
+ * expecting a letter to already be sitting there. When that square turns out to
+ * be empty the gap still claims it and the rest of the word carries on past it,
+ * so the whole shape stays visible while it's being aimed; the empty square is
+ * reported in `unfilledGaps` and the plan is not `complete`, which is what stops
+ * it being played. Running off the edge of the grid likewise leaves it
+ * incomplete, with only the picks that fitted.
  */
 export function planPlacement(
   board: TileMap,
@@ -48,6 +57,7 @@ export function planPlacement(
   picks: Pick[],
 ): PlacementPlan {
   const steps: PlacementStep[] = [];
+  const unfilledGaps: CellKey[] = [];
   let { row, col } = anchor;
   let i = 0;
 
@@ -57,8 +67,8 @@ export function planPlacement(
     const pick = picks[i];
 
     if (pick.letter === null) {
-      // A gap has to sit on a letter that's already down.
-      if (!occupied) return { steps, complete: false };
+      // A gap takes this square either way; it just needs a letter under it.
+      if (!occupied) unfilledGaps.push(key);
       i++;
     } else if (!occupied) {
       steps.push({ key, letter: pick.letter, rackIndex: pick.rackIndex });
@@ -69,7 +79,11 @@ export function planPlacement(
     else row++;
   }
 
-  return { steps, complete: i === picks.length };
+  return {
+    steps,
+    unfilledGaps,
+    complete: i === picks.length && unfilledGaps.length === 0,
+  };
 }
 
 /**
@@ -164,8 +178,7 @@ export function cursorCell(
       // Everything staged is placed; the next letter goes in the next free cell.
       if (!occupied) return key;
     } else if (picks[i].letter === null) {
-      // A gap with no letter under it: that's the problem to look at.
-      if (!occupied) return key;
+      // A gap holds its square whether or not a letter is under it yet.
       i++;
     } else if (!occupied) {
       i++;

@@ -12,6 +12,8 @@ interface GridProps {
   hiddenKeys: Set<CellKey>;
   /** Letters that would land if the current word were committed. */
   preview: Map<CellKey, string>;
+  /** Squares a gap tile is holding open, still waiting for a letter under it. */
+  previewGaps: Set<CellKey>;
   /** The square the next letter will land on, if a word is being built. */
   cursorKey: CellKey | null;
   /** The direction that word is being laid in. */
@@ -47,6 +49,7 @@ export const Grid = memo(function Grid({
   cellStatus,
   hiddenKeys,
   preview,
+  previewGaps,
   cursorKey,
   cursorDir,
   showRotate,
@@ -101,6 +104,12 @@ export const Grid = memo(function Grid({
 
           {letter === undefined && ghost !== undefined && (
             <div className="tile board-tile tile-preview">{ghost}</div>
+          )}
+
+          {/* A gap waiting on a letter: drawn as the hole it is, so the word's
+              whole shape is visible while it's being lined up. */}
+          {letter === undefined && ghost === undefined && previewGaps.has(key) && (
+            <div className="tile board-tile tile-preview tile-preview-gap" />
           )}
 
           {inWords && key === openWordCell && (

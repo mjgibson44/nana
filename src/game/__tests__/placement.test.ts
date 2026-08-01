@@ -27,6 +27,7 @@ describe('planPlacement with gap tiles', () => {
     const board: TileMap = { '2,4': 'l' };
     const plan = planPlacement(board, 10, { row: 2, col: 2 }, 'across', picksWithGaps('so.ar'));
     expect(plan.complete).toBe(true);
+    expect(plan.unfilledGaps).toEqual([]);
     // The gap places nothing — the L was already there.
     expect(plan.steps.map((s) => `${s.letter}@${s.key}`)).toEqual([
       's@2,2',
@@ -36,15 +37,31 @@ describe('planPlacement with gap tiles', () => {
     ]);
   });
 
-  it('refuses a gap that lands on an empty cell', () => {
-    // Nothing at 2,4 for the gap to stand on.
+  it('still lays out the whole word when a gap has nothing under it', () => {
+    // Nothing at 2,4 for the gap to stand on, but the word must stay visible so
+    // it can be lined up — it just can't be played yet.
     const plan = planPlacement({}, 10, { row: 2, col: 2 }, 'across', picksWithGaps('so.ar'));
     expect(plan.complete).toBe(false);
-    expect(plan.steps.map((s) => s.letter)).toEqual(['s', 'o']);
+    expect(plan.unfilledGaps).toEqual(['2,4']);
+    // Every letter is placed, and the gap holds its own square in the middle.
+    expect(plan.steps.map((s) => `${s.letter}@${s.key}`)).toEqual([
+      's@2,2',
+      'o@2,3',
+      'a@2,5',
+      'r@2,6',
+    ]);
+  });
+
+  it('reports every gap left uncovered', () => {
+    const plan = planPlacement({}, 10, { row: 2, col: 2 }, 'across', picksWithGaps('s.a.r'));
+    expect(plan.unfilledGaps).toEqual(['2,3', '2,5']);
+    expect(plan.complete).toBe(false);
+    expect(plan.steps.map((s) => s.key)).toEqual(['2,2', '2,4', '2,6']);
   });
 
   it('refuses a gap that misses the letter it was aimed at', () => {
-    // The L is one cell further along than the gap reaches.
+    // The L is one cell further along than the gap reaches, so the gap comes
+    // down on an empty square and the L gets flowed over instead.
     const plan = planPlacement(
       { '2,5': 'l' },
       10,
@@ -53,6 +70,7 @@ describe('planPlacement with gap tiles', () => {
       picksWithGaps('so.ar'),
     );
     expect(plan.complete).toBe(false);
+    expect(plan.unfilledGaps).toEqual(['2,4']);
   });
 
   it('still flows letters over existing tiles without a gap', () => {
@@ -112,6 +130,14 @@ describe('cursorCell', () => {
 
   it('comes back null once the word runs off the grid', () => {
     expect(cursorCell({}, 4, { row: 0, col: 0 }, 'across', picksFrom('abcd'))).toBeNull();
+  });
+
+  it('counts a gap as taking a square, covered or not', () => {
+    // S, gap, R from 2,2 reaches 2,5 next whether or not 2,3 holds a letter.
+    expect(cursorCell({}, 10, { row: 2, col: 2 }, 'across', picksWithGaps('s.r'))).toBe('2,5');
+    expect(
+      cursorCell({ '2,3': 'o' }, 10, { row: 2, col: 2 }, 'across', picksWithGaps('s.r')),
+    ).toBe('2,5');
   });
 });
 

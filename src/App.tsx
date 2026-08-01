@@ -345,6 +345,12 @@ export default function App() {
     return map;
   }, [plan]);
 
+  /** Squares a gap is holding open but has no letter under it yet. */
+  const previewGaps = useMemo(
+    () => new Set<CellKey>(plan?.unfilledGaps ?? []),
+    [plan],
+  );
+
   /**
    * The square the next letter lands on. With nothing typed it's the cell that
    * was chosen; as letters go in it walks ahead of them, stepping over words
@@ -1159,6 +1165,7 @@ export default function App() {
           cellStatus={cellStatus}
           hiddenKeys={hiddenKeys}
           preview={preview}
+          previewGaps={previewGaps}
           cursorKey={cursorKey}
           cursorDir={interaction.kind === 'place' ? interaction.dir : null}
           showRotate={showRotate}

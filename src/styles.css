@@ -272,6 +272,14 @@ body {
   pointer-events: none;
 }
 
+/* The square a gap is holding open. Emptier and cooler than a letter ghost, so
+   it reads as "a letter belongs here" rather than "this letter lands here". */
+.tile-preview-gap {
+  background: #f1e8cd;
+  border-color: #b9a469;
+  opacity: 0.75;
+}
+
 .rack-tile.is-picked {
   background: #ffd84d;
   border-color: #c9a52c;
