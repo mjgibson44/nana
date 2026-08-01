@@ -62,11 +62,12 @@ const MAX_ZOOM = 1.6;
 
 /**
  * Auto-fit: whenever tiles change, the zoom is re-picked so every placed tile
- * fits on screen — in for a small crossword, out as it spreads. The cap stops
- * one lonely word turning into billboard tiles; the pad keeps the outermost
- * tiles off the very edge; the epsilon ignores changes too small to matter.
+ * fits on screen. It only ever backs out — the default size is as big as tiles
+ * get, so a small crossword is left at the size the player is used to rather
+ * than blown up. The pad keeps the outermost tiles off the very edge; the
+ * epsilon ignores changes too small to matter.
  */
-const AUTO_ZOOM_MAX = 1.25;
+const AUTO_ZOOM_MAX = 1;
 const FIT_PAD_CELLS = 1;
 const ZOOM_EPSILON = 0.03;
 
@@ -1823,7 +1824,6 @@ export default function App() {
           plan.steps.length > 0
         }
         onRemove={(position) => setPicks(picks.filter((_, i) => i !== position))}
-        onCancel={clearFocus}
         onConfirm={() => {
           if (target) commit(target.key, target.dir);
         }}
@@ -1903,6 +1903,7 @@ export default function App() {
           }
           onPlayAgain={() => newGame(mode)}
           onClose={() => setShowSummary(false)}
+          onReturnHome={returnHome}
         />
       )}
 

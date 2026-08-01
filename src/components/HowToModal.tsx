@@ -78,8 +78,7 @@ export function HowToModal({ onClose }: HowToModalProps) {
 
       <div className="howto-inner">
         <header className="summary-header">
-          <span className="splash-eyebrow">How to play</span>
-          <h1 className="summary-title">🍌 Nana</h1>
+          <h1 className="summary-title">How to play</h1>
           <p className="howto-goal">
             Weave <strong>every tile</strong> from your pile into <strong>one connected
             crossword</strong> of real words. Longer words score more.
@@ -151,7 +150,7 @@ export function HowToModal({ onClose }: HowToModalProps) {
         </section>
 
         <section className="summary-section">
-          <h2 className="summary-section-title">Build through a letter with a gap</h2>
+          <h2 className="summary-section-title">Overlap words easier with a gap letter</h2>
           <ul className="howto-list">
             <li className="howto-row">
               <DemoButton>

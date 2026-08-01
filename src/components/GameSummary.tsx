@@ -15,6 +15,8 @@ interface GameSummaryProps {
   title?: string;
   onPlayAgain: () => void;
   onClose: () => void;
+  /** Back out to the mode picker instead of starting another game. */
+  onReturnHome: () => void;
 }
 
 /**
@@ -29,6 +31,7 @@ export function GameSummary({
   title = '🍌 Well played!',
   onPlayAgain,
   onClose,
+  onReturnHome,
 }: GameSummaryProps) {
   // Longest first: the lengths that earned the most, and within the word list
   // the proudest words at the top.
@@ -104,6 +107,9 @@ export function GameSummary({
           </button>
           <button type="button" className="btn" onClick={onClose}>
             See the board
+          </button>
+          <button type="button" className="btn" onClick={onReturnHome}>
+            Return home
           </button>
         </div>
       </div>
