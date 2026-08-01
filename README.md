@@ -66,9 +66,9 @@ in `src/game/modes.ts`.
   for level 2, and 15 seconds less for each level after. Out of time is game
   over.
 - **Endless** — no levels. 2:00 to work the starting 20 tiles, then 3 more
-  tiles arrive every minute. Clearing the pile pays a 25-point bonus and more
-  tiles (10 the first time, 3 after). Loose tiles — unplaced or not validly
-  connected — are your health bar: reach 20 and you're buried.
+  tiles arrive every minute. Clearing the pile pays a 25-point bonus and 3
+  more tiles. Loose tiles — unplaced or not validly connected — are your
+  health bar: reach 20 and you're buried.
 
 A first-run "How to play" tutorial pops up on entering a game and then stays
 out of the way (a localStorage flag remembers it's been seen).

@@ -16,7 +16,6 @@ import {
   ENDLESS_CONNECT_BONUS,
   ENDLESS_DRIP_SECONDS,
   ENDLESS_DRIP_TILES,
-  ENDLESS_FIRST_CLEAR_TILES,
   ENDLESS_INITIAL_SECONDS,
   ENDLESS_LOOSE_LIMIT,
   timedLevelSeconds,
@@ -60,6 +59,52 @@ const SPLASH_MS = 1700;
 /** Pinch limits, as a multiple of the stylesheet's cell size. */
 const MIN_ZOOM = 0.55;
 const MAX_ZOOM = 1.6;
+
+/**
+ * Auto-fit: whenever tiles change, the zoom is re-picked so every placed tile
+ * fits on screen — in for a small crossword, out as it spreads. The cap stops
+ * one lonely word turning into billboard tiles; the pad keeps the outermost
+ * tiles off the very edge; the epsilon ignores changes too small to matter.
+ */
+const AUTO_ZOOM_MAX = 1.25;
+const FIT_PAD_CELLS = 1;
+const ZOOM_EPSILON = 0.03;
+
+/** The rectangle of cells that actually hold tiles. */
+interface TileBox {
+  minRow: number;
+  maxRow: number;
+  minCol: number;
+  maxCol: number;
+}
+
+/**
+ * Where the placed tiles sit in the board viewport's scroll space, measured
+ * from the live DOM so it's true at whatever zoom is currently rendered.
+ * Null before the grid has cells to measure.
+ */
+function measureTiles(
+  wrap: HTMLElement,
+  gridOrigin: { minRow: number; minCol: number },
+  box: TileBox,
+): { step: number; left: number; top: number; width: number; height: number } | null {
+  const cell = wrap.querySelector('[data-cell]') as HTMLElement | null;
+  const boardEl = wrap.querySelector('.board') as HTMLElement | null;
+  if (!cell || !boardEl) return null;
+  const step = cell.getBoundingClientRect().width + 1; // +1 for the grid's hairline gap
+  const wrapRect = wrap.getBoundingClientRect();
+  const boardRect = boardEl.getBoundingClientRect();
+  // Client coordinates shifted into scroll coordinates; +1 skips the border.
+  const originX = boardRect.left - wrapRect.left + wrap.scrollLeft + 1;
+  const originY = boardRect.top - wrapRect.top + wrap.scrollTop + 1;
+  return {
+    step,
+    left: originX + (box.minCol - gridOrigin.minCol) * step,
+    top: originY + (box.minRow - gridOrigin.minRow) * step,
+    width: (box.maxCol - box.minCol + 1) * step - 1,
+    height: (box.maxRow - box.minRow + 1) * step - 1,
+  };
+}
 
 /** Once set, the tutorial stays put — it only auto-opens on the first game. */
 const HOWTO_SEEN_KEY = 'nana.howto.v1';
@@ -163,9 +208,6 @@ export default function App() {
   /** Endless: 'initial' is the opening two minutes; 'drip' is ever after,
    * when batches arrive on the clock and the health bar is live. */
   const [endlessPhase, setEndlessPhase] = useState<'initial' | 'drip'>('initial');
-  /** Endless: how many times the pile has been fully cleared — the first
-   * clear's reward is bigger than the rest. */
-  const [endlessClears, setEndlessClears] = useState(0);
   /** How the finished game ended, for the summary's headline. */
   const [endReason, setEndReason] = useState<EndReason | null>(null);
   /** The banner riding over the board ("+3 tiles!"), keyed so repeats replay. */
@@ -280,9 +322,9 @@ export default function App() {
     setSplashLevel(1);
     setEndReason(null);
     setEndlessPhase('initial');
-    setEndlessClears(0);
     setToast(null);
     setTileDrop(null);
+    setZoom(1);
     finished.current = false;
     setCountdown(
       nextMode === 'timed'
@@ -396,6 +438,94 @@ export default function App() {
     if (prev.row !== bounds.minRow) wrap.scrollTop += (prev.row - bounds.minRow) * step;
     if (prev.col !== bounds.minCol) wrap.scrollLeft += (prev.col - bounds.minCol) * step;
   }, [bounds.minRow, bounds.minCol]);
+
+  /* -------------------------------- auto-fit -------------------------------- */
+
+  /** The rectangle the placed tiles span, or null on an empty board. */
+  const tileBox = useMemo((): TileBox | null => {
+    const keys = Object.keys(board);
+    if (keys.length === 0) return null;
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    let minCol = Infinity;
+    let maxCol = -Infinity;
+    for (const key of keys) {
+      const { row, col } = parseKey(key);
+      if (row < minRow) minRow = row;
+      if (row > maxRow) maxRow = row;
+      if (col < minCol) minCol = col;
+      if (col > maxCol) maxCol = col;
+    }
+    return { minRow, maxRow, minCol, maxCol };
+  }, [board]);
+
+  /** Bumped when the board viewport changes size (window resized, pile grew a
+   * row), so the fit gets rechecked against the room actually left. */
+  const [fitTick, setFitTick] = useState(0);
+  useEffect(() => {
+    const wrap = boardWrapRef.current;
+    if (!wrap) return;
+    const observer = new ResizeObserver(() => setFitTick((tick) => tick + 1));
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [screen]);
+
+  /** A centering job waiting for its zoom to reach the DOM first. */
+  const pendingCenter = useRef<{ zoom: number } | null>(null);
+
+  // Keep the whole crossword on screen. Whenever the tiles change, re-pick the
+  // zoom that shows all of them — larger while the crossword is small, backing
+  // out as it spreads — and if the zoom moved, or a tile has strayed out of
+  // view, glide the viewport back to centre on the tiles. Reads zoom fresh on
+  // each run but deliberately doesn't depend on it, so a manual pinch is left
+  // alone until the next placement.
+  useLayoutEffect(() => {
+    const wrap = boardWrapRef.current;
+    if (!wrap || !tileBox) return;
+    const measured = measureTiles(wrap, bounds, tileBox);
+    if (!measured) return;
+
+    const cellBase = (measured.step - 1) / zoom;
+    const cols = tileBox.maxCol - tileBox.minCol + 1 + FIT_PAD_CELLS * 2;
+    const rows = tileBox.maxRow - tileBox.minRow + 1 + FIT_PAD_CELLS * 2;
+    const fitAcross = (wrap.clientWidth / cols - 1) / cellBase;
+    const fitDown = (wrap.clientHeight / rows - 1) / cellBase;
+    const target = Math.min(Math.max(Math.min(fitAcross, fitDown), MIN_ZOOM), AUTO_ZOOM_MAX);
+    if (!Number.isFinite(target)) return;
+
+    const zoomChanged = Math.abs(target - zoom) > ZOOM_EPSILON;
+    const slack = 2; // px of rounding forgiveness before "off screen" counts
+    const inView =
+      measured.left >= wrap.scrollLeft - slack &&
+      measured.left + measured.width <= wrap.scrollLeft + wrap.clientWidth + slack &&
+      measured.top >= wrap.scrollTop - slack &&
+      measured.top + measured.height <= wrap.scrollTop + wrap.clientHeight + slack;
+    if (!zoomChanged && inView) return;
+
+    pendingCenter.current = { zoom: zoomChanged ? target : zoom };
+    if (zoomChanged) setZoom(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- zoom and bounds
+    // are read fresh each run; depending on them would refit on every pinch.
+  }, [tileBox, fitTick]);
+
+  // The second half of the fit: once the DOM is laid out at the target zoom,
+  // slide the viewport so the tiles sit in the middle of it.
+  useLayoutEffect(() => {
+    const wrap = boardWrapRef.current;
+    const pending = pendingCenter.current;
+    if (!wrap || !pending || !tileBox) return;
+    if (pending.zoom !== zoom) return; // the zoom render hasn't landed yet
+    pendingCenter.current = null;
+    const measured = measureTiles(wrap, bounds, tileBox);
+    if (!measured) return;
+    wrap.scrollTo({
+      left: measured.left + measured.width / 2 - wrap.clientWidth / 2,
+      top: measured.top + measured.height / 2 - wrap.clientHeight / 2,
+      behavior: 'smooth',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bounds is read
+    // fresh; it only ever changes alongside tileBox.
+  }, [zoom, tileBox, fitTick]);
 
   /**
    * What each tile should be showing. Worst problem wins, so a tile is only
@@ -797,22 +927,22 @@ export default function App() {
 
   /**
    * Clearing the pile in Endless: the connect bonus banks (the live bonus
-   * swaps for it, so the score holds steady) and a reward batch arrives — a
-   * big one the first time, smaller ever after. Same short wait as a level-up,
-   * so the bonus lands on the scoreboard before the pile refills.
+   * swaps for it, so the score holds steady) and a fresh batch arrives — the
+   * same size as a timed drop. Same short wait as a level-up, so the bonus
+   * lands on the scoreboard before the pile refills.
    */
   useEffect(() => {
     if (mode !== 'endless' || complete || !boardScore.bonusEarned) return;
     if (drag !== null || wordDrag !== null) return;
     const timer = window.setTimeout(() => {
       setBankedBonus((banked) => banked + ENDLESS_CONNECT_BONUS);
-      const first = endlessClears === 0;
-      setEndlessClears((clears) => clears + 1);
-      const count = first ? ENDLESS_FIRST_CLEAR_TILES : ENDLESS_CLEAR_TILES;
-      dealBonusTiles(count, `Board clear! +${ENDLESS_CONNECT_BONUS} points · +${count} tiles`);
+      dealBonusTiles(
+        ENDLESS_CLEAR_TILES,
+        `Board clear! +${ENDLESS_CONNECT_BONUS} points · +${ENDLESS_CLEAR_TILES} tiles`,
+      );
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [mode, complete, boardScore.bonusEarned, drag, wordDrag, endlessClears, dealBonusTiles]);
+  }, [mode, complete, boardScore.bonusEarned, drag, wordDrag, dealBonusTiles]);
 
   /**
    * The health bar's measure: tiles not yet doing their job — still in the
