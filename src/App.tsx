@@ -184,6 +184,26 @@ export default function App() {
   /** Swallow the click that follows a drop, so it doesn't also select a cell. */
   const swallowClick = useRef(false);
 
+  /**
+   * Arm the swallow until the gesture's trailing click has actually come and
+   * gone. The click arrives in its own task — on touch screens well after any
+   * zero-delay timer — so a timer alone sometimes lowered the flag too early
+   * and let the click re-anchor a cell. The timer stays only as a backstop for
+   * gestures whose click never arrives at all.
+   */
+  const swallowNextClick = useCallback(() => {
+    swallowClick.current = true;
+    let timer: number | undefined;
+    const clear = () => {
+      swallowClick.current = false;
+      window.removeEventListener('click', clear);
+      window.clearTimeout(timer);
+    };
+    // Bubble phase on window, so it runs after the board has seen the click.
+    window.addEventListener('click', clear);
+    timer = window.setTimeout(clear, 500);
+  }, []);
+
   const newGame = useCallback(() => {
     setRack(generatePuzzle(COMMON_WORDS, tilesAddedForLevel(1)).letters);
     setBoard({});
@@ -694,10 +714,7 @@ export default function App() {
       if (cellEl) {
         const key = keyOf(Number(cellEl.dataset.row), Number(cellEl.dataset.col));
         moveWord(wordDrag.word, key, wordDrag.word.direction);
-        swallowClick.current = true;
-        window.setTimeout(() => {
-          swallowClick.current = false;
-        }, 0);
+        swallowNextClick();
       }
     };
     const cancel = (e: PointerEvent) => {
@@ -711,7 +728,7 @@ export default function App() {
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', cancel);
     };
-  }, [wordDrag, moveWord]);
+  }, [wordDrag, moveWord, swallowNextClick]);
 
   /* ---------------------------- tile selection ------------------------------ */
 
@@ -810,12 +827,11 @@ export default function App() {
       const spent = new Set(result.steps.map((step) => step.rackIndex));
       setRack((prev) => prev.filter((_, i) => !spent.has(i)));
       setLastDir(dir);
-      setInteraction(IDLE);
-      // Confirming ends the whole gesture. Placing through a letter starts by
-      // selecting it, so the ring would otherwise outlive the word it aimed.
-      setSelection(null);
+      // Confirming ends the whole gesture, however the word was submitted:
+      // no anchored cell, no selection ring, no word controls left behind.
+      clearFocus();
     },
-    [board, bounds, pickList, remember],
+    [board, bounds, pickList, remember, clearFocus],
   );
 
   /**
@@ -1084,10 +1100,7 @@ export default function App() {
       if (tap && source.type === 'board') {
         selectTile(source.key);
         // The click that follows this tap would otherwise re-anchor the cell.
-        swallowClick.current = true;
-        window.setTimeout(() => {
-          swallowClick.current = false;
-        }, 0);
+        swallowNextClick();
         return;
       }
 
@@ -1113,10 +1126,7 @@ export default function App() {
             setSelection((prev) => (prev?.key === source.key ? null : prev));
           }
         }
-        swallowClick.current = true;
-        window.setTimeout(() => {
-          swallowClick.current = false;
-        }, 0);
+        swallowNextClick();
       } else if (target?.closest('[data-rack]')) {
         if (source.type === 'board') {
           remember();
@@ -1129,7 +1139,7 @@ export default function App() {
         }
       }
     },
-    [drag, board, togglePick, selectTile, remember],
+    [drag, board, togglePick, selectTile, remember, swallowNextClick],
   );
 
   useEffect(() => {
