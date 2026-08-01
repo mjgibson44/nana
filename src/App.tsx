@@ -811,6 +811,9 @@ export default function App() {
       setRack((prev) => prev.filter((_, i) => !spent.has(i)));
       setLastDir(dir);
       setInteraction(IDLE);
+      // Confirming ends the whole gesture. Placing through a letter starts by
+      // selecting it, so the ring would otherwise outlive the word it aimed.
+      setSelection(null);
     },
     [board, bounds, pickList, remember],
   );
