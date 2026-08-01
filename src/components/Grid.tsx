@@ -29,6 +29,8 @@ interface GridProps {
   canRotate: (word: BoardWord) => boolean;
   onTilePointerDown: (key: CellKey, letter: string, e: React.PointerEvent) => void;
   onCellClick: (key: CellKey) => void;
+  /** The cell under the pointer, or null once it leaves the board. */
+  onCellHover: (key: CellKey | null) => void;
   onRotateDirection: () => void;
   onWordHighlight: (word: BoardWord | null) => void;
   onWordGrab: (word: BoardWord, e: React.PointerEvent) => void;
@@ -55,6 +57,7 @@ export const Grid = memo(function Grid({
   canRotate,
   onTilePointerDown,
   onCellClick,
+  onCellHover,
   onRotateDirection,
   onWordHighlight,
   onWordGrab,
@@ -141,6 +144,15 @@ export const Grid = memo(function Grid({
     <div
       className="board"
       style={{ gridTemplateColumns: `repeat(${size}, var(--cell))` }}
+      // Delegated rather than a handler per cell: at 33 squares square that's a
+      // thousand listeners saved, and the event tells us the cell anyway.
+      onPointerOver={(e) => {
+        const cell = (e.target as HTMLElement).closest('[data-cell]') as HTMLElement | null;
+        onCellHover(
+          cell ? keyOf(Number(cell.dataset.row), Number(cell.dataset.col)) : null,
+        );
+      }}
+      onPointerLeave={() => onCellHover(null)}
     >
       {cells}
     </div>

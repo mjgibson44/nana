@@ -158,6 +158,12 @@ export default function App() {
   const [confirmSkip, setConfirmSkip] = useState<string | null>(null);
   /** Cell size in px, driven by pinch on touch devices. */
   const [zoom, setZoom] = useState(1);
+  /**
+   * The cell under the pointer, but only tracked while letters are waiting to be
+   * placed — the rest of the time it stays null, so simply moving across a
+   * thousand-cell board costs nothing.
+   */
+  const [hoverCell, setHoverCell] = useState<CellKey | null>(null);
 
   const boardWrapRef = useRef<HTMLDivElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
@@ -268,15 +274,6 @@ export default function App() {
     [picks, rack],
   );
 
-  /** Where the word would go right now — the chosen cell, and its direction. */
-  const target = useMemo(
-    () =>
-      interaction.kind === 'place'
-        ? { key: interaction.anchor, dir: interaction.dir }
-        : null,
-    [interaction],
-  );
-
   /**
    * The direction to use for a cell without asking. Null means the cell can't
    * start a word at all — it's walled in on both sides.
@@ -298,6 +295,38 @@ export default function App() {
       return choices.includes(lastDir) ? lastDir : choices[0];
     },
     [board, lastDir],
+  );
+
+  /**
+   * Where the word would go right now.
+   *
+   * A cell that's been chosen owns the preview and keeps it — otherwise it would
+   * jump about as the pointer crossed the board on its way to a button. Until
+   * one is chosen, though, letters waiting in the bar follow the pointer, so it's
+   * plain where they'd land before committing to anywhere.
+   */
+  const target = useMemo(() => {
+    if (interaction.kind === 'place') {
+      return { key: interaction.anchor, dir: interaction.dir };
+    }
+    if (hoverCell !== null && picksOf(interaction).length > 0) {
+      const dir = assumeDir(hoverCell);
+      if (dir !== null) return { key: hoverCell, dir };
+    }
+    return null;
+  }, [interaction, hoverCell, assumeDir]);
+
+  /**
+   * Follow the pointer across the board, but only while there's a word waiting
+   * for a home and nothing is being dragged. Otherwise hold at null, which keeps
+   * the board from re-rendering on every cell the pointer crosses.
+   */
+  const onCellHover = useCallback(
+    (key: CellKey | null) => {
+      const wanted = picks.length > 0 && drag === null && wordDrag === null ? key : null;
+      setHoverCell((prev) => (prev === wanted ? prev : wanted));
+    },
+    [picks.length, drag, wordDrag],
   );
 
   /** Only offer to rotate when the cell genuinely could go either way. */
@@ -1132,6 +1161,7 @@ export default function App() {
           canRotate={canRotate}
           onTilePointerDown={onBoardTilePointerDown}
           onCellClick={onCellClick}
+          onCellHover={onCellHover}
           onRotateDirection={rotateDirection}
           onWordHighlight={setHighlightedWord}
           onWordGrab={onWordGrab}
