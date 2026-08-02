@@ -143,7 +143,10 @@ export function HowToModal({ onClose }: HowToModalProps) {
           <ul className="howto-list">
             <li className="howto-row">
               <DemoWord letters={['w', 'o', 'r', 'd']} />
-              <span>Type out your word, then choose a cell to place it.</span>
+              <span>
+                Type out your word, then choose a cell to place it. On a phone, press and hold
+                the board to drag the word into position before letting go.
+              </span>
             </li>
             <li className="howto-row">
               <DemoWord letters={['w', null, 'r', 'd']} />

@@ -1,90 +1,125 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ENDLESS_DRIP_STAGES,
+  DUEL_DRIP_SECONDS,
+  DUEL_PILE_LIMIT,
+  DUEL_ROUND_SECONDS,
+  ENDLESS_BIG_BATCH,
+  ENDLESS_SMALL_BATCH,
+  ENDLESS_SMALL_BATCH_ROUNDS,
+  duelAttackMultiplier,
+  duelAttackTiles,
+  duelDripTiles,
+  duelDripTilesAt,
+  duelRoundAt,
   endlessDripSeconds,
   endlessDripTiles,
   formatSeconds,
-  timedLevelSeconds,
 } from '../modes';
-import { LEVEL_COUNT } from '../levels';
-
-describe('timedLevelSeconds', () => {
-  it('gives three minutes for the first level', () => {
-    expect(timedLevelSeconds(1)).toBe(180);
-  });
-
-  it('gives two minutes for the second level', () => {
-    expect(timedLevelSeconds(2)).toBe(120);
-  });
-
-  it('takes 15 seconds off each level after the second', () => {
-    expect(timedLevelSeconds(3)).toBe(105);
-    expect(timedLevelSeconds(4)).toBe(90);
-    expect(timedLevelSeconds(5)).toBe(75);
-  });
-
-  it('never reaches zero within the game', () => {
-    for (let level = 1; level <= LEVEL_COUNT; level++) {
-      expect(timedLevelSeconds(level)).toBeGreaterThan(0);
-    }
-  });
-});
 
 describe('endlessDripSeconds', () => {
-  it('holds a minute for the first three intervals', () => {
-    expect(endlessDripSeconds(0)).toBe(60);
-    expect(endlessDripSeconds(1)).toBe(60);
-    expect(endlessDripSeconds(2)).toBe(60);
-  });
-
-  it('drops to 45 seconds after three intervals, and 30 after three more', () => {
-    expect(endlessDripSeconds(3)).toBe(45);
-    expect(endlessDripSeconds(5)).toBe(45);
-    expect(endlessDripSeconds(6)).toBe(30);
-  });
-
-  it('stays at the last stage forever after', () => {
-    expect(endlessDripSeconds(7)).toBe(30);
-    expect(endlessDripSeconds(100)).toBe(30);
-  });
-
-  it('only ever gets shorter', () => {
-    for (let i = 1; i <= 20; i++) {
-      expect(endlessDripSeconds(i)).toBeLessThanOrEqual(endlessDripSeconds(i - 1));
+  it('is thirty seconds for every round', () => {
+    for (let i = 0; i <= 30; i++) {
+      expect(endlessDripSeconds(i)).toBe(30);
     }
-    expect(endlessDripSeconds(20)).toBe(ENDLESS_DRIP_STAGES[ENDLESS_DRIP_STAGES.length - 1]);
   });
 });
 
 describe('endlessDripTiles', () => {
-  it('deals fives while the clock is still tightening', () => {
-    for (let i = 0; i <= 5; i++) {
-      expect(endlessDripTiles(i)).toBe(5);
+  it('deals fives for the first five rounds', () => {
+    for (let i = 0; i < ENDLESS_SMALL_BATCH_ROUNDS; i++) {
+      expect(endlessDripTiles(i)).toBe(ENDLESS_SMALL_BATCH);
     }
   });
 
-  it('holds fives for the first five rounds at the fastest pace', () => {
-    // 30-second rounds start at interval 6; the batch grows only after five
-    // of them have been survived.
-    expect(endlessDripTiles(6)).toBe(5);
-    expect(endlessDripTiles(10)).toBe(5);
-  });
-
-  it('grows to eight, then ten, five rounds apart', () => {
-    expect(endlessDripTiles(11)).toBe(8);
-    expect(endlessDripTiles(15)).toBe(8);
-    expect(endlessDripTiles(16)).toBe(10);
-  });
-
-  it('stays at ten forever after', () => {
-    expect(endlessDripTiles(21)).toBe(10);
-    expect(endlessDripTiles(100)).toBe(10);
+  it('deals sevens forever after', () => {
+    expect(endlessDripTiles(ENDLESS_SMALL_BATCH_ROUNDS)).toBe(ENDLESS_BIG_BATCH);
+    expect(endlessDripTiles(10)).toBe(ENDLESS_BIG_BATCH);
+    expect(endlessDripTiles(100)).toBe(ENDLESS_BIG_BATCH);
   });
 
   it('only ever grows', () => {
     for (let i = 1; i <= 30; i++) {
       expect(endlessDripTiles(i)).toBeGreaterThanOrEqual(endlessDripTiles(i - 1));
     }
+  });
+});
+
+describe('duelRoundAt', () => {
+  it('splits the game into three-minute rounds, final round forever', () => {
+    expect(duelRoundAt(0)).toBe(1);
+    expect(duelRoundAt(DUEL_ROUND_SECONDS - 1)).toBe(1);
+    expect(duelRoundAt(DUEL_ROUND_SECONDS)).toBe(2);
+    expect(duelRoundAt(DUEL_ROUND_SECONDS * 2 - 1)).toBe(2);
+    expect(duelRoundAt(DUEL_ROUND_SECONDS * 2)).toBe(3);
+    expect(duelRoundAt(DUEL_ROUND_SECONDS * 10)).toBe(3);
+  });
+});
+
+describe('duelDripTiles', () => {
+  it('brings one, then two, then four tiles a drip', () => {
+    expect(duelDripTiles(1)).toBe(1);
+    expect(duelDripTiles(2)).toBe(2);
+    expect(duelDripTiles(3)).toBe(4);
+  });
+
+  it('clamps rounds outside the game', () => {
+    expect(duelDripTiles(0)).toBe(1);
+    expect(duelDripTiles(9)).toBe(4);
+  });
+});
+
+describe('duelDripTilesAt', () => {
+  it('sizes each drip by the round it lands in', () => {
+    const dripsPerRound = DUEL_ROUND_SECONDS / DUEL_DRIP_SECONDS; // 9
+    // Drips 0..7 land inside round one (at 20s..160s); the drip at 180s
+    // opens round two.
+    for (let i = 0; i < dripsPerRound - 1; i++) {
+      expect(duelDripTilesAt(i)).toBe(1);
+    }
+    expect(duelDripTilesAt(dripsPerRound - 1)).toBe(2);
+    expect(duelDripTilesAt(dripsPerRound * 2 - 1)).toBe(4);
+    expect(duelDripTilesAt(100)).toBe(4);
+  });
+});
+
+describe('duelAttackMultiplier', () => {
+  it('scales rounds at ×1, ×1.5, ×2', () => {
+    expect(duelAttackMultiplier(1)).toBe(1);
+    expect(duelAttackMultiplier(2)).toBe(1.5);
+    expect(duelAttackMultiplier(3)).toBe(2);
+  });
+});
+
+describe('duelAttackTiles', () => {
+  it('sends nothing for short words', () => {
+    expect(duelAttackTiles(2, 1)).toBe(0);
+    expect(duelAttackTiles(3, 1)).toBe(0);
+    expect(duelAttackTiles(3, 3)).toBe(0);
+  });
+
+  it('sends one tile per letter past three in round one', () => {
+    expect(duelAttackTiles(4, 1)).toBe(1);
+    expect(duelAttackTiles(5, 1)).toBe(2);
+    expect(duelAttackTiles(6, 1)).toBe(3);
+    expect(duelAttackTiles(8, 1)).toBe(5);
+  });
+
+  it('scales up by half in round two', () => {
+    expect(duelAttackTiles(4, 2)).toBe(2); // 1 × 1.5 rounds up
+    expect(duelAttackTiles(5, 2)).toBe(3);
+    expect(duelAttackTiles(6, 2)).toBe(5); // 4.5 rounds up
+  });
+
+  it('doubles in the final round', () => {
+    expect(duelAttackTiles(4, 3)).toBe(2);
+    expect(duelAttackTiles(5, 3)).toBe(4);
+    expect(duelAttackTiles(6, 3)).toBe(6);
+  });
+});
+
+describe('duel constants', () => {
+  it('caps the pile at twenty-five', () => {
+    expect(DUEL_PILE_LIMIT).toBe(25);
   });
 });
 

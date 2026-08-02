@@ -8,28 +8,8 @@ import {
   GROW_MARGIN,
   boardBounds,
   scoreBoard,
-  tilesAddedForLevel,
-  tilesForLevel,
   wordScore,
 } from '../levels';
-
-describe('tilesForLevel', () => {
-  it('counts the running total, 20 then 10 a level', () => {
-    expect([1, 2, 3, 4, 5].map(tilesForLevel)).toEqual([20, 30, 40, 50, 60]);
-  });
-
-  it('deals 20 up front and 10 for each level after', () => {
-    expect([1, 2, 3, 4, 5].map(tilesAddedForLevel)).toEqual([20, 10, 10, 10, 10]);
-  });
-
-  it('adds up to the running total', () => {
-    let dealt = 0;
-    for (let level = 1; level <= 5; level++) {
-      dealt += tilesAddedForLevel(level);
-      expect(dealt).toBe(tilesForLevel(level));
-    }
-  });
-});
 
 describe('boardBounds', () => {
   const START = {

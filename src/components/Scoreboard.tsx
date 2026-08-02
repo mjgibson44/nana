@@ -1,8 +1,7 @@
 import { ordinal } from '../game/battle';
-import { LEVEL_COUNT } from '../game/levels';
 import { formatSeconds } from '../game/modes';
 
-/** How close to the loose limit counts as "getting close" — the orange zone. */
+/** How close to the tile limit counts as "getting close" — the orange zone. */
 const TILES_WARN_MARGIN = 5;
 
 /** One floating "+12"/"−12" riding off a score change, alive until its
@@ -15,11 +14,9 @@ export interface ScorePop {
 interface ScoreboardProps {
   /**
    * The whole running total: every word on the board right now, plus the
-   * all-tiles bonuses banked from levels already finished.
+   * bonuses banked along the way.
    */
   score: number;
-  /** The current level, or null in modes without levels (Endless). */
-  level: number | null;
   /** Every tile placed on a valid board — the bonus is already in `score`. */
   bonusEarned: boolean;
   /** What that bonus is worth in the current mode. */
@@ -28,9 +25,14 @@ interface ScoreboardProps {
   complete: boolean;
   /** The header clock, or null in modes without one. */
   timer: { label: string; seconds: number; urgent: boolean } | null;
-  /** Endless: how many tiles are loose against the limit that buries the
-   * player at a round's end. Null while the count isn't in play. */
-  tiles: { loose: number; limit: number } | null;
+  /** Duel: which round the game is in ("1/3", "Final"). Null elsewhere. */
+  round: string | null;
+  /** Tiles against the limit that ends the game. Null while not in play.
+   * `label` says which count it is — loose tiles in Endless, the whole
+   * pile in a Duel. */
+  tiles: { label: string; loose: number; limit: number } | null;
+  /** Duel: the other player's pile, to watch them drown (or not). */
+  opponent: { name: string; tiles: number; limit: number; out: boolean } | null;
   /** This player's place in a battle, or null outside one. */
   rank: { place: number; of: number; buried: boolean } | null;
   /** Score changes still floating up beside the total. */
@@ -41,12 +43,13 @@ interface ScoreboardProps {
 
 export function Scoreboard({
   score,
-  level,
   bonusEarned,
   bonusAmount,
   complete,
   timer,
+  round,
   tiles,
+  opponent,
   rank,
   pops,
   onPopEnd,
@@ -78,13 +81,10 @@ export function Scoreboard({
           ))}
         </div>
       </div>
-      {level !== null && (
+      {round !== null && (
         <div className="score-block">
-          <span className="score-label">Level</span>
-          <span className="score-value">
-            {complete ? 'Done' : level}
-            {!complete && <span className="score-of">/{LEVEL_COUNT}</span>}
-          </span>
+          <span className="score-label">Round</span>
+          <span className="score-value">{round}</span>
         </div>
       )}
       {timer && (
@@ -110,13 +110,11 @@ export function Scoreboard({
           className="score-block"
           title={
             over > 0
-              ? `${tiles.loose} loose tiles — ${over} over the limit of ${tiles.limit}. ` +
-                `Get back under before the round ends or you're buried.`
-              : `${tiles.loose} of ${tiles.limit} loose tiles — end a round over the limit ` +
-                `and you're buried`
+              ? `${tiles.loose} tiles — ${over} over the limit of ${tiles.limit}.`
+              : `${tiles.loose} of ${tiles.limit} tiles against the limit`
           }
         >
-          <span className="score-label">{over > 0 ? 'Limit exceeded' : 'Loose tiles'}</span>
+          <span className="score-label">{over > 0 ? 'Limit exceeded' : tiles.label}</span>
           <span className={`score-value tile-count-${tilesTone}`}>
             {over > 0 ? (
               `+${over}`
@@ -129,8 +127,26 @@ export function Scoreboard({
           </span>
         </div>
       )}
+      {opponent && (
+        <div
+          className="score-block"
+          title={`${opponent.name}’s pile: ${opponent.tiles} of ${opponent.limit} tiles`}
+        >
+          <span className="score-label">{opponent.name}</span>
+          <span className="score-value">
+            {opponent.out ? (
+              '💀'
+            ) : (
+              <>
+                {opponent.tiles}
+                <span className="score-of">/{opponent.limit}</span>
+              </>
+            )}
+          </span>
+        </div>
+      )}
       {bonusEarned && (
-        <span className="score-chip score-chip-bonus">🍌 +{bonusAmount} all tiles</span>
+        <span className="score-chip score-chip-bonus">+{bonusAmount} all tiles</span>
       )}
     </div>
   );

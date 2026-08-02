@@ -28,7 +28,7 @@ export function GameSummary({
   words,
   score,
   eyebrow = 'Game finished',
-  title = '🍌 Well played!',
+  title = 'Well played!',
   onPlayAgain,
   onClose,
   onReturnHome,

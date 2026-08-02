@@ -25,7 +25,7 @@ export function StatsPage({ stats, onClose }: StatsPageProps) {
       <div className="summary-inner">
         <header className="summary-header">
           <span className="splash-eyebrow">Your record</span>
-          <h1 className="summary-title">📊 Stats</h1>
+          <h1 className="summary-title">Stats</h1>
         </header>
 
         <div className="summary-totals">

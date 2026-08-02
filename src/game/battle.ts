@@ -5,7 +5,8 @@ import { seededRng } from './rng';
 import type { TileMap } from './types';
 
 /**
- * Endless Battle: several players race the same Endless game.
+ * Multiplayer: several players race the same Endless game (Endless Battle),
+ * or exactly two fight a Duel.
  *
  * Everything here is pure and serializable — the networking layer
  * (src/net/battleSession.ts) moves these values between browsers, and the
@@ -19,8 +20,15 @@ import type { TileMap } from './types';
 /** Where a battle currently stands, for everyone in it. */
 export type BattlePhase = 'lobby' | 'playing' | 'finished';
 
+/** What game the lobby plays: Endless raced by everyone, or a two-player Duel. */
+export type BattleMode = 'endless' | 'duel';
+
 export interface BattlePlayer {
-  /** The player's peer id — stable for as long as they stay connected. */
+  /**
+   * The player's stable identity — a random key their browser holds on to, so
+   * a dropped connection can be re-attached to the same seat. (Peer ids
+   * change on every reconnect, so they can't be the identity.)
+   */
   id: string;
   name: string;
   host: boolean;
@@ -28,18 +36,31 @@ export interface BattlePlayer {
   score: number;
   /** Buried under loose tiles — out of the current game. */
   buried: boolean;
-  /** False once the player's connection has dropped. */
+  /**
+   * False while the player's connection is down. A disconnected player isn't
+   * out — the game pauses and waits for them to reconnect; only once the
+   * grace period runs out (or they leave on purpose) do they become `left`.
+   */
   connected: boolean;
+  /** Gone for good — left by choice, or never came back from a drop. */
+  left: boolean;
   /** Joined while a game was running; playing from the next start. */
   waiting: boolean;
+  /** How many tiles are in the player's pile right now — the Duel gauge. */
+  tiles: number;
 }
 
 /** The whole shared truth, owned by the host and broadcast on every change. */
 export interface BattleState {
+  mode: BattleMode;
   phase: BattlePhase;
   players: BattlePlayer[];
   /** Counts the games started in this lobby, so clients can tell restarts apart. */
   game: number;
+  /** True while the game is held for a player who lost their connection. */
+  paused: boolean;
+  /** Duel only: who won, once the phase is 'finished'. Null for a draw. */
+  winnerId: string | null;
 }
 
 /* ------------------------------- join codes ------------------------------- */
@@ -124,9 +145,12 @@ export function createTileStream(seed: string, wordPool: string[] = COMMON_WORDS
   return {
     next(count: number): string[] {
       if (hidden === null) {
-        const puzzle = generatePuzzle(wordPool, count, rng);
-        hidden = puzzle.solution;
-        return puzzle.letters;
+        // The opening deal sizes the hidden board — but never below what a
+        // crossword needs, so a stream can serve requests of any size (duel
+        // attacks ask for as little as one tile).
+        const puzzle = generatePuzzle(wordPool, Math.max(count, STREAM_CHUNK), rng);
+        hidden = puzzle.solution ?? {};
+        pending.push(...puzzle.letters);
       }
       while (pending.length < count) {
         const grown = extendPuzzle(hidden, boardBounds(hidden), wordPool, STREAM_CHUNK, rng);
@@ -144,13 +168,15 @@ export function createTileStream(seed: string, wordPool: string[] = COMMON_WORDS
 export interface Contestant {
   score: number;
   buried: boolean;
-  connected: boolean;
+  /** Permanently out — left by choice or never reconnected. A merely
+   * disconnected player is NOT left: the game pauses and waits for them. */
+  left: boolean;
   waiting: boolean;
 }
 
 /** In the current game and still able to change their score. */
 function isAlive(player: Contestant): boolean {
-  return !player.waiting && !player.buried && player.connected;
+  return !player.waiting && !player.buried && !player.left;
 }
 
 /**
@@ -172,6 +198,25 @@ export function battleOver(players: Contestant[]): boolean {
     return alive[0].score > best;
   }
   return false;
+}
+
+/**
+ * Whether a duel is decided: both players are dealt in and at most one is
+ * still alive. (A duel can't be decided before it has two contestants.)
+ */
+export function duelOver(players: Contestant[]): boolean {
+  const inGame = players.filter((p) => !p.waiting);
+  if (inGame.length < 2) return false;
+  return inGame.filter(isAlive).length <= 1;
+}
+
+/**
+ * Who won a decided duel: the last player alive, or null when nobody is —
+ * a draw, which in practice takes both players going down together.
+ */
+export function duelWinner<T extends Contestant>(players: T[]): T | null {
+  const alive = players.filter((p) => !p.waiting).filter(isAlive);
+  return alive.length === 1 ? alive[0] : null;
 }
 
 /** One row of the standings: a player and where they sit. */

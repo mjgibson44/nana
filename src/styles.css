@@ -2,12 +2,126 @@
   /* Board tiles scale from this; the board multiplies it by the pinch zoom. */
   --cell-base: 44px;
   --cell: var(--cell-base);
-  --bg: #f6efdd;
-  --board-bg: #efe6cf;
-  --cell-line: #e2d7b8;
-  --ink: #3d3524;
-  --tile-face: #fffbea;
-  --tile-edge: #d9c58a;
+
+  /*
+   * The monochrome palette, light scheme. Everything structural is black,
+   * white and grey; the only colour left is the functional tile feedback
+   * (valid / invalid / disconnected / isolated), which is information the
+   * game can't say any other way at a glance.
+   */
+  --bg: #f4f4f3;
+  --surface: #ffffff;
+  --surface-alt: #ededec;
+  --board-bg: #e9e9e7;
+  --cell-bg: #f7f7f6;
+  --cell-hover: #ffffff;
+  --cell-line: #dcdcda;
+  --ink: #161616;
+  --ink-invert: #ffffff;
+  --line: #bdbdbb;
+  --line-soft: #e3e3e1;
+  --tile-face: #ffffff;
+  --tile-edge: #c6c6c4;
+  --accent: #161616;
+  --focus: #161616;
+  --focus-bg: #eaeaea;
+  --select-bg: #e0e0de;
+  --shadow: rgba(0, 0, 0, 0.18);
+  --shadow-strong: rgba(0, 0, 0, 0.3);
+
+  /* Functional tile feedback. */
+  --ok-bg: #ddedcc;
+  --ok-edge: #86ac67;
+  --ok-ink: #3c5c21;
+  --bad-bg: #f6c9c2;
+  --bad-edge: #dd7c71;
+  --bad-ink: #a32e23;
+  --warn-bg: #ffd9a6;
+  --warn-edge: #e08a3c;
+  --warn-ink: #94520f;
+  --iso-bg: #ffeebb;
+  --iso-edge: #dfb45e;
+  --iso-ink: #8a6210;
+  --good-tone-bg: #e9f2dc;
+  --bad-tone-bg: #fbe4e1;
+}
+
+/* The dark scheme's tokens, applied two ways below. */
+:root[data-theme='dark'] {
+  --bg: #131313;
+  --surface: #1e1e1e;
+  --surface-alt: #292929;
+  --board-bg: #181818;
+  --cell-bg: #212121;
+  --cell-hover: #2b2b2b;
+  --cell-line: #2f2f2f;
+  --ink: #ececec;
+  --ink-invert: #131313;
+  --line: #555553;
+  --line-soft: #323230;
+  --tile-face: #2b2b2b;
+  --tile-edge: #505050;
+  --accent: #ececec;
+  --focus: #ececec;
+  --focus-bg: #2f2f2f;
+  --select-bg: #3c3c3a;
+  --shadow: rgba(0, 0, 0, 0.55);
+  --shadow-strong: rgba(0, 0, 0, 0.75);
+
+  --ok-bg: #2b3d1d;
+  --ok-edge: #5b8039;
+  --ok-ink: #bcd99e;
+  --bad-bg: #4b211c;
+  --bad-edge: #a4544a;
+  --bad-ink: #f0a89f;
+  --warn-bg: #46311a;
+  --warn-edge: #a86a2e;
+  --warn-ink: #eec089;
+  --iso-bg: #403919;
+  --iso-edge: #94803e;
+  --iso-ink: #dfcf8e;
+  --good-tone-bg: #202e18;
+  --bad-tone-bg: #3a1f1c;
+}
+
+/* "System": no data-theme pinned, so the device decides. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    --bg: #131313;
+    --surface: #1e1e1e;
+    --surface-alt: #292929;
+    --board-bg: #181818;
+    --cell-bg: #212121;
+    --cell-hover: #2b2b2b;
+    --cell-line: #2f2f2f;
+    --ink: #ececec;
+    --ink-invert: #131313;
+    --line: #555553;
+    --line-soft: #323230;
+    --tile-face: #2b2b2b;
+    --tile-edge: #505050;
+    --accent: #ececec;
+    --focus: #ececec;
+    --focus-bg: #2f2f2f;
+    --select-bg: #3c3c3a;
+    --shadow: rgba(0, 0, 0, 0.55);
+    --shadow-strong: rgba(0, 0, 0, 0.75);
+
+    --ok-bg: #2b3d1d;
+    --ok-edge: #5b8039;
+    --ok-ink: #bcd99e;
+    --bad-bg: #4b211c;
+    --bad-edge: #a4544a;
+    --bad-ink: #f0a89f;
+    --warn-bg: #46311a;
+    --warn-edge: #a86a2e;
+    --warn-ink: #eec089;
+    --iso-bg: #403919;
+    --iso-edge: #94803e;
+    --iso-ink: #dfcf8e;
+    --good-tone-bg: #202e18;
+    --bad-tone-bg: #3a1f1c;
+  }
 }
 
 * {
@@ -41,8 +155,8 @@ body {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 18px;
-  background: #ffd84d;
-  border-bottom: 3px solid #e0b62e;
+  background: var(--surface);
+  border-bottom: 3px solid var(--ink);
   flex-wrap: wrap;
 }
 
@@ -82,17 +196,17 @@ body {
 .score-chip {
   padding: 3px 10px;
   border-radius: 999px;
-  background: #fff3c4;
-  border: 1px solid #c9a52c;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
 
 .score-chip-bonus {
-  background: #3d3524;
-  border-color: #3d3524;
-  color: #ffd84d;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-invert);
 }
 
 /* ---------- score pops ---------- */
@@ -116,7 +230,7 @@ body {
 }
 
 /* Anchored just under the total so each pop floats up into it, clear of the
-   level block beside it. Quick successive pops stack downward. */
+   block beside it. Quick successive pops stack downward. */
 .score-pops {
   position: absolute;
   top: calc(100% - 2px);
@@ -138,11 +252,11 @@ body {
 }
 
 .score-pop-gain {
-  color: #3f5c22;
+  color: var(--ok-ink);
 }
 
 .score-pop-loss {
-  color: #a33025;
+  color: var(--bad-ink);
 }
 
 @keyframes score-pop-float {
@@ -166,15 +280,15 @@ body {
   }
 }
 
-/* ---------- header clock & health ---------- */
+/* ---------- header clock & pile gauges ---------- */
 
 .score-timer {
   font-variant-numeric: tabular-nums;
 }
 
-/* The last seconds of a timed level: hard to miss, easy to panic. */
+/* The last seconds of a clock: hard to miss, easy to panic. */
 .score-timer-urgent {
-  color: #a33025;
+  color: var(--bad-ink);
   animation: timer-pulse 1s ease-in-out infinite;
 }
 
@@ -184,18 +298,18 @@ body {
   }
 }
 
-/* The loose-tile count against the limit: green while comfortable, orange
-   when the limit is close, red once it's been blown. */
+/* The tile count against the limit: green while comfortable, orange when the
+   limit is close, red once it's been blown. */
 .tile-count-ok {
-  color: #3f5c22;
+  color: var(--ok-ink);
 }
 
 .tile-count-warn {
-  color: #9a4f0d;
+  color: var(--warn-ink);
 }
 
 .tile-count-over {
-  color: #a33025;
+  color: var(--bad-ink);
   animation: timer-pulse 1s ease-in-out infinite;
 }
 
@@ -212,10 +326,10 @@ body {
   font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
-  color: #ffd84d;
-  background: #3d3524;
+  color: var(--ink-invert);
+  background: var(--accent);
   border-radius: 999px;
-  box-shadow: 0 4px 12px rgba(61, 53, 36, 0.35);
+  box-shadow: 0 4px 12px var(--shadow);
   pointer-events: none;
   animation: toast-in-out 2400ms ease forwards;
 }
@@ -249,15 +363,15 @@ body {
 }
 
 .btn {
-  border: 2px solid #c9a52c;
-  background: #fff3c4;
+  border: 2px solid var(--line);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-weight: 600;
   padding: 7px 14px;
   border-radius: 10px;
   cursor: pointer;
-  box-shadow: 0 2px 0 #c9a52c;
+  box-shadow: 0 2px 0 var(--line);
 }
 
 .btn:active {
@@ -266,10 +380,10 @@ body {
 }
 
 .btn-primary {
-  background: #3d3524;
-  border-color: #3d3524;
-  color: #ffd84d;
-  box-shadow: 0 2px 0 #1f1a10;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-invert);
+  box-shadow: 0 2px 0 var(--shadow-strong);
 }
 
 .btn:disabled {
@@ -280,15 +394,15 @@ body {
 }
 
 .btn-confirm {
-  background: #dcedc4;
-  border-color: #7f9f5f;
-  box-shadow: 0 2px 0 #7f9f5f;
+  background: var(--ok-bg);
+  border-color: var(--ok-edge);
+  box-shadow: 0 2px 0 var(--ok-edge);
 }
 
 .btn-cancel {
-  background: #f8ded9;
-  border-color: #c98a80;
-  box-shadow: 0 2px 0 #c98a80;
+  background: var(--bad-bg);
+  border-color: var(--bad-edge);
+  box-shadow: 0 2px 0 var(--bad-edge);
 }
 
 /* ---------- board ---------- */
@@ -323,22 +437,22 @@ body {
 .cell {
   width: var(--cell);
   height: var(--cell);
-  background: #f7f0dc;
+  background: var(--cell-bg);
   position: relative;
 }
 
 /* Hover only points a cell out; choosing it is what brings up its controls. */
 .cell:hover {
-  background: #fdf6e0;
-  box-shadow: inset 0 0 0 2px #ecd282;
+  background: var(--cell-hover);
+  box-shadow: inset 0 0 0 2px var(--line);
 }
 
 /* The focus square: where the next letter lands. It walks ahead of the word as
    it's typed, so it's drawn firmly enough to follow at a glance. */
 .cell.is-cursor,
 .cell.is-cursor:hover {
-  background: #fff4cf;
-  box-shadow: inset 0 0 0 3px #e0b62e;
+  background: var(--focus-bg);
+  box-shadow: inset 0 0 0 3px var(--focus);
 }
 
 /* ---------- direction ---------- */
@@ -362,17 +476,17 @@ body {
   padding: 0;
   font-size: 11px;
   line-height: 1;
-  color: #6b5a1e;
-  background: #ffd84d;
-  border: 1px solid #c9a52c;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 6px 0 6px 0;
   cursor: pointer;
 }
 
 .cell-rotate:hover {
-  background: #3d3524;
-  border-color: #3d3524;
-  color: #ffd84d;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-invert);
 }
 
 /* ---------- tiles ---------- */
@@ -384,10 +498,11 @@ body {
   font-weight: 700;
   font-size: 21px;
   text-transform: uppercase;
+  color: var(--ink);
   background: var(--tile-face);
   border: 2px solid var(--tile-edge);
   border-radius: 8px;
-  box-shadow: 0 2px 3px rgba(61, 53, 36, 0.25);
+  box-shadow: 0 2px 3px var(--shadow);
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -421,25 +536,26 @@ body {
 }
 
 .tile-preview {
-  background: #fff6d6;
-  border: 2px dashed #c9a52c;
-  color: #8a6210;
-  opacity: 0.85;
+  background: var(--surface-alt);
+  border: 2px dashed var(--line);
+  color: var(--ink);
+  opacity: 0.8;
   box-shadow: none;
   pointer-events: none;
 }
 
-/* The square a gap is holding open. Emptier and cooler than a letter ghost, so
-   it reads as "a letter belongs here" rather than "this letter lands here". */
+/* The square a gap is holding open. Emptier than a letter ghost, so it reads
+   as "a letter belongs here" rather than "this letter lands here". */
 .tile-preview-gap {
-  background: #f1e8cd;
-  border-color: #b9a469;
-  opacity: 0.75;
+  background: var(--bg);
+  border-color: var(--line);
+  opacity: 0.7;
 }
 
 .rack-tile.is-picked {
-  background: #ffd84d;
-  border-color: #c9a52c;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-invert);
   transform: translateY(-4px);
 }
 
@@ -449,56 +565,61 @@ body {
   right: 1px;
   font-size: 9px;
   font-weight: 700;
-  opacity: 0.6;
+  opacity: 0.7;
 }
 
 .t-valid {
-  border-color: #8fb573;
-  box-shadow: 0 2px 3px rgba(90, 122, 61, 0.35);
+  border-color: var(--ok-edge);
+  box-shadow: 0 2px 3px var(--shadow);
 }
 
 .t-invalid {
-  background: #ffe3e0;
-  border-color: #de7c72;
-  color: #a33025;
+  background: var(--bad-bg);
+  border-color: var(--bad-edge);
+  color: var(--bad-ink);
 }
 
 .t-isolated {
-  background: #fff0d2;
-  border-color: #dfb45e;
-  color: #8a6210;
+  background: var(--iso-bg);
+  border-color: var(--iso-edge);
+  color: var(--iso-ink);
 }
 
 /* A real word, but marooned from the rest of the board — it still has to be
    joined up before the board counts as finished. */
 .t-disconnected {
-  background: #ffe2c0;
-  border-color: #e08a3c;
-  color: #9a4f0d;
-  box-shadow: 0 2px 3px rgba(154, 79, 13, 0.3);
+  background: var(--warn-bg);
+  border-color: var(--warn-edge);
+  color: var(--warn-ink);
+  box-shadow: 0 2px 3px var(--shadow);
 }
 
 /* On the board the whole cell carries the colour — border tints alone vanish
    once the frame is gone, so each status gets a solid fill instead. */
 .board-tile.t-valid {
-  background: #dcedc4;
-  color: #3f5c22;
+  background: var(--ok-bg);
+  color: var(--ok-ink);
 }
 
 .board-tile.t-invalid {
-  background: #f5c6bf;
-  color: #a33025;
+  background: var(--bad-bg);
+  color: var(--bad-ink);
 }
 
 .board-tile.t-isolated {
-  background: #ffeebb;
-  color: #8a6210;
+  background: var(--iso-bg);
+  color: var(--iso-ink);
 }
 
 .board-tile.t-disconnected {
-  background: #ffd9a6;
-  color: #9a4f0d;
+  background: var(--warn-bg);
+  color: var(--warn-ink);
   box-shadow: none;
+}
+
+/* Duel: a placed tile is down for good. No grab cursor, no pretending. */
+.board-tile.is-locked {
+  cursor: default;
 }
 
 .ghost {
@@ -516,8 +637,8 @@ body {
 /* ---------- word controls ---------- */
 
 .board-tile.is-in-word {
-  background: #ffd84d;
-  box-shadow: inset 0 0 0 2px #c9a52c;
+  background: var(--select-bg);
+  box-shadow: inset 0 0 0 2px var(--line);
 }
 
 .is-word-tile {
@@ -543,10 +664,10 @@ body {
   flex-direction: column;
   gap: 3px;
   padding: 4px;
-  background: #fffbea;
-  border: 2px solid #c9a52c;
+  background: var(--surface);
+  border: 2px solid var(--line);
   border-radius: 9px;
-  box-shadow: 0 3px 8px rgba(61, 53, 36, 0.3);
+  box-shadow: 0 3px 8px var(--shadow);
 }
 
 .word-controls-row {
@@ -558,7 +679,7 @@ body {
 }
 
 .word-controls-row:hover {
-  background: #fff2c8;
+  background: var(--surface-alt);
 }
 
 .word-controls-name {
@@ -591,16 +712,16 @@ body {
   font-size: 18px;
   line-height: 1;
   color: var(--ink);
-  background: #fff3c4;
-  border: 1px solid #c9a52c;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
   border-radius: 7px;
   cursor: pointer;
 }
 
 .word-btn:hover:not(:disabled) {
-  background: #3d3524;
-  border-color: #3d3524;
-  color: #ffd84d;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-invert);
 }
 
 .word-btn:disabled {
@@ -614,9 +735,9 @@ body {
 }
 
 .word-btn-remove:hover:not(:disabled) {
-  background: #a33025;
-  border-color: #a33025;
-  color: #fff;
+  background: var(--bad-ink);
+  border-color: var(--bad-ink);
+  color: var(--surface);
 }
 
 .word-ghost {
@@ -646,8 +767,8 @@ body {
   padding: 8px 18px;
   font-size: 14px;
   font-weight: 600;
-  background: #fbe4e1;
-  color: #8f2c22;
+  background: var(--bad-tone-bg);
+  color: var(--bad-ink);
   border-top: 1px solid var(--cell-line);
 }
 
@@ -658,16 +779,16 @@ body {
   align-items: center;
   gap: 12px;
   padding: 8px 18px;
-  background: #fbf3d8;
-  border-top: 1px solid var(--cell-line);
+  background: var(--surface);
+  border-top: 1px solid var(--line-soft);
 }
 
 .word-bar-bad {
-  background: #fbe4e1;
+  background: var(--bad-tone-bg);
 }
 
 .word-bar-good {
-  background: #e9f2dc;
+  background: var(--good-tone-bg);
 }
 
 .word-bar-letters {
@@ -692,23 +813,23 @@ body {
 
 /* `.t-valid` alone only tints the border, which is too subtle at this size. */
 .word-tile.t-valid {
-  background: #dcedc4;
-  border-color: #7f9f5f;
-  color: #3f5c22;
+  background: var(--ok-bg);
+  border-color: var(--ok-edge);
+  color: var(--ok-ink);
 }
 
 .word-tile:hover {
-  background: #f8ded9;
-  border-color: #c98a80;
-  color: #a33025;
+  background: var(--bad-bg);
+  border-color: var(--bad-edge);
+  color: var(--bad-ink);
 }
 
 /* A hole in the word, waiting to be dropped onto a letter already placed. */
 .word-tile-gap,
 .word-tile-gap:hover {
-  background: #f3ead2;
+  background: var(--surface-alt);
   border-style: dashed;
-  border-color: #b9a469;
+  border-color: var(--line);
   box-shadow: none;
 }
 
@@ -745,7 +866,7 @@ body {
   width: 1px;
   align-self: stretch;
   margin: 0 6px;
-  background: #ddd0a8;
+  background: var(--line-soft);
 }
 
 .icon-btn {
@@ -757,10 +878,10 @@ body {
   padding: 0;
   font-size: 19px;
   color: var(--ink);
-  background: #fff3c4;
-  border: 2px solid #c9a52c;
+  background: var(--surface);
+  border: 2px solid var(--line);
   border-radius: 9px;
-  box-shadow: 0 2px 0 #c9a52c;
+  box-shadow: 0 2px 0 var(--line);
   cursor: pointer;
 }
 
@@ -786,9 +907,9 @@ body {
 }
 
 .icon-btn-confirm {
-  background: #dcedc4;
-  border-color: #7f9f5f;
-  box-shadow: 0 2px 0 #7f9f5f;
+  background: var(--ok-bg);
+  border-color: var(--ok-edge);
+  box-shadow: 0 2px 0 var(--ok-edge);
 }
 
 /* ---------- menu ---------- */
@@ -804,10 +925,10 @@ body {
   z-index: 60;
   min-width: 150px;
   padding: 5px;
-  background: #fffbea;
-  border: 2px solid #c9a52c;
+  background: var(--surface);
+  border: 2px solid var(--line);
   border-radius: 11px;
-  box-shadow: 0 6px 16px rgba(61, 53, 36, 0.25);
+  box-shadow: 0 6px 16px var(--shadow);
 }
 
 .menu-item {
@@ -825,7 +946,7 @@ body {
 }
 
 .menu-item:hover {
-  background: #fff2c8;
+  background: var(--surface-alt);
 }
 
 /* ---------- splash & dialogs ---------- */
@@ -838,7 +959,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(61, 53, 36, 0.35);
+  background: var(--shadow-strong);
 }
 
 .splash {
@@ -848,10 +969,10 @@ body {
   gap: 4px;
   padding: 26px 40px;
   text-align: center;
-  background: #ffd84d;
-  border: 3px solid #c9a52c;
+  background: var(--surface);
+  border: 3px solid var(--ink);
   border-radius: 18px;
-  box-shadow: 0 10px 28px rgba(61, 53, 36, 0.35);
+  box-shadow: 0 10px 28px var(--shadow-strong);
   animation: splash-in 180ms ease-out;
 }
 
@@ -907,7 +1028,7 @@ body {
 }
 
 .splash-standing-self {
-  background: #fff3c4;
+  background: var(--surface-alt);
   border-radius: 8px;
 }
 
@@ -938,7 +1059,8 @@ body {
 
 /* ---------- finish summary & stats page ---------- */
 
-/* A whole screen, not a card: the game's closing report and the stats page. */
+/* A whole screen, not a card: the game's closing report, the stats page and
+   the settings page. */
 .summary {
   position: fixed;
   inset: 0;
@@ -985,8 +1107,8 @@ body {
   flex: 1;
   max-width: 190px;
   padding: 14px 18px;
-  background: #ffd84d;
-  border: 3px solid #c9a52c;
+  background: var(--surface);
+  border: 3px solid var(--ink);
   border-radius: 16px;
 }
 
@@ -1027,14 +1149,14 @@ body {
   padding: 6px 13px;
   font-size: 14px;
   font-weight: 700;
-  background: #fff3c4;
-  border: 2px solid #c9a52c;
+  background: var(--surface-alt);
+  border: 2px solid var(--line);
   border-radius: 999px;
   white-space: nowrap;
 }
 
 .summary-length-count {
-  color: #8a6210;
+  opacity: 0.6;
 }
 
 .summary-words {
@@ -1053,8 +1175,8 @@ body {
   gap: 10px;
   padding: 8px 12px;
   font-weight: 700;
-  background: #fffbea;
-  border: 2px solid var(--tile-edge);
+  background: var(--surface);
+  border: 2px solid var(--line-soft);
   border-radius: 10px;
 }
 
@@ -1067,8 +1189,8 @@ body {
   font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: #3f5c22;
-  background: #dcedc4;
+  color: var(--ok-ink);
+  background: var(--ok-bg);
   border-radius: 999px;
   white-space: nowrap;
 }
@@ -1100,13 +1222,56 @@ body {
   white-space: nowrap;
 }
 
+/* ---------- settings ---------- */
+
+.settings-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.settings-option:hover {
+  background: var(--surface-alt);
+}
+
+.settings-option.is-active {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.settings-option-label {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.settings-option-detail {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
 .dialog {
   max-width: 380px;
   padding: 22px;
-  background: #fffbea;
-  border: 3px solid #c9a52c;
+  background: var(--surface);
+  border: 3px solid var(--ink);
   border-radius: 16px;
-  box-shadow: 0 10px 28px rgba(61, 53, 36, 0.35);
+  box-shadow: 0 10px 28px var(--shadow-strong);
 }
 
 .dialog-message {
@@ -1127,8 +1292,8 @@ body {
    corner while the tiles scroll underneath. */
 .rack-wrap {
   position: relative;
-  background: #f2e9d2;
-  border-top: 3px solid #e0b62e;
+  background: var(--surface-alt);
+  border-top: 3px solid var(--ink);
 }
 
 .rack {
@@ -1139,7 +1304,7 @@ body {
   /* Right padding keeps the last tile of a row out from under shuffle. */
   padding: 12px 56px calc(12px + env(safe-area-inset-bottom)) 18px;
   min-height: 76px;
-  /* Later levels deal up to 60 tiles — let the pile scroll rather than
+  /* Big deals run to dozens of tiles — let the pile scroll rather than
      squeezing the board off the screen. */
   max-height: 28vh;
   overflow-y: auto;
@@ -1158,7 +1323,7 @@ body {
   align-self: center;
 }
 
-/* Fresh Endless tiles drop into the pile one after another. */
+/* Fresh tiles drop into the pile one after another. */
 .rack-tile-new {
   animation: tile-drop-in 600ms cubic-bezier(0.2, 0.9, 0.3, 1.35) backwards;
 }
@@ -1231,23 +1396,23 @@ body {
   font: inherit;
   text-align: left;
   color: var(--ink);
-  background: #fffbea;
-  border: 3px solid #c9a52c;
+  background: var(--surface);
+  border: 3px solid var(--line);
   border-radius: 16px;
-  box-shadow: 0 3px 0 #c9a52c;
+  box-shadow: 0 3px 0 var(--line);
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
 .mode-card:hover {
-  background: #fff3c4;
+  background: var(--surface-alt);
   transform: translateY(-2px);
-  box-shadow: 0 5px 0 #c9a52c;
+  box-shadow: 0 5px 0 var(--line);
 }
 
 .mode-card:active {
   transform: translateY(1px);
-  box-shadow: 0 2px 0 #c9a52c;
+  box-shadow: 0 2px 0 var(--line);
 }
 
 .mode-card-name {
@@ -1276,7 +1441,7 @@ body {
 
 .mode-card-detail::before {
   content: '· ';
-  color: #c9a52c;
+  opacity: 0.7;
 }
 
 .mode-card-play {
@@ -1284,15 +1449,59 @@ body {
   padding: 6px 14px;
   font-size: 14px;
   font-weight: 700;
-  color: #ffd84d;
-  background: #3d3524;
+  color: var(--ink-invert);
+  background: var(--accent);
   border-radius: 999px;
 }
 
 .home-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
+}
+
+/* ---------- tutorial ---------- */
+
+/* Rides between the header and the board: the current step's instructions,
+   always visible while the player works the board underneath. */
+.tutorial-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 18px;
+  font-size: 14px;
+  line-height: 1.45;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.tutorial-step {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--ink-invert);
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.tutorial-text {
+  margin: 0;
+}
+
+.tutorial-text kbd {
+  padding: 1px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  white-space: nowrap;
 }
 
 /* ---------- how-to modal ---------- */
@@ -1346,8 +1555,8 @@ body {
   padding: 10px 12px;
   font-size: 14px;
   line-height: 1.45;
-  background: #fffbea;
-  border: 2px solid var(--tile-edge);
+  background: var(--surface);
+  border: 2px solid var(--line-soft);
   border-radius: 12px;
 }
 
@@ -1369,41 +1578,42 @@ body {
   font-size: 16px;
   font-weight: 700;
   text-transform: uppercase;
+  color: var(--ink);
   background: var(--tile-face);
   border: 2px solid var(--tile-edge);
   border-radius: 8px;
-  box-shadow: 0 2px 3px rgba(61, 53, 36, 0.25);
+  box-shadow: 0 2px 3px var(--shadow);
 }
 
 .howto-tile-valid {
-  background: #dcedc4;
-  border-color: #8fb573;
-  color: #3f5c22;
+  background: var(--ok-bg);
+  border-color: var(--ok-edge);
+  color: var(--ok-ink);
 }
 
 .howto-tile-disconnected {
-  background: #ffd9a6;
-  border-color: #e08a3c;
-  color: #9a4f0d;
+  background: var(--warn-bg);
+  border-color: var(--warn-edge);
+  color: var(--warn-ink);
 }
 
 .howto-tile-invalid {
-  background: #f5c6bf;
-  border-color: #de7c72;
-  color: #a33025;
+  background: var(--bad-bg);
+  border-color: var(--bad-edge);
+  color: var(--bad-ink);
 }
 
 .howto-tile-gap {
-  background: #f3ead2;
+  background: var(--surface-alt);
   border-style: dashed;
-  border-color: #b9a469;
+  border-color: var(--line);
   box-shadow: none;
 }
 
 .howto-tile-cursor {
-  background: #fff4cf;
-  border-color: #e0b62e;
-  box-shadow: inset 0 0 0 3px #e0b62e;
+  background: var(--focus-bg);
+  border-color: var(--focus);
+  box-shadow: inset 0 0 0 3px var(--focus);
 }
 
 /* Game buttons shown as pictures — the same classes the live ones wear, made
@@ -1429,8 +1639,8 @@ body {
   font-family: inherit;
   font-size: 12px;
   font-weight: 700;
-  background: #fff3c4;
-  border: 1px solid #c9a52c;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
   border-bottom-width: 2px;
   border-radius: 5px;
   white-space: nowrap;
@@ -1441,7 +1651,7 @@ body {
     --cell-base: 38px;
   }
 
-  /* Score, level and the menu all share one row — no wrapping, no growing
+  /* Score, clocks and the menu all share one row — no wrapping, no growing
      header eating the board. */
   .header {
     flex-wrap: nowrap;
@@ -1450,7 +1660,7 @@ body {
   }
 
   .scoreboard {
-    gap: 12px;
+    gap: 10px;
     flex-wrap: nowrap;
     min-width: 0;
   }
@@ -1470,11 +1680,6 @@ body {
 
   .btn {
     padding: 7px 10px;
-  }
-
-  /* "Next level →" is just "Next →" when space is short. */
-  .btn-long {
-    display: none;
   }
 
   /* The word being typed gets a row of its own; the buttons drop to a second
@@ -1524,19 +1729,6 @@ body {
     font-size: 28px;
   }
 
-  /* The endless header carries score, clock and health — tighten up. */
-  .scoreboard {
-    gap: 10px;
-  }
-
-  .health-bar {
-    width: 64px;
-  }
-
-  .health-count {
-    display: none;
-  }
-
   .game-toast {
     top: 58px;
     max-width: calc(100vw - 24px);
@@ -1562,9 +1754,15 @@ body {
     align-items: flex-start;
     gap: 8px;
   }
+
+  .tutorial-banner {
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+  }
 }
 
-/* ---------- endless battle ---------- */
+/* ---------- multiplayer screens ---------- */
 
 .battle-inner {
   max-width: 480px;
@@ -1575,10 +1773,10 @@ body {
   flex-direction: column;
   gap: 14px;
   padding: 22px 20px;
-  background: #fffbea;
-  border: 3px solid #c9a52c;
+  background: var(--surface);
+  border: 3px solid var(--line);
   border-radius: 16px;
-  box-shadow: 0 3px 0 #c9a52c;
+  box-shadow: 0 3px 0 var(--line);
 }
 
 .battle-field {
@@ -1600,15 +1798,15 @@ body {
   font-weight: 600;
   color: var(--ink);
   padding: 10px 12px;
-  background: #fff;
-  border: 2px solid #d9c58a;
+  background: var(--surface);
+  border: 2px solid var(--line);
   border-radius: 10px;
 }
 
 .battle-input:focus {
   outline: none;
-  border-color: #c9a52c;
-  box-shadow: 0 0 0 3px #fff3c4;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--surface-alt);
 }
 
 .battle-code-input {
@@ -1642,7 +1840,7 @@ body {
   content: '';
   flex: 1;
   height: 2px;
-  background: #ecdfba;
+  background: var(--line-soft);
   border-radius: 1px;
 }
 
@@ -1658,7 +1856,7 @@ body {
   margin: 0;
   font-size: 14px;
   font-weight: 700;
-  color: #a33d2c;
+  color: var(--bad-ink);
   text-align: center;
 }
 
@@ -1681,8 +1879,8 @@ body {
   font-weight: 800;
   letter-spacing: 0.3em;
   text-indent: 0.3em;
-  background: #fff3c4;
-  border: 2px dashed #c9a52c;
+  background: var(--surface-alt);
+  border: 2px dashed var(--line);
   border-radius: 12px;
   user-select: all;
 }
@@ -1708,7 +1906,7 @@ body {
   justify-content: space-between;
   gap: 10px;
   padding: 9px 4px;
-  border-top: 2px solid #f4ecd4;
+  border-top: 2px solid var(--line-soft);
   font-weight: 600;
 }
 
@@ -1735,18 +1933,18 @@ body {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
-  background: #fff3c4;
-  border: 1px solid #c9a52c;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
   white-space: nowrap;
 }
 
 .battle-chip-you {
-  background: #3d3524;
-  border-color: #3d3524;
-  color: #ffd84d;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-invert);
 }
 
-/* ---------- live standings (top-left of the board) ---------- */
+/* ---------- board area ---------- */
 
 /* Holds the board viewport. */
 .board-area {
@@ -1776,19 +1974,19 @@ body {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: #fffbea;
-  border: 2px solid #ecdfba;
+  background: var(--surface);
+  border: 2px solid var(--line-soft);
   border-radius: 12px;
   font-weight: 600;
 }
 
 .battle-results-winner {
-  background: #fff3c4;
-  border-color: #c9a52c;
+  background: var(--surface-alt);
+  border-color: var(--ink);
 }
 
 .battle-results-self {
-  border-color: #3d3524;
+  border-color: var(--line);
 }
 
 .battle-results-rank {
@@ -1834,12 +2032,97 @@ body {
   padding: 10px 18px;
   font-size: 14px;
   font-weight: 700;
-  color: #ffd84d;
-  background: #3d3524;
+  color: var(--ink-invert);
+  background: var(--accent);
   border: none;
   border-radius: 999px;
-  box-shadow: 0 4px 12px rgba(61, 53, 36, 0.35);
+  box-shadow: 0 4px 12px var(--shadow);
   cursor: pointer;
+}
+
+/* ---------- connection trouble ---------- */
+
+/* Over everything but dialogs: the game is held while a link heals. */
+.net-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 350;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--shadow-strong);
+}
+
+.net-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 380px;
+  padding: 24px 28px;
+  text-align: center;
+  background: var(--surface);
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  box-shadow: 0 10px 28px var(--shadow-strong);
+}
+
+.net-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.net-note {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.75;
+  line-height: 1.45;
+}
+
+.net-players {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-self: stretch;
+}
+
+.net-player {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 14px;
+  font-weight: 700;
+  background: var(--surface-alt);
+  border-radius: 8px;
+}
+
+/* The little "still trying" heartbeat beside a reconnecting name. */
+.net-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ink);
+  animation: net-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes net-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.net-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 @media (max-width: 540px) {

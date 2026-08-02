@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { CODE_LENGTH, isValidBattleCode, normalizeBattleCode } from '../game/battle';
+import { CODE_LENGTH, isValidBattleCode, normalizeBattleCode, type BattleMode } from '../game/battle';
 
 interface BattleMenuProps {
+  /** Which game hosting from here opens: an Endless Battle or a Duel. */
+  mode: BattleMode;
   /** The player name last used on this device, to save retyping. */
   initialName: string;
   /** A code carried in by a share link, ready to join. */
@@ -15,12 +17,29 @@ interface BattleMenuProps {
   onBack: () => void;
 }
 
+const COPY: Record<BattleMode, { title: string; tagline: string; host: string }> = {
+  endless: {
+    title: 'Endless Battle',
+    tagline:
+      'Everyone digs out of the same tiles — the last board standing, or the highest score, takes it.',
+    host: 'Host a game',
+  },
+  duel: {
+    title: 'Duel',
+    tagline:
+      'Two players, the same tiles. Placed words are permanent — and every word sends tiles to your opponent. Overflow your pile and you lose.',
+    host: 'Host a duel',
+  },
+};
+
 /**
- * The battle doorway: give a name, then either open a lobby or enter a
+ * The multiplayer doorway: give a name, then either open a lobby or enter a
  * friend's code. Arriving by share link lands here with the code filled in,
- * so joining is just confirming a name.
+ * so joining is just confirming a name. (Joining works for either mode —
+ * the code decides what game you land in.)
  */
 export function BattleMenu({
+  mode,
   initialName,
   initialCode,
   busy,
@@ -35,6 +54,7 @@ export function BattleMenu({
   const trimmedName = name.trim();
   const codeReady = isValidBattleCode(normalizeBattleCode(code));
   const disabled = busy !== null;
+  const copy = COPY[mode];
 
   const join = () => {
     if (trimmedName && codeReady) onJoin(trimmedName, normalizeBattleCode(code));
@@ -44,11 +64,8 @@ export function BattleMenu({
     <div className="home">
       <div className="home-inner battle-inner">
         <header className="home-header">
-          <h1 className="home-title">Endless Battle</h1>
-          <p className="home-tagline">
-            Everyone digs out of the same tiles — the last board standing, or the highest
-            score, takes it.
-          </p>
+          <h1 className="home-title">{copy.title}</h1>
+          <p className="home-tagline">{copy.tagline}</p>
         </header>
 
         <div className="battle-card">
@@ -59,7 +76,7 @@ export function BattleMenu({
               type="text"
               value={name}
               maxLength={24}
-              placeholder="e.g. Banana Fan"
+              placeholder="e.g. Alex"
               autoFocus={initialCode === ''}
               disabled={disabled}
               onChange={(e) => setName(e.target.value)}
@@ -72,7 +89,7 @@ export function BattleMenu({
             disabled={disabled || trimmedName === ''}
             onClick={() => onHost(trimmedName)}
           >
-            Host a game
+            {copy.host}
           </button>
 
           <div className="battle-divider">

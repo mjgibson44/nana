@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { validateBoard } from '../board';
 import { COMMON_WORDS } from '../commonWords';
 import { extendPuzzle, generatePuzzle } from '../generator';
-import { BOARD_SIZE, tilesAddedForLevel } from '../levels';
+import { BOARD_SIZE } from '../levels';
 import type { TileMap } from '../types';
 import { parseKey } from '../types';
 
@@ -118,11 +118,11 @@ describe('extendPuzzle', () => {
     }
   });
 
-  it('carries a board all the way to the last level, 10 tiles at a time', () => {
+  it('carries a board through four more deals, 10 tiles at a time', () => {
     for (let run = 0; run < 10; run++) {
       let board = openingBoard();
-      for (let level = 2; level <= 5; level++) {
-        const dealt = extendPuzzle(board, BOARD_SIZE, COMMON_WORDS, tilesAddedForLevel(level));
+      for (let deal = 2; deal <= 5; deal++) {
+        const dealt = extendPuzzle(board, BOARD_SIZE, COMMON_WORDS, 10);
         expect(dealt.letters).toHaveLength(10);
         expect(dealt.solution).not.toBeNull();
         // Play the arrangement and carry on from there, as a player would.

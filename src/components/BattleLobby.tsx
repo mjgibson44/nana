@@ -55,21 +55,24 @@ function CopyButton({ label, text }: { label: string; text: string }) {
 }
 
 /**
- * The room where a battle gathers. The host shares the code (or the link that
- * carries it) and starts the game once everyone's in; everyone else watches
- * the roster fill. A player who joins while a game is running waits here for
- * the next one.
+ * The room where a multiplayer game gathers. The host shares the code (or
+ * the link that carries it) and starts the game once everyone's in; everyone
+ * else watches the roster fill. A player who joins while a game is running
+ * waits here for the next one. A Duel seats exactly two, so its start button
+ * waits for an opponent.
  */
 export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: BattleLobbyProps) {
   const host = state.players.find((p) => p.host);
   const gameRunning = state.phase !== 'lobby';
   const alone = state.players.length === 1;
+  const duel = state.mode === 'duel';
+  const duelReady = state.players.filter((p) => !p.left).length >= 2;
 
   return (
     <div className="home">
       <div className="home-inner battle-inner">
         <header className="home-header">
-          <span className="splash-eyebrow">Endless Battle</span>
+          <span className="splash-eyebrow">{duel ? 'Duel' : 'Endless Battle'}</span>
           <h1 className="home-title battle-lobby-title">Lobby</h1>
         </header>
 
@@ -93,11 +96,13 @@ export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: B
                   {player.host && <span className="battle-chip">Host</span>}
                   {player.id === selfId && <span className="battle-chip battle-chip-you">You</span>}
                 </span>
-                {gameRunning && (
+                {!player.connected ? (
+                  <span className="battle-roster-note">reconnecting…</span>
+                ) : gameRunning ? (
                   <span className="battle-roster-note">
-                    {player.waiting ? 'next game' : player.buried ? 'buried' : 'playing'}
+                    {player.waiting ? 'next game' : player.buried ? 'out' : 'playing'}
                   </span>
-                )}
+                ) : null}
               </li>
             ))}
           </ul>
@@ -108,13 +113,23 @@ export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: B
             </p>
           ) : isHost ? (
             <>
-              {alone && (
+              {duel && !duelReady && (
+                <p className="battle-status">
+                  A duel needs two — share the code and wait for your opponent.
+                </p>
+              )}
+              {!duel && alone && (
                 <p className="battle-status">
                   Share the code so friends can join — or start solo to warm up.
                 </p>
               )}
-              <button type="button" className="btn btn-primary battle-wide-btn" onClick={onStart}>
-                {state.game === 0 ? 'Start game' : 'Start another game'}
+              <button
+                type="button"
+                className="btn btn-primary battle-wide-btn"
+                disabled={duel && !duelReady}
+                onClick={onStart}
+              >
+                {state.game === 0 ? (duel ? 'Start the duel' : 'Start game') : 'Start another game'}
               </button>
             </>
           ) : (
