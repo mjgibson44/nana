@@ -45,7 +45,7 @@ export const MODES: ModeInfo[] = [
     tagline: 'Survive the ever-growing pile.',
     details: [
       '2:00 to place your first 20 tiles',
-      '+5 tiles a minute, and it speeds up',
+      '+5 tiles a minute — it speeds up, then the batches grow',
       'Over 20 loose tiles when a round ends and you’re buried',
     ],
   },
@@ -109,11 +109,32 @@ export function endlessDripSeconds(intervalsElapsed: number): number {
   return ENDLESS_DRIP_STAGES[Math.min(stage, ENDLESS_DRIP_STAGES.length - 1)];
 }
 
-/** How many tiles each timed batch brings. */
-export const ENDLESS_DRIP_TILES = 5;
+/**
+ * How many tiles a timed batch brings, by era: fives while the clock is still
+ * tightening, then — once it's been at its fastest for a while — eights, then
+ * tens for good.
+ */
+export const ENDLESS_DRIP_SIZES = [5, 8, 10];
 
-/** Clearing the pile — every tile placed and connected — feeds the board the
- * same size batch as a timed drop. */
+/** How many rounds at the fastest pace each batch size lasts before the next
+ * one takes over. */
+export const ENDLESS_ROUNDS_PER_SIZE = 5;
+
+/**
+ * How many tiles the batch landing after `intervalsElapsed` drip intervals
+ * brings. Batches only start growing once the clock has tightened all the way
+ * down (see ENDLESS_DRIP_STAGES): five rounds at the fastest pace on the
+ * opening size, five more on the next, and the last size is forever.
+ */
+export function endlessDripTiles(intervalsElapsed: number): number {
+  const fastestFrom = (ENDLESS_DRIP_STAGES.length - 1) * ENDLESS_INTERVALS_PER_STAGE;
+  const roundsAtFastest = intervalsElapsed - fastestFrom;
+  const step = Math.floor(roundsAtFastest / ENDLESS_ROUNDS_PER_SIZE);
+  return ENDLESS_DRIP_SIZES[Math.max(0, Math.min(step, ENDLESS_DRIP_SIZES.length - 1))];
+}
+
+/** Clearing the pile — every tile placed and connected — feeds the board a
+ * small fixed batch, whatever size the timed drops have grown to. */
 export const ENDLESS_CLEAR_TILES = 5;
 
 /** Points for having every tile placed on a fully connected, valid board. */

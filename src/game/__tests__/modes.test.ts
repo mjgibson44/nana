@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ENDLESS_DRIP_STAGES, endlessDripSeconds, formatSeconds, timedLevelSeconds } from '../modes';
+import {
+  ENDLESS_DRIP_STAGES,
+  endlessDripSeconds,
+  endlessDripTiles,
+  formatSeconds,
+  timedLevelSeconds,
+} from '../modes';
 import { LEVEL_COUNT } from '../levels';
 
 describe('timedLevelSeconds', () => {
@@ -47,6 +53,38 @@ describe('endlessDripSeconds', () => {
       expect(endlessDripSeconds(i)).toBeLessThanOrEqual(endlessDripSeconds(i - 1));
     }
     expect(endlessDripSeconds(20)).toBe(ENDLESS_DRIP_STAGES[ENDLESS_DRIP_STAGES.length - 1]);
+  });
+});
+
+describe('endlessDripTiles', () => {
+  it('deals fives while the clock is still tightening', () => {
+    for (let i = 0; i <= 5; i++) {
+      expect(endlessDripTiles(i)).toBe(5);
+    }
+  });
+
+  it('holds fives for the first five rounds at the fastest pace', () => {
+    // 30-second rounds start at interval 6; the batch grows only after five
+    // of them have been survived.
+    expect(endlessDripTiles(6)).toBe(5);
+    expect(endlessDripTiles(10)).toBe(5);
+  });
+
+  it('grows to eight, then ten, five rounds apart', () => {
+    expect(endlessDripTiles(11)).toBe(8);
+    expect(endlessDripTiles(15)).toBe(8);
+    expect(endlessDripTiles(16)).toBe(10);
+  });
+
+  it('stays at ten forever after', () => {
+    expect(endlessDripTiles(21)).toBe(10);
+    expect(endlessDripTiles(100)).toBe(10);
+  });
+
+  it('only ever grows', () => {
+    for (let i = 1; i <= 30; i++) {
+      expect(endlessDripTiles(i)).toBeGreaterThanOrEqual(endlessDripTiles(i - 1));
+    }
   });
 });
 
