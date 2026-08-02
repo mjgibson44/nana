@@ -1,13 +1,30 @@
 import { LEVEL_COUNT, levelName, tilesAddedForLevel } from '../game/levels';
 import {
+  ENDLESS_DRIP_TILES,
   ENDLESS_INITIAL_SECONDS,
   formatSeconds,
   timedLevelSeconds,
   type GameMode,
 } from '../game/modes';
 
-/** What the card is announcing: a level starting, or Endless tightening its clock. */
-export type Splash = { kind: 'level'; level: number } | { kind: 'speedup'; seconds: number };
+/** One line of the between-rounds battle scoreboard. */
+export interface RoundStanding {
+  rank: number;
+  name: string;
+  score: number;
+  self: boolean;
+  /** Buried or gone — out of the running either way. */
+  buried: boolean;
+}
+
+/**
+ * What the card is announcing: a level starting, Endless tightening its
+ * clock, or a battle round ending with the whole field's scores.
+ */
+export type Splash =
+  | { kind: 'level'; level: number }
+  | { kind: 'speedup'; seconds: number }
+  | { kind: 'round'; standings: RoundStanding[]; seconds: number };
 
 interface LevelSplashProps {
   /** The card to show, or null when nothing is showing. */
@@ -18,15 +35,52 @@ interface LevelSplashProps {
 
 /**
  * A card that pops over the board to name the level just reached — or, in
- * Endless, to warn that tiles are about to start coming faster — then gets out
- * of the way on its own. Clicking anywhere dismisses it early. The end of the
- * game gets the full-screen summary instead of this card.
+ * Endless, to warn that tiles are about to start coming faster, or between
+ * battle rounds to show where everyone stands — then gets out of the way on
+ * its own. Clicking anywhere dismisses it early. The end of the game gets the
+ * full-screen summary instead of this card.
  *
- * Modes with a clock say what's on it — the countdown itself waits until this
- * card is gone, so reading it costs nothing.
+ * Solo modes with a clock say what's on it — the countdown itself waits until
+ * this card is gone, so reading it costs nothing. A battle's shared clock
+ * keeps running behind the card, which is why the round card dismisses on a
+ * tap anywhere.
  */
 export function LevelSplash({ splash, mode, onDismiss }: LevelSplashProps) {
   if (splash === null) return null;
+
+  if (splash.kind === 'round') {
+    return (
+      <div className="splash-backdrop" onClick={onDismiss} role="presentation">
+        <div className="splash splash-round" role="status" aria-live="polite">
+          <span className="splash-eyebrow">Endless battle</span>
+          <span className="splash-name">Round over!</span>
+          <ol className="splash-standings">
+            {splash.standings.map((standing, i) => (
+              <li
+                // eslint-disable-next-line react/no-array-index-key
+                key={i}
+                className={
+                  'splash-standing' +
+                  (standing.self ? ' splash-standing-self' : '') +
+                  (standing.buried ? ' splash-standing-buried' : '')
+                }
+              >
+                <span className="splash-standing-place">{standing.rank}</span>
+                <span className="splash-standing-name">
+                  {standing.name}
+                  {standing.buried && ' 💀'}
+                </span>
+                <span className="splash-standing-score">{standing.score}</span>
+              </li>
+            ))}
+          </ol>
+          <span className="splash-note">
+            +{ENDLESS_DRIP_TILES} tiles · next batch in {formatSeconds(splash.seconds)}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   const content =
     splash.kind === 'speedup'

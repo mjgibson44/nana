@@ -2,10 +2,11 @@ interface ConfirmDialogProps {
   /** Null when nothing is being asked. */
   message: string | null;
   confirmLabel: string;
-  /** The safe way out — also what clicking the backdrop does. */
-  cancelLabel?: string;
+  /** The safe way out — also what clicking the backdrop does. Pass null for a
+   * one-button notice, where confirming is the only way on. */
+  cancelLabel?: string | null;
   onConfirm: () => void;
-  onCancel: () => void;
+  onCancel?: () => void;
 }
 
 export function ConfirmDialog({
@@ -17,8 +18,10 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   if (message === null) return null;
 
+  const dismiss = cancelLabel === null ? onConfirm : (onCancel ?? onConfirm);
+
   return (
-    <div className="splash-backdrop" onClick={onCancel} role="presentation">
+    <div className="splash-backdrop" onClick={dismiss} role="presentation">
       <div
         className="dialog"
         role="dialog"
@@ -28,9 +31,11 @@ export function ConfirmDialog({
       >
         <p className="dialog-message">{message}</p>
         <div className="dialog-actions">
-          <button type="button" className="btn btn-cancel" onClick={onCancel}>
-            {cancelLabel}
-          </button>
+          {cancelLabel !== null && (
+            <button type="button" className="btn btn-cancel" onClick={onCancel}>
+              {cancelLabel}
+            </button>
+          )}
           <button type="button" className="btn btn-primary" onClick={onConfirm}>
             {confirmLabel}
           </button>
