@@ -97,23 +97,30 @@ export interface TileStream {
   next(count: number): string[];
 }
 
+/** The fixed size the stream grows its hidden board by, whatever callers ask
+ * for — see the determinism contract on createTileStream. */
+const STREAM_CHUNK = 5;
+
 /**
  * The battle deal. Exactly Endless's generator — a hidden crossword grown
  * word by word — but driven by a seeded RNG, and grown off its own private
  * solution board rather than the player's real one. Players' boards diverge
  * immediately, so growing from them would deal different letters; growing
- * from the shared hidden board keeps every player's batches identical while
+ * from the shared hidden board keeps every player's letters identical while
  * still drawing letters that weave into real crossing words.
  *
- * Determinism contract: two streams with the same seed deal the same batches
- * as long as they're asked for the same counts in the same order. Endless
- * only ever deals the opening batch and then fives (a timed drip and a
- * pile-clear are the same size), so every player's Nth batch matches no
- * matter how their drips and clears interleave.
+ * Determinism contract: two streams with the same seed deal the same opening
+ * batch (every client asks for the same one) and after it the identical
+ * sequence of letters, however the requests are sized. Drip batches grow as
+ * an Endless game wears on while pile-clears stay small, so players' request
+ * sizes interleave differently — which is why the hidden board always grows
+ * by the same fixed chunk and requests just drain the resulting sequence.
  */
 export function createTileStream(seed: string, wordPool: string[] = COMMON_WORDS): TileStream {
   const rng = seededRng(seed);
   let hidden: TileMap | null = null;
+  /** Letters grown but not yet handed out. */
+  const pending: string[] = [];
   return {
     next(count: number): string[] {
       if (hidden === null) {
@@ -121,9 +128,12 @@ export function createTileStream(seed: string, wordPool: string[] = COMMON_WORDS
         hidden = puzzle.solution;
         return puzzle.letters;
       }
-      const grown = extendPuzzle(hidden, boardBounds(hidden), wordPool, count, rng);
-      if (grown.solution) hidden = grown.solution;
-      return grown.letters;
+      while (pending.length < count) {
+        const grown = extendPuzzle(hidden, boardBounds(hidden), wordPool, STREAM_CHUNK, rng);
+        if (grown.solution) hidden = grown.solution;
+        pending.push(...grown.letters);
+      }
+      return pending.splice(0, count);
     },
   };
 }

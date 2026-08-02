@@ -88,8 +88,9 @@ in `src/game/modes.ts`.
   for level 2, and 15 seconds less for each level after. Out of time is game
   over.
 - **Endless** — no levels. 2:00 to work the starting 20 tiles, then 5 more
-  tiles arrive on a clock that keeps tightening. Clearing the pile pays a
-  25-point bonus and 5 more tiles. Loose tiles — unplaced or not validly
+  tiles arrive on a clock that keeps tightening — and once it's been at its
+  fastest for five rounds the batches grow to 8, then five rounds later to
+  10 for good. Clearing the pile pays a 25-point bonus and 5 more tiles. Loose tiles — unplaced or not validly
   connected — are counted against the limit in the header: green while
   comfortable, orange near 20, red once you're over. Going over the limit
   doesn't end the game by itself; still being over when the round's clock

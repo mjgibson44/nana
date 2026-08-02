@@ -58,6 +58,19 @@ describe('createTileStream', () => {
     }
   });
 
+  it('deals the same letter sequence however the requests are sized', () => {
+    // Late-game drips grow to eights and tens while pile-clears stay at
+    // five, so two players' request sizes interleave differently. The
+    // letters must not: same seed, same sequence, just cut differently.
+    const seed = 'chunky';
+    const a = createTileStream(seed);
+    const b = createTileStream(seed);
+    expect(a.next(20)).toEqual(b.next(20));
+    const lettersA = [5, 8, 5, 10, 8].flatMap((count) => a.next(count));
+    const lettersB = [8, 5, 5, 8, 10].flatMap((count) => b.next(count));
+    expect(lettersA).toEqual(lettersB);
+  });
+
   it('deals different games for different seeds', () => {
     const a = createTileStream('seed-one').next(20);
     const b = createTileStream('seed-two').next(20);

@@ -1,6 +1,5 @@
 import { LEVEL_COUNT, levelName, tilesAddedForLevel } from '../game/levels';
 import {
-  ENDLESS_DRIP_TILES,
   ENDLESS_INITIAL_SECONDS,
   formatSeconds,
   timedLevelSeconds,
@@ -18,13 +17,15 @@ export interface RoundStanding {
 }
 
 /**
- * What the card is announcing: a level starting, Endless tightening its
- * clock, or a battle round ending with the whole field's scores.
+ * What the card is announcing: a level starting, Endless turning the screw
+ * (a faster clock or bigger batches), or a battle round ending with the
+ * whole field's scores. `seconds` is the new round length and `tiles` the
+ * batch size it lands with.
  */
 export type Splash =
   | { kind: 'level'; level: number }
-  | { kind: 'speedup'; seconds: number }
-  | { kind: 'round'; standings: RoundStanding[]; seconds: number };
+  | { kind: 'speedup'; seconds: number; tiles: number }
+  | { kind: 'round'; standings: RoundStanding[]; seconds: number; tiles: number };
 
 interface LevelSplashProps {
   /** The card to show, or null when nothing is showing. */
@@ -75,7 +76,7 @@ export function LevelSplash({ splash, mode, onDismiss }: LevelSplashProps) {
             ))}
           </ol>
           <span className="splash-note">
-            +{ENDLESS_DRIP_TILES} tiles · next batch in {formatSeconds(splash.seconds)}
+            +{splash.tiles} tiles · next batch in {formatSeconds(splash.seconds)}
           </span>
         </div>
       </div>
@@ -87,7 +88,7 @@ export function LevelSplash({ splash, mode, onDismiss }: LevelSplashProps) {
       ? {
           eyebrow: 'Endless mode',
           name: 'Speeding up!',
-          note: `New tiles every ${formatSeconds(splash.seconds)} from here`,
+          note: `+${splash.tiles} tiles every ${formatSeconds(splash.seconds)} from here`,
         }
       : levelContent(splash.level, mode);
 

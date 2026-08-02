@@ -14,10 +14,10 @@ import {
 import {
   ENDLESS_CLEAR_TILES,
   ENDLESS_CONNECT_BONUS,
-  ENDLESS_DRIP_TILES,
   ENDLESS_INITIAL_SECONDS,
   ENDLESS_LOOSE_LIMIT,
   endlessDripSeconds,
+  endlessDripTiles,
   timedLevelSeconds,
   type GameMode,
 } from './game/modes';
@@ -736,15 +736,16 @@ export default function App() {
     return () => observer.disconnect();
   }, [screen]);
 
-  /** A centering job waiting for its zoom to reach the DOM first. */
-  const pendingCenter = useRef<{ zoom: number } | null>(null);
+  /** A scroll compensation waiting for its zoom to reach the DOM first. */
+  const pendingFit = useRef<{ zoom: number; fx: number; fy: number } | null>(null);
 
-  // Keep the whole crossword on screen. Whenever the tiles change, re-pick the
-  // zoom that shows all of them — larger while the crossword is small, backing
-  // out as it spreads — and if the zoom moved, or a tile has strayed out of
-  // view, glide the viewport back to centre on the tiles. Reads zoom fresh on
-  // each run but deliberately doesn't depend on it, so a manual pinch is left
-  // alone until the next placement.
+  // Keep the whole crossword fittable: whenever the tiles change, re-pick the
+  // zoom that would show all of them — larger while the crossword is small,
+  // backing out as it spreads, until the zoom-out limit is reached. The
+  // viewport is never steered toward the tiles, though: whatever point the
+  // player is looking at stays put while the board resizes around it. Reads
+  // zoom fresh on each run but deliberately doesn't depend on it, so a manual
+  // pinch is left alone until the next placement.
   useLayoutEffect(() => {
     const wrap = boardWrapRef.current;
     if (!wrap || !tileBox) return;
@@ -758,37 +759,35 @@ export default function App() {
     const fitDown = (wrap.clientHeight / rows - 1) / cellBase;
     const target = Math.min(Math.max(Math.min(fitAcross, fitDown), MIN_ZOOM), AUTO_ZOOM_MAX);
     if (!Number.isFinite(target)) return;
+    if (Math.abs(target - zoom) <= ZOOM_EPSILON) return;
 
-    const zoomChanged = Math.abs(target - zoom) > ZOOM_EPSILON;
-    const slack = 2; // px of rounding forgiveness before "off screen" counts
-    const inView =
-      measured.left >= wrap.scrollLeft - slack &&
-      measured.left + measured.width <= wrap.scrollLeft + wrap.clientWidth + slack &&
-      measured.top >= wrap.scrollTop - slack &&
-      measured.top + measured.height <= wrap.scrollTop + wrap.clientHeight + slack;
-    if (!zoomChanged && inView) return;
-
-    pendingCenter.current = { zoom: zoomChanged ? target : zoom };
-    if (zoomChanged) setZoom(target);
+    // Note where the viewport's centre sits relative to the tiles, so it can
+    // be put back once the new zoom renders — the refit must not move the
+    // player's focus.
+    pendingFit.current = {
+      zoom: target,
+      fx: (wrap.scrollLeft + wrap.clientWidth / 2 - measured.left) / measured.width,
+      fy: (wrap.scrollTop + wrap.clientHeight / 2 - measured.top) / measured.height,
+    };
+    setZoom(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- zoom and bounds
     // are read fresh each run; depending on them would refit on every pinch.
   }, [tileBox, fitTick]);
 
-  // The second half of the fit: once the DOM is laid out at the target zoom,
-  // slide the viewport so the tiles sit in the middle of it.
+  // The second half of the fit: once the DOM is laid out at the new zoom, put
+  // the point the player was looking at straight back under the viewport's
+  // centre. This only cancels the drift the resize itself would cause — it
+  // never glides the view toward the crossword.
   useLayoutEffect(() => {
     const wrap = boardWrapRef.current;
-    const pending = pendingCenter.current;
+    const pending = pendingFit.current;
     if (!wrap || !pending || !tileBox) return;
     if (pending.zoom !== zoom) return; // the zoom render hasn't landed yet
-    pendingCenter.current = null;
+    pendingFit.current = null;
     const measured = measureTiles(wrap, bounds, tileBox);
     if (!measured) return;
-    wrap.scrollTo({
-      left: measured.left + measured.width / 2 - wrap.clientWidth / 2,
-      top: measured.top + measured.height / 2 - wrap.clientHeight / 2,
-      behavior: 'smooth',
-    });
+    wrap.scrollLeft = measured.left + pending.fx * measured.width - wrap.clientWidth / 2;
+    wrap.scrollTop = measured.top + pending.fy * measured.height - wrap.clientHeight / 2;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bounds is read
     // fresh; it only ever changes alongside tileBox.
   }, [zoom, tileBox, fitTick]);
@@ -1228,11 +1227,13 @@ export default function App() {
         finishGame('buried');
         return;
       }
-      dealBonusTiles(ENDLESS_DRIP_TILES, `+${ENDLESS_DRIP_TILES} tiles!`);
       // The opening clock running out starts the drip phase; every expiry
-      // after that is one drip interval gone.
+      // after that is one drip interval gone. The batch dealt here opens the
+      // round numbered `elapsed`, so that's the size it lands at.
       const elapsed = endlessPhase === 'drip' ? dripsElapsed + 1 : 0;
       const seconds = endlessDripSeconds(elapsed);
+      const batch = endlessDripTiles(elapsed);
+      dealBonusTiles(batch, `+${batch} tiles!`);
       if (inBattle && battle && battleState) {
         // Between rounds a battle shows the whole field's scores — this
         // player's own straight from their board, the rest as last reported.
@@ -1247,12 +1248,15 @@ export default function App() {
           self: player.id === battle.selfId,
           buried: player.buried || !player.connected,
         }));
-        setSplash({ kind: 'round', standings, seconds });
-      } else if (elapsed > 0 && seconds < endlessDripSeconds(elapsed - 1)) {
-        // Solo keeps the speedup card: each few intervals the wait gets
-        // shorter, and the splash says so — holding the new clock until it's
+        setSplash({ kind: 'round', standings, seconds, tiles: batch });
+      } else if (
+        elapsed > 0 &&
+        (seconds < endlessDripSeconds(elapsed - 1) || batch > endlessDripTiles(elapsed - 1))
+      ) {
+        // Solo keeps the pressure card: the wait got shorter or the batches
+        // grew, and the splash says so — holding the new clock until it's
         // been read, the same way a level-up splash does.
-        setSplash({ kind: 'speedup', seconds });
+        setSplash({ kind: 'speedup', seconds, tiles: batch });
       }
       setEndlessPhase('drip');
       setDripsElapsed(elapsed);
