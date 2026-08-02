@@ -1,32 +1,108 @@
 import { Peer } from 'peerjs';
 import type { DataConnection } from 'peerjs';
-import { battleOver, newBattleCode, type BattleState } from '../game/battle';
+import {
+  battleOver,
+  duelOver,
+  duelWinner,
+  newBattleCode,
+  type BattleMode,
+  type BattleState,
+} from '../game/battle';
 import { randomSeed } from '../game/rng';
 
 /**
- * Endless Battle's plumbing: browser-to-browser connections over WebRTC, with
+ * Multiplayer plumbing: browser-to-browser connections over WebRTC, with
  * PeerJS's public broker doing the introductions. There is no game server —
  * the host's browser is the authority. It owns the roster, starts and stops
- * games, collects everyone's scores, and decides when the battle is over; the
+ * games, collects everyone's scores, and decides when the game is over; the
  * other players hold one data connection to the host and follow its
  * broadcasts. The join code doubles as the host's address: hosting claims the
  * peer id `nana-battle-<code>`, and joining dials exactly that id.
  *
  * Tiles never travel over these connections. The host shares one seed per
  * game and every client grows the identical deal from it — see
- * src/game/battle.ts.
+ * src/game/battle.ts. (Duel attack batches are the one exception in spirit:
+ * even they travel as a count, not letters — the receiver draws the letters
+ * from a stream seeded off the shared seed.)
+ *
+ * Connection failsafes, in three layers:
+ *
+ *  - Identity survives the connection. Every player carries a stable random
+ *    key (per tab), so when their WebRTC link dies and they dial back in,
+ *    the host re-attaches them to the same seat — score, board and all.
+ *  - The host forgives drops. A player who vanishes mid-game isn't out;
+ *    they're "reconnecting" for a grace period while the game pauses for
+ *    everyone. Only when the grace runs out (or they left on purpose) do
+ *    they count as gone.
+ *  - Clients heal themselves. On any loss — or on waking from a phone's app
+ *    switch to find the link stale — the client quietly redials with backoff
+ *    until the grace period is spent, and only then gives up.
  */
 
 /** Bumped when messages change shape, so a stale tab fails loud, not weird. */
-const PROTOCOL = 1;
+const PROTOCOL = 2;
 
 /** How long connecting may take before it's called a failure. */
 const CONNECT_TIMEOUT_MS = 20_000;
+
+/** How long the host holds a dropped player's seat before they're out. */
+export const RECONNECT_GRACE_MS = 120_000;
+
+/** How long a client keeps redialing before giving up — a touch under the
+ * host's grace so the client stops asking before the seat is gone. */
+const RECONNECT_BUDGET_MS = 115_000;
+
+/** Each reconnect attempt gets this long before the next try. */
+const RECONNECT_ATTEMPT_MS = 12_000;
+
+/** The host announces itself this often so everyone can tell live from dead. */
+const PING_INTERVAL_MS = 10_000;
+
+/**
+ * Silence longer than this means the link is gone even if nobody said so —
+ * wide enough that one delayed ping doesn't trip it, tight enough that the
+ * other players aren't left wondering. (Tripping it isn't fatal anyway: the
+ * game pauses and the seat is held while the player redials.)
+ */
+const STALE_LINK_MS = 25_000;
+
+/**
+ * The transport's own verdict, when it gives one: an ICE state of failed,
+ * closed — or disconnected, which on a dead peer never recovers — means the
+ * link is done. Reacting to it beats waiting out the staleness window.
+ */
+function watchTransport(conn: DataConnection, onDead: () => void): void {
+  const pc = (conn as unknown as { peerConnection?: RTCPeerConnection }).peerConnection;
+  if (!pc) return;
+  const check = () => {
+    const state = pc.iceConnectionState;
+    if (state === 'failed' || state === 'closed') onDead();
+  };
+  pc.addEventListener('iceconnectionstatechange', check);
+}
 
 const PEER_ID_PREFIX = 'nana-battle-';
 
 function peerIdFor(code: string): string {
   return `${PEER_ID_PREFIX}${code.toLowerCase()}`;
+}
+
+/**
+ * This tab's stable player identity. Peer ids change on every reconnect, so
+ * seats are keyed by this instead — sessionStorage keeps it per-tab (so two
+ * tabs in one browser stay two players) and across reloads.
+ */
+function playerKey(): string {
+  const KEY = 'nana.playerKey.v1';
+  try {
+    const existing = window.sessionStorage.getItem(KEY);
+    if (existing) return existing;
+    const fresh = `p-${randomSeed()}${randomSeed()}`;
+    window.sessionStorage.setItem(KEY, fresh);
+    return fresh;
+  } catch {
+    return `p-${randomSeed()}${randomSeed()}`;
+  }
 }
 
 /**
@@ -55,32 +131,45 @@ function newPeer(id?: string): Peer {
 }
 
 type ClientMessage =
-  | { t: 'hello'; name: string; proto: number }
-  | { t: 'progress'; score: number; buried: boolean };
+  | { t: 'hello'; name: string; key: string; proto: number }
+  | { t: 'progress'; score: number; buried: boolean; tiles: number }
+  | { t: 'attack'; count: number }
+  | { t: 'pong' }
+  | { t: 'leave' };
 
 type HostMessage =
   | { t: 'state'; state: BattleState }
   | { t: 'start'; seed: string }
   | { t: 'stop' }
-  | { t: 'reject'; reason: string };
+  | { t: 'reject'; reason: string }
+  | { t: 'attack'; count: number }
+  | { t: 'ping' };
 
 /** What a battle tells the app as it goes. All calls arrive after the
  * host/join promise has resolved. */
 export interface BattleEvents {
-  /** The shared truth changed: roster, scores, phase. */
+  /** The shared truth changed: roster, scores, phase, pauses. */
   onState(state: BattleState): void;
   /** A game is starting (or restarting); grow the deal from this seed. */
   onStart(seed: string): void;
   /** The host sent everyone back to the lobby. */
   onStop(): void;
-  /** The battle is gone for good — connection lost or the lobby closed. */
+  /** The battle is gone for good — connection lost past saving, or the
+   * lobby closed. */
   onEnded(message: string): void;
+  /** Duel: the opponent's word just sent this many tiles our way. */
+  onAttack(count: number): void;
+  /** This client's own link dropped; it's redialing in the background. */
+  onReconnecting(): void;
+  /** The redial worked — same seat, game resumes. */
+  onReconnected(): void;
 }
 
 /** A live battle, hosted or joined. One method surface for both, so the app
  * doesn't fork on which side of the connection it is. */
 export interface BattleHandle {
   readonly code: string;
+  /** This player's stable id — the same one their roster entry carries. */
   readonly selfId: string;
   readonly isHost: boolean;
   /** The latest shared state; safe to read immediately after connecting. */
@@ -90,7 +179,9 @@ export interface BattleHandle {
   /** Host only: send every player back to the lobby. */
   stop(): void;
   /** Report this player's own game as it moves. No-op outside a game. */
-  reportProgress(score: number, buried: boolean): void;
+  reportProgress(score: number, buried: boolean, tiles: number): void;
+  /** Duel: send an attack of `count` tiles to the opponent. */
+  sendAttack(count: number): void;
   /** Leave for good. Hosts take the whole lobby down with them. */
   leave(): void;
 }
@@ -109,7 +200,7 @@ function connectionFailureMessage(err: unknown): string {
     case 'peer-unavailable':
       return 'No game found with that code. Check it with your host and try again.';
     case 'browser-incompatible':
-      return 'This browser can’t make the player-to-player connection battles need.';
+      return 'This browser can’t make the player-to-player connection multiplayer needs.';
     default:
       return 'Couldn’t reach the connection service. Check your network and try again.';
   }
@@ -124,29 +215,47 @@ function clone(state: BattleState): BattleState {
 class HostSession implements BattleHandle {
   readonly isHost = true;
   readonly selfId: string;
+  /** Live connections by player id (the stable key, not the peer id). */
   private readonly conns = new Map<string, DataConnection>();
+  /** When each player was last heard from, for the staleness sweep. */
+  private readonly lastSeen = new Map<string, number>();
+  /** Grace timers for players who dropped and may still come back. */
+  private readonly graceTimers = new Map<string, number>();
   private readonly state: BattleState;
+  private pingTimer: number | undefined;
   private left = false;
+
+  private readonly onVisible = () => {
+    // Coming back from a phone's app switch: make sure the broker link is
+    // up so new joiners (and reconnecting players) can still find us.
+    if (!this.left && this.peer.disconnected && !this.peer.destroyed) this.peer.reconnect();
+  };
 
   constructor(
     private readonly peer: Peer,
     readonly code: string,
     hostName: string,
+    mode: BattleMode,
     private readonly events: BattleEvents,
   ) {
-    this.selfId = peer.id;
+    this.selfId = playerKey();
     this.state = {
+      mode,
       phase: 'lobby',
       game: 0,
+      paused: false,
+      winnerId: null,
       players: [
         {
-          id: peer.id,
+          id: this.selfId,
           name: sanitizeName(hostName),
           host: true,
           score: 0,
           buried: false,
           connected: true,
+          left: false,
           waiting: false,
+          tiles: 0,
         },
       ],
     };
@@ -164,21 +273,61 @@ class HostSession implements BattleHandle {
       if (type === 'peer-unavailable' || type === 'network') return;
       this.shutdown(connectionFailureMessage(err));
     });
+
+    document.addEventListener('visibilitychange', this.onVisible);
+
+    // The heartbeat: keeps every link warm, and notices the ones that died
+    // without saying so (a phone that fell asleep mid-game).
+    this.pingTimer = window.setInterval(() => this.sweep(), PING_INTERVAL_MS);
   }
 
   snapshot(): BattleState {
     return clone(this.state);
   }
 
-  private accept(conn: DataConnection): void {
-    conn.on('data', (raw) => this.onMessage(conn, raw));
-    conn.on('close', () => this.dropPlayer(conn.peer));
-    conn.on('error', () => this.dropPlayer(conn.peer));
+  private sweep(): void {
+    const now = Date.now();
+    this.broadcast({ t: 'ping' });
+    for (const [id, conn] of this.conns) {
+      const seen = this.lastSeen.get(id) ?? now;
+      if (now - seen > STALE_LINK_MS) {
+        // Close it ourselves; the close handler runs the normal drop path,
+        // which holds the player's seat and pauses the game for them.
+        this.conns.delete(id);
+        try {
+          conn.close();
+        } catch {
+          // A connection too dead to close is exactly the case in point.
+        }
+        this.dropPlayer(id);
+      }
+    }
   }
 
-  private onMessage(conn: DataConnection, raw: unknown): void {
+  private accept(conn: DataConnection): void {
+    /** Which seat this connection belongs to — known once it says hello. */
+    let playerId: string | null = null;
+    const gone = () => {
+      if (playerId !== null && this.conns.get(playerId) === conn) {
+        this.conns.delete(playerId);
+        this.dropPlayer(playerId);
+      }
+    };
+    conn.on('data', (raw) => {
+      if (playerId !== null) this.lastSeen.set(playerId, Date.now());
+      const claimed = this.onMessage(conn, playerId, raw);
+      if (claimed !== null) playerId = claimed;
+    });
+    conn.on('close', gone);
+    conn.on('error', gone);
+    // A crashed peer often never says close — but the transport notices.
+    watchTransport(conn, gone);
+  }
+
+  /** Handle one message; returns the player id a hello claims, if any. */
+  private onMessage(conn: DataConnection, playerId: string | null, raw: unknown): string | null {
     const msg = raw as ClientMessage | null;
-    if (!msg || typeof msg !== 'object') return;
+    if (!msg || typeof msg !== 'object') return null;
 
     if (msg.t === 'hello') {
       if (msg.proto !== PROTOCOL) {
@@ -188,57 +337,202 @@ class HostSession implements BattleHandle {
         };
         conn.send(reject);
         window.setTimeout(() => conn.close(), 250);
-        return;
+        return null;
       }
-      this.conns.set(conn.peer, conn);
-      const existing = this.state.players.find((p) => p.id === conn.peer);
-      if (existing) {
-        existing.connected = true;
-        existing.name = sanitizeName(msg.name);
-      } else {
+
+      const key = String(msg.key || conn.peer);
+      const existing = this.state.players.find((p) => p.id === key);
+
+      if (!existing) {
+        // A duel seats exactly two. Anyone else is politely turned away.
+        if (
+          this.state.mode === 'duel' &&
+          this.state.players.filter((p) => !p.left).length >= 2
+        ) {
+          const reject: HostMessage = {
+            t: 'reject',
+            reason: 'This duel already has two players.',
+          };
+          conn.send(reject);
+          window.setTimeout(() => conn.close(), 250);
+          return null;
+        }
         this.state.players.push({
-          id: conn.peer,
+          id: key,
           name: sanitizeName(msg.name),
           host: false,
           score: 0,
           buried: false,
           connected: true,
-          // Mid-game joiners watch from the lobby and play the next game.
+          left: false,
           waiting: this.state.phase !== 'lobby',
+          tiles: 0,
         });
+      } else {
+        // The same seat dialing back in — from a drop, or a fresh tab that
+        // kept its key. Re-attach and cancel any countdown on their seat.
+        existing.connected = true;
+        existing.name = sanitizeName(msg.name);
+        if (existing.left) {
+          // They were counted out while away; they're back as a spectator
+          // and deal into the next game like any newcomer.
+          existing.left = false;
+          existing.waiting = this.state.phase !== 'lobby';
+        }
+        const timer = this.graceTimers.get(key);
+        if (timer !== undefined) {
+          window.clearTimeout(timer);
+          this.graceTimers.delete(key);
+        }
       }
+
+      // One live connection per seat: a replaced link gets closed quietly.
+      const old = this.conns.get(key);
+      if (old && old !== conn) {
+        try {
+          old.close();
+        } catch {
+          // Already dead — which is why it's being replaced.
+        }
+      }
+      this.conns.set(key, conn);
+      this.lastSeen.set(key, Date.now());
+      this.recomputePaused();
       this.publish();
-      return;
+      return key;
+    }
+
+    if (playerId === null) return null;
+
+    if (msg.t === 'pong') return null;
+
+    if (msg.t === 'leave') {
+      // A deliberate exit: no grace, no pause — the game moves on without
+      // them right away.
+      this.conns.delete(playerId);
+      this.removePlayer(playerId);
+      return null;
     }
 
     if (msg.t === 'progress') {
-      const player = this.state.players.find((p) => p.id === conn.peer);
-      if (!player || player.waiting || this.state.phase !== 'playing') return;
+      const player = this.state.players.find((p) => p.id === playerId);
+      if (!player || player.waiting || this.state.phase !== 'playing') return null;
       player.score = Math.max(0, Math.floor(Number(msg.score))) || 0;
       player.buried = Boolean(msg.buried);
+      player.tiles = Math.max(0, Math.floor(Number(msg.tiles))) || 0;
       this.checkOver();
       this.publish();
+      return null;
+    }
+
+    if (msg.t === 'attack') {
+      this.relayAttack(playerId, Number(msg.count));
+      return null;
+    }
+
+    return null;
+  }
+
+  /** Pass a duel attack from one player to the other — or take it ourselves. */
+  private relayAttack(fromId: string, count: number): void {
+    if (this.state.mode !== 'duel' || this.state.phase !== 'playing') return;
+    if (!Number.isFinite(count) || count <= 0) return;
+    const sender = this.state.players.find((p) => p.id === fromId);
+    if (!sender || sender.waiting || sender.buried || sender.left) return;
+    const target = this.state.players.find(
+      (p) => p.id !== fromId && !p.waiting && !p.left,
+    );
+    if (!target || target.buried) return;
+    const clamped = Math.min(50, Math.floor(count));
+    if (target.id === this.selfId) {
+      this.events.onAttack(clamped);
+      return;
+    }
+    const conn = this.conns.get(target.id);
+    if (conn?.open) {
+      const msg: HostMessage = { t: 'attack', count: clamped };
+      conn.send(msg);
     }
   }
 
+  /**
+   * A player's link died. Mid-game their seat is held and the game pauses
+   * while they redial; in the lobby (or as a spectator) they just leave.
+   */
   private dropPlayer(id: string): void {
-    this.conns.delete(id);
     const player = this.state.players.find((p) => p.id === id);
     if (!player || !player.connected) return;
+
+    const midGame = this.state.phase === 'playing' && !player.waiting;
+    if (!midGame) {
+      this.removePlayer(id);
+      return;
+    }
+
+    player.connected = false;
+    this.recomputePaused();
+    this.publish();
+
+    // The grace clock: come back before it runs out and nothing happened;
+    // miss it and the game goes on without them.
+    const timer = window.setTimeout(() => {
+      this.graceTimers.delete(id);
+      const p = this.state.players.find((entry) => entry.id === id);
+      if (!p || p.connected) return;
+      p.left = true;
+      this.recomputePaused();
+      this.checkOver();
+      this.publish();
+    }, RECONNECT_GRACE_MS);
+    this.graceTimers.set(id, timer);
+  }
+
+  /** Remove a player entirely — deliberate leave, or a drop outside a game. */
+  private removePlayer(id: string): void {
+    const player = this.state.players.find((p) => p.id === id);
+    if (!player) return;
+    const timer = this.graceTimers.get(id);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      this.graceTimers.delete(id);
+    }
     if (this.state.phase === 'playing' && !player.waiting) {
       // Keep their entry: the score they left behind still places in the
-      // standings, and battleOver treats them as out of the running.
+      // standings, and the referee treats them as out of the running.
       player.connected = false;
+      player.left = true;
+      this.recomputePaused();
       this.checkOver();
     } else {
       this.state.players = this.state.players.filter((p) => p.id !== id);
+      this.recomputePaused();
     }
     this.publish();
   }
 
+  /** The game holds while any contestant's connection is down. */
+  private recomputePaused(): void {
+    this.state.paused =
+      this.state.phase === 'playing' &&
+      this.state.players.some(
+        (p) => !p.left && !p.waiting && !p.buried && !p.connected,
+      );
+  }
+
   private checkOver(): void {
     if (this.state.phase !== 'playing') return;
-    if (battleOver(this.state.players)) this.state.phase = 'finished';
+    if (this.state.mode === 'duel') {
+      if (duelOver(this.state.players)) {
+        this.state.winnerId = duelWinner(this.state.players)?.id ?? null;
+        this.state.phase = 'finished';
+        this.state.paused = false;
+      }
+      return;
+    }
+    if (battleOver(this.state.players)) {
+      this.state.phase = 'finished';
+      this.state.paused = false;
+    }
   }
 
   private broadcast(msg: HostMessage): void {
@@ -255,15 +549,21 @@ class HostSession implements BattleHandle {
   }
 
   start(): void {
-    // Anyone who dropped stays dropped; a fresh game starts with who's here.
-    this.state.players = this.state.players.filter((p) => p.connected);
+    // Anyone gone (or still mid-drop) doesn't deal in; a fresh game starts
+    // with who's actually here.
+    for (const timer of this.graceTimers.values()) window.clearTimeout(timer);
+    this.graceTimers.clear();
+    this.state.players = this.state.players.filter((p) => p.connected && !p.left);
     for (const player of this.state.players) {
       player.score = 0;
       player.buried = false;
       player.waiting = false;
+      player.tiles = 0;
     }
     this.state.phase = 'playing';
     this.state.game += 1;
+    this.state.paused = false;
+    this.state.winnerId = null;
     const seed = randomSeed();
     this.broadcast({ t: 'start', seed });
     this.publish();
@@ -271,36 +571,57 @@ class HostSession implements BattleHandle {
   }
 
   stop(): void {
-    this.state.players = this.state.players.filter((p) => p.connected);
+    for (const timer of this.graceTimers.values()) window.clearTimeout(timer);
+    this.graceTimers.clear();
+    this.state.players = this.state.players.filter((p) => p.connected && !p.left);
     for (const player of this.state.players) {
       player.score = 0;
       player.buried = false;
       player.waiting = false;
+      player.tiles = 0;
     }
     this.state.phase = 'lobby';
+    this.state.paused = false;
+    this.state.winnerId = null;
     this.broadcast({ t: 'stop' });
     this.publish();
     this.events.onStop();
   }
 
-  reportProgress(score: number, buried: boolean): void {
+  reportProgress(score: number, buried: boolean, tiles: number): void {
     if (this.state.phase !== 'playing') return;
     const self = this.state.players.find((p) => p.id === this.selfId);
-    if (!self || (self.score === score && self.buried === buried)) return;
+    if (!self || (self.score === score && self.buried === buried && self.tiles === tiles)) {
+      return;
+    }
     self.score = score;
     self.buried = buried;
+    self.tiles = tiles;
     this.checkOver();
     this.publish();
   }
 
+  sendAttack(count: number): void {
+    this.relayAttack(this.selfId, count);
+  }
+
   leave(): void {
     this.left = true;
+    this.dispose();
     this.peer.destroy();
+  }
+
+  private dispose(): void {
+    window.clearInterval(this.pingTimer);
+    for (const timer of this.graceTimers.values()) window.clearTimeout(timer);
+    this.graceTimers.clear();
+    document.removeEventListener('visibilitychange', this.onVisible);
   }
 
   private shutdown(message: string): void {
     if (this.left) return;
     this.left = true;
+    this.dispose();
     this.peer.destroy();
     this.events.onEnded(message);
   }
@@ -310,7 +631,11 @@ class HostSession implements BattleHandle {
  * Open a lobby. Resolves once the join code is claimed with the broker and
  * other players could dial it; rejects with a human-readable Error otherwise.
  */
-export function hostBattle(name: string, events: BattleEvents): Promise<BattleHandle> {
+export function hostBattle(
+  name: string,
+  mode: BattleMode,
+  events: BattleEvents,
+): Promise<BattleHandle> {
   return new Promise((resolve, reject) => {
     let attempts = 0;
 
@@ -330,7 +655,7 @@ export function hostBattle(name: string, events: BattleEvents): Promise<BattleHa
         if (settled) return;
         settled = true;
         window.clearTimeout(timeout);
-        resolve(new HostSession(peer, code, name, events));
+        resolve(new HostSession(peer, code, name, mode, events));
       });
 
       peer.on('error', (err) => {
@@ -360,35 +685,65 @@ class ClientSession implements BattleHandle {
   readonly selfId: string;
   private last: BattleState;
   private left = false;
+  private reconnecting = false;
+  private lastHeard = Date.now();
+  private readonly staleTimer: number;
+
+  private readonly onVisible = () => {
+    if (this.left || this.reconnecting) return;
+    if (document.visibilityState !== 'visible') return;
+    // Back from an app switch: if the link went quiet (or outright closed)
+    // while the phone was away, start healing it now rather than waiting to
+    // notice mid-move.
+    if (!this.conn.open || Date.now() - this.lastHeard > STALE_LINK_MS) {
+      this.linkDown();
+    }
+  };
 
   constructor(
-    private readonly peer: Peer,
-    private readonly conn: DataConnection,
+    private peer: Peer,
+    private conn: DataConnection,
     readonly code: string,
+    private readonly name: string,
+    private readonly key: string,
     firstState: BattleState,
     private readonly events: BattleEvents,
   ) {
-    this.selfId = peer.id;
+    this.selfId = key;
     this.last = firstState;
-
-    conn.on('data', (raw) => this.onMessage(raw));
-    conn.on('close', () => this.lost());
-    conn.on('error', () => this.lost());
-    peer.on('error', (err) => {
-      // A broker blip doesn't touch the open connection to the host; anything
-      // fatal destroys the peer, which closes the connection and lands in
-      // lost() by itself.
-      const type = (err as { type?: string }).type;
-      if (type === 'network' || type === 'peer-unavailable') return;
-      this.lost();
-    });
+    this.attach(peer, conn);
+    document.addEventListener('visibilitychange', this.onVisible);
+    // The host pings every few seconds; too long without hearing anything
+    // means the link is dead even if nothing ever said so.
+    this.staleTimer = window.setInterval(() => {
+      if (this.left || this.reconnecting) return;
+      if (Date.now() - this.lastHeard > STALE_LINK_MS) this.linkDown();
+    }, PING_INTERVAL_MS);
   }
 
   snapshot(): BattleState {
     return clone(this.last);
   }
 
+  private attach(peer: Peer, conn: DataConnection): void {
+    conn.on('data', (raw) => this.onMessage(raw));
+    conn.on('close', () => this.linkDown(peer, conn));
+    conn.on('error', () => this.linkDown(peer, conn));
+    // A host that vanished mid-call often never says close — but the
+    // transport notices.
+    watchTransport(conn, () => this.linkDown(peer, conn));
+    peer.on('error', (err) => {
+      // A broker blip doesn't touch the open connection to the host;
+      // anything fatal destroys the peer, which closes the connection and
+      // lands in linkDown by itself.
+      const type = (err as { type?: string }).type;
+      if (type === 'network' || type === 'peer-unavailable') return;
+      this.linkDown(peer, conn);
+    });
+  }
+
   private onMessage(raw: unknown): void {
+    this.lastHeard = Date.now();
     const msg = raw as HostMessage | null;
     if (!msg || typeof msg !== 'object') return;
     switch (msg.t) {
@@ -402,19 +757,89 @@ class ClientSession implements BattleHandle {
       case 'stop':
         this.events.onStop();
         break;
+      case 'ping': {
+        if (this.conn.open) {
+          const pong: ClientMessage = { t: 'pong' };
+          this.conn.send(pong);
+        }
+        break;
+      }
+      case 'attack':
+        this.events.onAttack(Math.max(0, Math.floor(Number(msg.count))));
+        break;
       case 'reject':
-        this.left = true;
-        this.peer.destroy();
-        this.events.onEnded(String(msg.reason));
+        this.fail(String(msg.reason));
         break;
     }
   }
 
-  private lost(): void {
+  /**
+   * The link to the host is down (or too stale to trust). Not the end: dial
+   * back in with the same identity, backing off between tries, until the
+   * reconnect budget is spent. The host is holding our seat meanwhile.
+   */
+  private linkDown(fromPeer?: Peer, fromConn?: DataConnection): void {
+    if (this.left || this.reconnecting) return;
+    // Stale handlers from an already-replaced connection don't get a say.
+    if (fromConn !== undefined && fromConn !== this.conn) return;
+    if (fromPeer !== undefined && fromPeer !== this.peer) return;
+
+    this.reconnecting = true;
+    this.events.onReconnecting();
+    try {
+      this.peer.destroy();
+    } catch {
+      // It was likely dead already.
+    }
+
+    const deadline = Date.now() + RECONNECT_BUDGET_MS;
+    let attempt = 0;
+
+    const tryOnce = () => {
+      if (this.left) return;
+      if (Date.now() >= deadline) {
+        this.fail('Couldn’t reconnect to the game — the connection is gone.');
+        return;
+      }
+      attempt += 1;
+
+      dial(this.code, this.name, this.key, RECONNECT_ATTEMPT_MS)
+        .then(({ peer, conn, state }) => {
+          if (this.left) {
+            peer.destroy();
+            return;
+          }
+          this.peer = peer;
+          this.conn = conn;
+          this.lastHeard = Date.now();
+          this.attach(peer, conn);
+          this.reconnecting = false;
+          this.last = state;
+          this.events.onReconnected();
+          this.events.onState(clone(state));
+        })
+        .catch(() => {
+          if (this.left) return;
+          // Back off a little more each round: 2s, 4s, 8s, then 10s forever.
+          const wait = Math.min(10_000, 1000 * 2 ** attempt);
+          window.setTimeout(tryOnce, wait);
+        });
+    };
+
+    tryOnce();
+  }
+
+  private fail(message: string): void {
     if (this.left) return;
     this.left = true;
-    this.peer.destroy();
-    this.events.onEnded('Lost the connection to the host — the battle is over.');
+    window.clearInterval(this.staleTimer);
+    document.removeEventListener('visibilitychange', this.onVisible);
+    try {
+      this.peer.destroy();
+    } catch {
+      // Nothing left to tear down.
+    }
+    this.events.onEnded(message);
   }
 
   start(): void {
@@ -425,29 +850,47 @@ class ClientSession implements BattleHandle {
     // Host only; nothing for a guest to do.
   }
 
-  reportProgress(score: number, buried: boolean): void {
-    if (!this.conn.open) return;
-    const msg: ClientMessage = { t: 'progress', score, buried };
+  reportProgress(score: number, buried: boolean, tiles: number): void {
+    if (this.reconnecting || !this.conn.open) return;
+    const msg: ClientMessage = { t: 'progress', score, buried, tiles };
+    this.conn.send(msg);
+  }
+
+  sendAttack(count: number): void {
+    if (this.reconnecting || !this.conn.open) return;
+    const msg: ClientMessage = { t: 'attack', count };
     this.conn.send(msg);
   }
 
   leave(): void {
+    if (this.left) return;
     this.left = true;
-    this.peer.destroy();
+    window.clearInterval(this.staleTimer);
+    document.removeEventListener('visibilitychange', this.onVisible);
+    // Tell the host it's on purpose, so nobody waits out a grace period.
+    try {
+      if (this.conn.open) {
+        const bye: ClientMessage = { t: 'leave' };
+        this.conn.send(bye);
+      }
+    } catch {
+      // Leaving is best-effort; destroying the peer says it anyway.
+    }
+    window.setTimeout(() => this.peer.destroy(), 150);
   }
 }
 
 /**
- * Join a lobby by its code. Resolves once the host has answered with the
- * current state — so the lobby renders complete on arrival — and rejects
- * with a human-readable Error if the code finds nothing or the network
- * won't cooperate.
+ * One dial to a host: fresh peer, connect, say hello, wait for the first
+ * state. Resolves with all three or rejects — used by both the first join
+ * and every reconnect attempt.
  */
-export function joinBattle(
+function dial(
   code: string,
   name: string,
-  events: BattleEvents,
-): Promise<BattleHandle> {
+  key: string,
+  timeoutMs: number,
+): Promise<{ peer: Peer; conn: DataConnection; state: BattleState }> {
   return new Promise((resolve, reject) => {
     const peer = newPeer();
     let settled = false;
@@ -462,7 +905,7 @@ export function joinBattle(
 
     const timeout = window.setTimeout(
       () => fail('Couldn’t reach that game. Check the code and your network, then try again.'),
-      CONNECT_TIMEOUT_MS,
+      timeoutMs,
     );
 
     peer.on('error', (err) => fail(connectionFailureMessage(err)));
@@ -471,7 +914,7 @@ export function joinBattle(
       const conn = peer.connect(peerIdFor(code), { reliable: true, serialization: 'json' });
 
       conn.on('open', () => {
-        const hello: ClientMessage = { t: 'hello', name: sanitizeName(name), proto: PROTOCOL };
+        const hello: ClientMessage = { t: 'hello', name: sanitizeName(name), key, proto: PROTOCOL };
         conn.send(hello);
       });
 
@@ -489,9 +932,25 @@ export function joinBattle(
           window.clearTimeout(timeout);
           // The session re-registers 'data'; both handlers run, so hand it
           // the state we consumed and let it take over from the next message.
-          resolve(new ClientSession(peer, conn, code, msg.state, events));
+          resolve({ peer, conn, state: msg.state });
         }
       });
     });
   });
+}
+
+/**
+ * Join a lobby by its code. Resolves once the host has answered with the
+ * current state — so the lobby renders complete on arrival — and rejects
+ * with a human-readable Error if the code finds nothing or the network
+ * won't cooperate.
+ */
+export async function joinBattle(
+  code: string,
+  name: string,
+  events: BattleEvents,
+): Promise<BattleHandle> {
+  const key = playerKey();
+  const { peer, conn, state } = await dial(code, name, key, CONNECT_TIMEOUT_MS);
+  return new ClientSession(peer, conn, code, name, key, state, events);
 }

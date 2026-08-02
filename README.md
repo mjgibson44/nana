@@ -1,8 +1,11 @@
-# 🍌 Nana
+# Word
 
-A Bananagrams-style word game for the web. You're dealt a pile of letters and
-race to arrange **all** of them into a single connected crossword of valid
-words.
+A crossword tile race for the web. You're dealt a pile of letters and race to
+arrange **all** of them into a single connected crossword of valid words.
+
+The UI is a clean black-and-white theme with light, dark, and follow-the-system
+modes — pick yours on the Settings screen (from the home page, or the menu in
+the top-right corner of any game).
 
 ## Playing
 
@@ -13,22 +16,23 @@ npm test        # run unit tests
 npm run build   # type-check + production build
 ```
 
-- **Drag** tiles from the pile at the bottom onto the board to build words.
-- Drag tiles between board cells to rearrange, or drag them back down to the
+- **Type** a word (or tap tiles in the pile), then tap an empty square to
+  place it — on a phone you can also press and hold the board to drag the
+  word's preview around, and let go where it should land.
+- **Drag** individual tiles from the pile onto the board to build words by
+  hand, drag them between cells to rearrange, or drag them back down to the
   pile (double-click/double-tap a placed tile to send it back instantly).
 - Every horizontal and vertical run of 2+ letters is checked live against a
   ~173k-word dictionary (ENABLE). Invalid words turn **red**, loose tiles turn
-  **amber**, valid words get a **green** edge.
-- To win, place all 20 tiles so that every word is valid and everything
-  connects into one group — the status bar goes full banana. 🍌
+  **amber**, valid words go **green**.
 
 ## How the letters are dealt (solvability guarantee)
 
-Random letters make miserable Bananagrams hands, so the generator
+Random letters make miserable hands, so the generator
 (`src/game/generator.ts`) works backwards: it **builds a real hidden
 crossword** from a pool of ~5,000 common English words — each new word
 crossing an existing one, exactly like a finished board — until it uses
-exactly 20 tiles. You're dealt those letters, shuffled.
+exactly the tile count wanted. You're dealt those letters, shuffled.
 
 That means every deal is solvable *by construction*: at least one fully
 valid, fully connected arrangement is known to exist (the generator holds on
@@ -44,58 +48,35 @@ src/
     types.ts            #   board = plain serializable Record<"row,col", letter>
     board.ts            #   word extraction, dictionary + connectivity validation
     generator.ts        #   crossword-construction letter dealing
+    modes.ts            #   the rules: Endless pacing, Duel rounds and attacks
+    battle.ts           #   multiplayer brain: codes, shared deal, referees
     dictionary.ts       #   word list loading/parsing
     commonWords.ts      #   generation word pool (subset of the dictionary)
-  components/           # Grid, Rack (pile), StatusBar
+  net/battleSession.ts  # WebRTC plumbing, reconnection failsafes
+  components/           # Grid, Rack (pile), lobby screens, overlays
+  theme.ts              # light / dark / system preference
   App.tsx               # game state + pointer-based drag & drop
 public/dictionary.txt   # ENABLE word list, fetched at runtime
 ```
 
 Everything under `src/game/` is deliberately framework-free and operates on
-plain serializable data — which is exactly what lets Endless Battle run with
+plain serializable data — which is exactly what lets multiplayer run with
 **no game server at all**.
-
-## Multiplayer (Endless Battle)
-
-- `src/game/rng.ts` — a tiny seeded PRNG (xmur3 + mulberry32) that slots into
-  the generator's injectable `rng` parameter.
-- `src/game/battle.ts` — the pure battle brain: join codes, the shared tile
-  stream, rankings, and the referee that decides when a battle is over.
-- `src/net/battleSession.ts` — WebRTC plumbing via PeerJS. The host's browser
-  is the authority: it owns the roster, starts/stops games, aggregates
-  scores, and broadcasts state. The join code doubles as the host's peer id,
-  so joining is just dialing `nana-battle-<code>`.
-
-Tiles are never sent over the wire. The host shares one random seed per game
-and every client grows the identical deal from it: the generator builds the
-same hidden crossword batch by batch because its RNG, word pool, and call
-sequence match everywhere. Every batch after the opening one is the same
-size (a timed drip and a pile-clear both deal 5), so player boards can
-diverge freely while batch *N* stays identical for everyone.
-
-Signaling defaults to PeerJS's free public cloud; only introductions run
-through it — gameplay flows peer to peer. To use your own broker (e.g.
-`npx peer --port 9000`), set `VITE_PEER_HOST` (and optionally
-`VITE_PEER_PORT`, `VITE_PEER_PATH`, `VITE_PEER_SECURE=false`) at build time.
 
 ## Game modes
 
-Picked from the splash screen (`src/components/HomeScreen.tsx`); the rules live
+Picked from the home screen (`src/components/HomeScreen.tsx`); the rules live
 in `src/game/modes.ts`.
 
-- **Solo Puzzle** — the classic five-level climb, no clock.
-- **Solo Timed** — the same climb against the clock: 3:00 for level 1, 2:00
-  for level 2, and 15 seconds less for each level after. Out of time is game
-  over.
-- **Endless** — no levels. 2:00 to work the starting 20 tiles, then 5 more
-  tiles arrive on a clock that keeps tightening — and once it's been at its
-  fastest for five rounds the batches grow to 8, then five rounds later to
-  10 for good. Clearing the pile pays a 25-point bonus and 5 more tiles. Loose tiles — unplaced or not validly
-  connected — are counted against the limit in the header: green while
-  comfortable, orange near 20, red once you're over. Going over the limit
-  doesn't end the game by itself; still being over when the round's clock
-  runs out is what buries you. The first move that takes you over gets a
-  one-time warning spelling that out (solo stops the clock to read it).
+- **Endless** — no levels. 2:00 to work the starting 20 tiles, then batches
+  land on a tightening clock: five rounds of 5 tiles every 45 seconds, five
+  rounds of 5 tiles every 30 seconds, then 7 tiles every 30 seconds forever
+  after. Clearing the pile pays a 25-point bonus and 5 more
+  tiles. Loose tiles — unplaced or not validly connected — are counted
+  against the limit of 20 in the header: green while comfortable, orange
+  near the limit, red once you're over. Going over doesn't end the game by
+  itself; still being over when the round's clock runs out is what buries
+  you.
 - **Endless Battle** — Endless, against your friends. One player hosts a
   lobby and shares a 5-letter code (or an invite link that carries it);
   everyone enters a name to join. Every player fights the identical game:
@@ -104,21 +85,68 @@ in `src/game/modes.ts`.
   clock, and between rounds a five-second scoreboard shows the whole field.
   Being buried knocks you out but the race runs on; the battle ends when
   everyone is buried — or the moment the last player standing is already
-  strictly ahead, since nothing can change the outcome. Highest score wins,
-  and the final standings name the champion. The host can restart the game
-  or pull everyone back to the lobby at any time, and after a finish chooses
-  between another game and the lobby. Nothing one player does pauses a
-  battle (everyone's clock must run as one), so the limit warning shows with
-  the clock still ticking.
+  strictly ahead. Highest score wins.
+- **Duel** — head-to-head for exactly two players, through the same
+  host/join lobby flow. Both duellists draw the identical letters. A placed
+  word is **permanent** — no moving, no taking back — and only real words
+  are allowed down. Every word you place sends tiles to your opponent: one
+  per letter past three (4 letters → 1 tile, 5 → 2, …). Three rounds turn
+  the screw: rounds one and two last 3:00, with attacks at ×1 then ×1.5 and
+  a drip of 1 then 2 tiles every 20 seconds; the final round has no clock,
+  ×2 attacks, and 4 tiles every 20 seconds. Let your pile exceed 25 tiles —
+  for any reason, at any moment — and you lose. Last one standing wins.
+- **Tutorial** — a guided two-step walkthrough: place your first word, then
+  cross a placed word using the gap tile. No clock, no pressure.
 
-A first-run "How to play" tutorial pops up on entering a game and then stays
-out of the way (a localStorage flag remembers it's been seen).
+A "How to play" reference pops up before the first game and stays available
+from the menu afterwards.
+
+## Multiplayer (Endless Battle & Duel)
+
+- `src/game/rng.ts` — a tiny seeded PRNG (xmur3 + mulberry32) that slots into
+  the generator's injectable `rng` parameter.
+- `src/game/battle.ts` — the pure multiplayer brain: join codes, the shared
+  tile stream, rankings, and the referees that decide when a battle or duel
+  is over.
+- `src/net/battleSession.ts` — WebRTC plumbing via PeerJS. The host's browser
+  is the authority: it owns the roster, starts/stops games, aggregates
+  scores, relays duel attacks, and broadcasts state. The join code doubles as
+  the host's peer id, so joining is just dialing it.
+
+Tiles are never sent over the wire. The host shares one random seed per game
+and every client grows the identical deal from it: the generator builds the
+same hidden crossword batch by batch because its RNG, word pool, and call
+sequence match everywhere. Even duel attacks travel as a count — the receiver
+draws the letters from a stream seeded off the shared seed and their own id.
+
+### Connection failsafes
+
+Multiplayer assumes phones will be phones:
+
+- Every player carries a **stable identity** (a per-tab key), so a dropped
+  WebRTC link can be re-attached to the same seat — score, board and all.
+- The **host forgives drops**: a player who vanishes mid-game is
+  "reconnecting" for a two-minute grace period while the game **pauses for
+  everyone**, with an overlay naming who it's waiting for. Only when the
+  grace runs out (or they deliberately left) does the game move on.
+- **Clients heal themselves**: on any loss — or on returning from an app
+  switch to find the link stale — the client redials with backoff until the
+  grace period is spent. A heartbeat tells live links from dead ones, so a
+  quick app switch doesn't disconnect you at all.
+
+Signaling defaults to PeerJS's free public cloud; only introductions run
+through it — gameplay flows peer to peer. To use your own broker (e.g.
+`npx peer --port 9000`), set `VITE_PEER_HOST` (and optionally
+`VITE_PEER_PORT`, `VITE_PEER_PATH`, `VITE_PEER_SECURE=false`) at build time.
 
 ## Roadmap
 
-- [x] Single-player: 20-tile solvable deal, drag & drop, live validation
-- [x] Timed and endless ("peel"-style) modes
+- [x] Single-player: solvable deals, drag & drop, live validation
+- [x] Endless ("peel"-style) mode
 - [x] Multiplayer: Endless Battle — shared deal from one seed, lobbies with
       codes/invite links, live standings, host controls, final rankings
+- [x] Duel mode: permanent words, attack tiles, escalating rounds
+- [x] Light/dark/system theme and a settings screen
+- [x] Reconnection grace, auto-redial, and pause-on-disconnect
 - [ ] Hints powered by the generator's known solution
 - [ ] Live opponent boards (spectate other players' crosswords mid-battle)

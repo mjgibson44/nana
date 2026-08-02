@@ -29,6 +29,8 @@ interface GridProps {
   highlighted: Set<CellKey>;
   /** The placed tile picked out for deletion, if any. */
   selectedKey: CellKey | null;
+  /** Duel: placed tiles are permanent — no grab affordance, no controls. */
+  boardLocked: boolean;
   canRotate: (word: BoardWord) => boolean;
   onTilePointerDown: (key: CellKey, letter: string, e: React.PointerEvent) => void;
   onCellClick: (key: CellKey) => void;
@@ -58,6 +60,7 @@ export const Grid = memo(function Grid({
   openWordCell,
   highlighted,
   selectedKey,
+  boardLocked,
   canRotate,
   onTilePointerDown,
   onCellClick,
@@ -94,9 +97,11 @@ export const Grid = memo(function Grid({
             <div
               className={`tile board-tile${status ? ` t-${status}` : ''}${
                 hiddenKeys.has(key) ? ' tile-hidden' : ''
-              }${inWords ? ' is-word-tile' : ''}${
-                highlighted.has(key) ? ' is-in-word' : ''
-              }${key === selectedKey ? ' is-selected' : ''}`}
+              }${inWords && !boardLocked ? ' is-word-tile' : ''}${
+                boardLocked ? ' is-locked' : ''
+              }${highlighted.has(key) ? ' is-in-word' : ''}${
+                key === selectedKey ? ' is-selected' : ''
+              }`}
               onPointerDown={(e) => onTilePointerDown(key, letter, e)}
             >
               {letter}

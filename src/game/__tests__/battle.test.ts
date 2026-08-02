@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   battleOver,
   createTileStream,
+  duelOver,
+  duelWinner,
   isValidBattleCode,
   newBattleCode,
   normalizeBattleCode,
@@ -12,21 +14,21 @@ import {
 import { seededRng } from '../rng';
 
 function player(overrides: Partial<Contestant> = {}): Contestant {
-  return { score: 0, buried: false, connected: true, waiting: false, ...overrides };
+  return { score: 0, buried: false, left: false, waiting: false, ...overrides };
 }
 
 describe('seededRng', () => {
   it('repeats exactly for the same seed', () => {
-    const a = seededRng('banana');
-    const b = seededRng('banana');
+    const a = seededRng('pepper');
+    const b = seededRng('pepper');
     for (let i = 0; i < 1000; i++) {
       expect(a()).toBe(b());
     }
   });
 
   it('differs between seeds and stays in [0, 1)', () => {
-    const a = seededRng('banana');
-    const b = seededRng('bananb');
+    const a = seededRng('pepper');
+    const b = seededRng('peppes');
     let same = 0;
     for (let i = 0; i < 1000; i++) {
       const x = a();
@@ -75,6 +77,14 @@ describe('createTileStream', () => {
     const a = createTileStream('seed-one').next(20);
     const b = createTileStream('seed-two').next(20);
     expect(a.join('')).not.toBe(b.join(''));
+  });
+
+  it('serves requests smaller than a word — duel attacks ask for one tile', () => {
+    const stream = createTileStream('attacks');
+    expect(stream.next(1)).toHaveLength(1);
+    expect(stream.next(2)).toHaveLength(2);
+    expect(stream.next(4)).toHaveLength(4);
+    for (const letter of stream.next(1)) expect(letter).toMatch(/^[a-z]$/);
   });
 });
 
@@ -129,16 +139,16 @@ describe('battleOver', () => {
     expect(battleOver([player({ score: 100, buried: true })])).toBe(true);
   });
 
-  it('treats a disconnected player as out of the running', () => {
-    // The survivor leads the disconnected player's frozen score, so it's over.
+  it('treats a player who left for good as out of the running', () => {
+    // The survivor leads the leaver's frozen score, so it's over.
     expect(
-      battleOver([player({ score: 40 }), player({ score: 10, connected: false })]),
+      battleOver([player({ score: 40 }), player({ score: 10, left: true })]),
     ).toBe(true);
     // Everyone left; nobody can move the game forward.
     expect(
       battleOver([
-        player({ score: 40, connected: false }),
-        player({ score: 10, connected: false }),
+        player({ score: 40, left: true }),
+        player({ score: 10, left: true }),
       ]),
     ).toBe(true);
   });
@@ -148,6 +158,37 @@ describe('battleOver', () => {
       battleOver([player({ score: 5, buried: true }), player({ score: 0, waiting: true })]),
     ).toBe(true);
     expect(battleOver([player({ waiting: true })])).toBe(false);
+  });
+});
+
+describe('duelOver / duelWinner', () => {
+  it('is not decided before two players are dealt in', () => {
+    expect(duelOver([player()])).toBe(false);
+    expect(duelOver([player(), player({ waiting: true })])).toBe(false);
+  });
+
+  it('plays on while both duellists are alive', () => {
+    expect(duelOver([player(), player()])).toBe(false);
+  });
+
+  it('ends the moment one goes under, and names the survivor', () => {
+    const survivor = player({ score: 12 });
+    const players = [survivor, player({ buried: true })];
+    expect(duelOver(players)).toBe(true);
+    expect(duelWinner(players)).toBe(survivor);
+  });
+
+  it('ends when one leaves for good', () => {
+    const survivor = player();
+    const players = [survivor, player({ left: true })];
+    expect(duelOver(players)).toBe(true);
+    expect(duelWinner(players)).toBe(survivor);
+  });
+
+  it('calls a draw when both are gone', () => {
+    const players = [player({ buried: true }), player({ buried: true })];
+    expect(duelOver(players)).toBe(true);
+    expect(duelWinner(players)).toBeNull();
   });
 });
 

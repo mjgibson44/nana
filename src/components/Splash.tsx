@@ -1,10 +1,4 @@
-import { LEVEL_COUNT, levelName, tilesAddedForLevel } from '../game/levels';
-import {
-  ENDLESS_INITIAL_SECONDS,
-  formatSeconds,
-  timedLevelSeconds,
-  type GameMode,
-} from '../game/modes';
+import { formatSeconds } from '../game/modes';
 
 /** One line of the between-rounds battle scoreboard. */
 export interface RoundStanding {
@@ -17,36 +11,32 @@ export interface RoundStanding {
 }
 
 /**
- * What the card is announcing: a level starting, Endless turning the screw
- * (a faster clock or bigger batches), or a battle round ending with the
- * whole field's scores. `seconds` is the new round length and `tiles` the
- * batch size it lands with.
+ * What the card is announcing:
+ *
+ *  - `start`: a game opening — how many tiles and how long to place them.
+ *  - `speedup`: Endless turning the screw (bigger batches from here).
+ *  - `round`: an Endless Battle round ending, with the whole field's scores.
+ *  - `duelRound`: a Duel round starting, with its multiplier and drip.
  */
 export type Splash =
-  | { kind: 'level'; level: number }
+  | { kind: 'start'; title: string; eyebrow: string; note: string }
   | { kind: 'speedup'; seconds: number; tiles: number }
-  | { kind: 'round'; standings: RoundStanding[]; seconds: number; tiles: number };
+  | { kind: 'round'; standings: RoundStanding[]; seconds: number; tiles: number }
+  | { kind: 'duelRound'; round: number; final: boolean; multiplier: number; dripTiles: number };
 
-interface LevelSplashProps {
+interface SplashCardProps {
   /** The card to show, or null when nothing is showing. */
   splash: Splash | null;
-  mode: GameMode;
   onDismiss: () => void;
 }
 
 /**
- * A card that pops over the board to name the level just reached — or, in
- * Endless, to warn that tiles are about to start coming faster, or between
- * battle rounds to show where everyone stands — then gets out of the way on
- * its own. Clicking anywhere dismisses it early. The end of the game gets the
- * full-screen summary instead of this card.
- *
- * Solo modes with a clock say what's on it — the countdown itself waits until
- * this card is gone, so reading it costs nothing. A battle's shared clock
- * keeps running behind the card, which is why the round card dismisses on a
- * tap anywhere.
+ * A card that pops over the board to announce something — a game starting,
+ * Endless speeding up, a Duel round turning the screw, or a battle round
+ * ending with the whole field's scores — then gets out of the way on its
+ * own. Clicking anywhere dismisses it early.
  */
-export function LevelSplash({ splash, mode, onDismiss }: LevelSplashProps) {
+export function SplashCard({ splash, onDismiss }: SplashCardProps) {
   if (splash === null) return null;
 
   if (splash.kind === 'round') {
@@ -84,13 +74,22 @@ export function LevelSplash({ splash, mode, onDismiss }: LevelSplashProps) {
   }
 
   const content =
-    splash.kind === 'speedup'
-      ? {
-          eyebrow: 'Endless mode',
-          name: 'Speeding up!',
-          note: `+${splash.tiles} tiles every ${formatSeconds(splash.seconds)} from here`,
-        }
-      : levelContent(splash.level, mode);
+    splash.kind === 'start'
+      ? { eyebrow: splash.eyebrow, name: splash.title, note: splash.note }
+      : splash.kind === 'speedup'
+        ? {
+            eyebrow: 'Endless mode',
+            name: 'Speeding up!',
+            note: `+${splash.tiles} tiles every ${formatSeconds(splash.seconds)} from here`,
+          }
+        : {
+            eyebrow: 'Duel',
+            name: splash.final ? 'Final round!' : `Round ${splash.round}`,
+            note:
+              `Words hit ×${splash.multiplier} · +${splash.dripTiles} ` +
+              `tile${splash.dripTiles === 1 ? '' : 's'} every 20s` +
+              (splash.final ? ' · no clock — last one standing' : ''),
+          };
 
   return (
     <div className="splash-backdrop" onClick={onDismiss} role="presentation">
@@ -101,20 +100,4 @@ export function LevelSplash({ splash, mode, onDismiss }: LevelSplashProps) {
       </div>
     </div>
   );
-}
-
-function levelContent(level: number, mode: GameMode) {
-  const tiles =
-    level === 1 ? `${tilesAddedForLevel(level)} tiles` : `+${tilesAddedForLevel(level)} tiles`;
-
-  return {
-    eyebrow: mode === 'endless' ? 'Endless mode' : `Level ${level} of ${LEVEL_COUNT}`,
-    name: mode === 'endless' ? 'Go bananas!' : levelName(level),
-    note:
-      mode === 'timed'
-        ? `${tiles} · ${formatSeconds(timedLevelSeconds(level))} on the clock`
-        : mode === 'endless'
-          ? `${tiles} · ${formatSeconds(ENDLESS_INITIAL_SECONDS)} to place them`
-          : tiles,
-  };
 }

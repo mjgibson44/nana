@@ -1,66 +1,42 @@
 /**
  * Game modes.
  *
- * One board and one set of rules for building words, three ways to play them:
+ * One board and one set of rules for building words, played three ways:
  *
- *  - Solo Puzzle: the classic five-level climb, no clock.
- *  - Solo Timed: the same climb, but each level must be finished before its
- *    clock runs out — 3:00 for the first, 2:00 for the second, and 15 seconds
- *    less for every level after that.
- *  - Endless: no levels. New tiles keep arriving on a clock that speeds up as
- *    you last (and as a reward for clearing the pile); let too many pile up
- *    loose and the game ends.
+ *  - Endless: no levels. New tiles keep arriving on a clock; let too many
+ *    pile up loose and the game ends. Played solo, or as Endless Battle —
+ *    the same game raced by several players on one shared deal.
+ *  - Duel: head-to-head for exactly two players. Placed words are permanent,
+ *    and every word you place sends tiles to your opponent. First player to
+ *    overflow their pile loses.
+ *  - Tutorial: a guided walk through placing words, at your own pace.
  */
 
-export type GameMode = 'puzzle' | 'timed' | 'endless';
+export type GameMode = 'endless' | 'duel' | 'tutorial';
 
 export interface ModeInfo {
-  id: GameMode;
   name: string;
   tagline: string;
   /** Short bullet lines for the mode's card on the home screen. */
   details: string[];
 }
 
-export const MODES: ModeInfo[] = [
-  {
-    id: 'puzzle',
-    name: 'Solo Puzzle',
-    tagline: 'The classic climb, at your own pace.',
-    details: ['5 levels, 20 tiles to start', '+10 tiles each level', 'No clock — take your time'],
-  },
-  {
-    id: 'timed',
-    name: 'Solo Timed',
-    tagline: 'The same climb, against the clock.',
-    details: [
-      '3:00 for level 1, 2:00 for level 2',
-      '15 seconds less each level after',
-      'Out of time means game over',
-    ],
-  },
-  {
-    id: 'endless',
-    name: 'Endless',
-    tagline: 'Survive the ever-growing pile.',
-    details: [
-      '2:00 to place your first 20 tiles',
-      '+5 tiles a minute — it speeds up, then the batches grow',
-      'Over 20 loose tiles when a round ends and you’re buried',
-    ],
-  },
-];
-
-export function modeName(mode: GameMode): string {
-  return MODES.find((m) => m.id === mode)?.name ?? mode;
-}
+export const ENDLESS_INFO: ModeInfo = {
+  name: 'Endless',
+  tagline: 'Survive the ever-growing pile.',
+  details: [
+    '2:00 to place your first 20 tiles',
+    '+5 tiles a round — 45s rounds shrink to 30s, then batches grow to +7',
+    'Over 20 loose tiles when a round ends and you’re out',
+  ],
+};
 
 /**
- * Endless Battle's home-screen card. Not one of MODES: a battle isn't a solo
- * mode of its own — each player's game runs as Endless, and the multiplayer
- * wrapping (lobby, shared deal, standings) lives in src/game/battle.ts.
+ * Endless Battle's home-screen card. Each player's game runs as Endless, and
+ * the multiplayer wrapping (lobby, shared deal, standings) lives in
+ * src/game/battle.ts.
  */
-export const BATTLE_INFO = {
+export const BATTLE_INFO: ModeInfo = {
   name: 'Endless Battle',
   tagline: 'Endless, against your friends.',
   details: [
@@ -70,67 +46,64 @@ export const BATTLE_INFO = {
   ],
 };
 
-/* ------------------------------- Solo Timed ------------------------------- */
+export const DUEL_INFO: ModeInfo = {
+  name: 'Duel',
+  tagline: 'Head-to-head. Bury your opponent.',
+  details: [
+    'Two players, same tiles',
+    'Placed words are permanent — and send tiles to your opponent',
+    'Overflow 25 tiles in your pile and you lose',
+  ],
+};
 
-const TIMED_FIRST_LEVEL_SECONDS = 180;
-const TIMED_SECOND_LEVEL_SECONDS = 120;
-const TIMED_STEP_SECONDS = 15;
-
-/** The clock a Solo Timed level starts with: 3:00, then 2:00, then 15s less
- * per level (1:45, 1:30, 1:15…). */
-export function timedLevelSeconds(level: number): number {
-  if (level <= 1) return TIMED_FIRST_LEVEL_SECONDS;
-  return TIMED_SECOND_LEVEL_SECONDS - (level - 2) * TIMED_STEP_SECONDS;
-}
+export const TUTORIAL_INFO: ModeInfo = {
+  name: 'Tutorial',
+  tagline: 'Learn the game in two quick steps.',
+  details: ['Place your first word', 'Cross words with the gap tile', 'No clock, no pressure'],
+};
 
 /* -------------------------------- Endless --------------------------------- */
+
+/** Tiles in the opening Endless deal. */
+export const ENDLESS_START_TILES = 20;
 
 /** The opening phase: this long to work the starting pile before tiles start
  * arriving — and before the loose-tile count switches on. */
 export const ENDLESS_INITIAL_SECONDS = 120;
 
 /**
- * After the opening phase, batches land on a clock that keeps tightening: the
- * first few arrive a minute apart, then every 45 seconds, then every 30 —
- * where it stays until the pile buries the player.
+ * The screw turns twice after the opening phase: five rounds of 45 seconds,
+ * then the clock tightens to 30-second rounds — five of those at the small
+ * batch, and after that every round deals the big batch forever.
  */
-export const ENDLESS_DRIP_STAGES = [60, 45, 30];
+export const ENDLESS_SLOW_SECONDS = 45;
+export const ENDLESS_FAST_SECONDS = 30;
 
-/** How many drip intervals each stage lasts before the next one takes over. */
-export const ENDLESS_INTERVALS_PER_STAGE = 3;
+/** How many drip rounds run at the slower opening pace. */
+export const ENDLESS_SLOW_ROUNDS = 5;
+
+/** The batch size rounds start at, and how many rounds it lasts — the five
+ * slow rounds plus the first five fast ones. */
+export const ENDLESS_SMALL_BATCH = 5;
+export const ENDLESS_SMALL_BATCH_ROUNDS = 10;
+
+/** The batch size every round deals once the small rounds are spent. */
+export const ENDLESS_BIG_BATCH = 7;
 
 /**
- * How long the wait for the next batch is, given how many drip intervals have
- * already run out. The opening phase isn't one of them, so the first three
- * waits after it are all the opening stage's length.
+ * How long the wait for the next batch is, given how many drip intervals
+ * have already run out: 45 seconds for the first five, 30 forever after.
  */
 export function endlessDripSeconds(intervalsElapsed: number): number {
-  const stage = Math.floor(intervalsElapsed / ENDLESS_INTERVALS_PER_STAGE);
-  return ENDLESS_DRIP_STAGES[Math.min(stage, ENDLESS_DRIP_STAGES.length - 1)];
+  return intervalsElapsed < ENDLESS_SLOW_ROUNDS ? ENDLESS_SLOW_SECONDS : ENDLESS_FAST_SECONDS;
 }
 
 /**
- * How many tiles a timed batch brings, by era: fives while the clock is still
- * tightening, then — once it's been at its fastest for a while — eights, then
- * tens for good.
- */
-export const ENDLESS_DRIP_SIZES = [5, 8, 10];
-
-/** How many rounds at the fastest pace each batch size lasts before the next
- * one takes over. */
-export const ENDLESS_ROUNDS_PER_SIZE = 5;
-
-/**
  * How many tiles the batch landing after `intervalsElapsed` drip intervals
- * brings. Batches only start growing once the clock has tightened all the way
- * down (see ENDLESS_DRIP_STAGES): five rounds at the fastest pace on the
- * opening size, five more on the next, and the last size is forever.
+ * brings: five for each of the first ten rounds, then seven forever.
  */
 export function endlessDripTiles(intervalsElapsed: number): number {
-  const fastestFrom = (ENDLESS_DRIP_STAGES.length - 1) * ENDLESS_INTERVALS_PER_STAGE;
-  const roundsAtFastest = intervalsElapsed - fastestFrom;
-  const step = Math.floor(roundsAtFastest / ENDLESS_ROUNDS_PER_SIZE);
-  return ENDLESS_DRIP_SIZES[Math.max(0, Math.min(step, ENDLESS_DRIP_SIZES.length - 1))];
+  return intervalsElapsed < ENDLESS_SMALL_BATCH_ROUNDS ? ENDLESS_SMALL_BATCH : ENDLESS_BIG_BATCH;
 }
 
 /** Clearing the pile — every tile placed and connected — feeds the board a
@@ -142,8 +115,71 @@ export const ENDLESS_CONNECT_BONUS = 25;
 
 /** Loose tiles — in the pile, or on the board but not validly connected —
  * are the pressure gauge. Going over this limit is survivable; still being
- * over it when a drip round ends is what buries the player. */
+ * over it when a drip round ends is what ends the game. */
 export const ENDLESS_LOOSE_LIMIT = 20;
+
+/* ---------------------------------- Duel ----------------------------------- */
+
+/** Tiles in each player's opening Duel deal. */
+export const DUEL_START_TILES = 15;
+
+/** A Duel pile may never exceed this many tiles — one over and you lose. */
+export const DUEL_PILE_LIMIT = 25;
+
+/** How many rounds a duel has. The last one runs until somebody loses. */
+export const DUEL_ROUNDS = 3;
+
+/** Rounds one and two are this long; the final round has no clock. */
+export const DUEL_ROUND_SECONDS = 180;
+
+/** How often the drip lands a tile (or several) in each player's pile. */
+export const DUEL_DRIP_SECONDS = 20;
+
+/** How many tiles the drip brings per round: 1, then 2, then 4. */
+const DUEL_DRIP_TILES = [1, 2, 4];
+
+/** How hard words hit per round: attacks are ×1, then ×1.5, then ×2. */
+const DUEL_ATTACK_MULTIPLIERS = [1, 1.5, 2];
+
+function clampRound(round: number): number {
+  return Math.max(1, Math.min(DUEL_ROUNDS, Math.floor(round)));
+}
+
+export function duelDripTiles(round: number): number {
+  return DUEL_DRIP_TILES[clampRound(round) - 1];
+}
+
+export function duelAttackMultiplier(round: number): number {
+  return DUEL_ATTACK_MULTIPLIERS[clampRound(round) - 1];
+}
+
+/**
+ * Which round the duel is in `seconds` into the game: rounds one and two are
+ * DUEL_ROUND_SECONDS each, and the final round runs forever.
+ */
+export function duelRoundAt(seconds: number): number {
+  return clampRound(Math.floor(seconds / DUEL_ROUND_SECONDS) + 1);
+}
+
+/**
+ * How many tiles the drip numbered `dripIndex` (0-based) deals. Pure in the
+ * index so both duellists — whose clocks may drift — draw identical batches
+ * from the shared stream: drip k is drip k on both screens.
+ */
+export function duelDripTilesAt(dripIndex: number): number {
+  const at = (dripIndex + 1) * DUEL_DRIP_SECONDS;
+  return duelDripTiles(duelRoundAt(at));
+}
+
+/**
+ * How many tiles placing a word sends to the opponent: nothing under four
+ * letters, then one per letter past three — 4→1, 5→2, 6→3 — scaled up by the
+ * round's multiplier and rounded to the nearest whole tile.
+ */
+export function duelAttackTiles(wordLength: number, round: number): number {
+  const base = Math.max(0, Math.floor(wordLength) - 3);
+  return Math.round(base * duelAttackMultiplier(round));
+}
 
 /* --------------------------------- shared --------------------------------- */
 

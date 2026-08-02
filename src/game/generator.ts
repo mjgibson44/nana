@@ -6,7 +6,7 @@ import { asBounds, keyOf } from './types';
  *
  * Rather than dealing random letters and hoping they spell something, we
  * build an actual hidden crossword out of common words — each new word
- * crossing an already-placed one, exactly like a finished Bananagrams board —
+ * crossing an already-placed one, exactly like a finished crossword board —
  * until it uses exactly `tileCount` tiles. The player receives those letters
  * shuffled. This guarantees (by construction) that at least one fully valid,
  * fully connected arrangement of all the letters exists, and because the

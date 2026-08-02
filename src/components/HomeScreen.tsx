@@ -1,19 +1,56 @@
-import { BATTLE_INFO, MODES, type GameMode } from '../game/modes';
+import {
+  BATTLE_INFO,
+  DUEL_INFO,
+  ENDLESS_INFO,
+  TUTORIAL_INFO,
+  type ModeInfo,
+} from '../game/modes';
 
 interface HomeScreenProps {
-  onPlay: (mode: GameMode) => void;
+  /** Start a solo Endless game. */
+  onPlayEndless: () => void;
   /** Head for the Endless Battle door: host or join a multiplayer lobby. */
   onBattle: () => void;
+  /** Head for the Duel door: the two-player lobby flow. */
+  onDuel: () => void;
+  /** Start the guided tutorial. */
+  onTutorial: () => void;
   onShowHowTo: () => void;
   onShowStats: () => void;
+  onShowSettings: () => void;
+}
+
+function ModeCard({ info, onClick }: { info: ModeInfo; onClick: () => void }) {
+  return (
+    <button type="button" className="mode-card" onClick={onClick}>
+      <span className="mode-card-name">{info.name}</span>
+      <span className="mode-card-tagline">{info.tagline}</span>
+      <span className="mode-card-details">
+        {info.details.map((detail) => (
+          <span key={detail} className="mode-card-detail">
+            {detail}
+          </span>
+        ))}
+      </span>
+      <span className="mode-card-play">Play &rarr;</span>
+    </button>
+  );
 }
 
 /**
  * The splash screen the app opens on: the game's name up top and a card per
  * mode underneath. Picking a card starts a fresh game in that mode — except
- * Endless Battle, which heads to its lobby screens first.
+ * the multiplayer modes, which head to their lobby screens first.
  */
-export function HomeScreen({ onPlay, onBattle, onShowHowTo, onShowStats }: HomeScreenProps) {
+export function HomeScreen({
+  onPlayEndless,
+  onBattle,
+  onDuel,
+  onTutorial,
+  onShowHowTo,
+  onShowStats,
+  onShowSettings,
+}: HomeScreenProps) {
   return (
     <div className="home">
       <div className="home-inner">
@@ -23,37 +60,10 @@ export function HomeScreen({ onPlay, onBattle, onShowHowTo, onShowStats }: HomeS
         </header>
 
         <div className="home-modes">
-          {MODES.map((mode) => (
-            <button
-              key={mode.id}
-              type="button"
-              className="mode-card"
-              onClick={() => onPlay(mode.id)}
-            >
-              <span className="mode-card-name">{mode.name}</span>
-              <span className="mode-card-tagline">{mode.tagline}</span>
-              <span className="mode-card-details">
-                {mode.details.map((detail) => (
-                  <span key={detail} className="mode-card-detail">
-                    {detail}
-                  </span>
-                ))}
-              </span>
-              <span className="mode-card-play">Play &rarr;</span>
-            </button>
-          ))}
-          <button type="button" className="mode-card" onClick={onBattle}>
-            <span className="mode-card-name">{BATTLE_INFO.name}</span>
-            <span className="mode-card-tagline">{BATTLE_INFO.tagline}</span>
-            <span className="mode-card-details">
-              {BATTLE_INFO.details.map((detail) => (
-                <span key={detail} className="mode-card-detail">
-                  {detail}
-                </span>
-              ))}
-            </span>
-            <span className="mode-card-play">Play &rarr;</span>
-          </button>
+          <ModeCard info={ENDLESS_INFO} onClick={onPlayEndless} />
+          <ModeCard info={BATTLE_INFO} onClick={onBattle} />
+          <ModeCard info={DUEL_INFO} onClick={onDuel} />
+          <ModeCard info={TUTORIAL_INFO} onClick={onTutorial} />
         </div>
 
         <div className="home-actions">
@@ -62,6 +72,9 @@ export function HomeScreen({ onPlay, onBattle, onShowHowTo, onShowStats }: HomeS
           </button>
           <button type="button" className="btn" onClick={onShowStats}>
             Stats
+          </button>
+          <button type="button" className="btn" onClick={onShowSettings}>
+            Settings
           </button>
         </div>
       </div>

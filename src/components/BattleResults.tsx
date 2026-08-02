@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { ordinal, rankPlayers, type BattleState } from '../game/battle';
+import { ordinal, rankPlayers, type BattlePlayer, type BattleState } from '../game/battle';
 
 interface BattleResultsProps {
   state: BattleState;
@@ -17,9 +17,12 @@ interface BattleResultsProps {
 const MEDALS = ['🥇', '🥈', '🥉'];
 
 /**
- * The end of a battle: who won, and the full standings. The host decides
- * what happens next — another game or back to the lobby — while everyone
- * else sees the same table and waits, or bows out.
+ * The end of a multiplayer game: who won, and the full standings. The host
+ * decides what happens next — another game or back to the lobby — while
+ * everyone else sees the same table and waits, or bows out.
+ *
+ * An Endless Battle ranks by score. A Duel is simpler: the survivor named by
+ * the host wins, whatever the scores say.
  */
 export function BattleResults({
   state,
@@ -30,33 +33,65 @@ export function BattleResults({
   onLeave,
   onClose,
 }: BattleResultsProps) {
-  const ranked = useMemo(
-    () => rankPlayers(state.players.filter((p) => !p.waiting)),
+  const duel = state.mode === 'duel';
+  const contestants = useMemo(
+    () => state.players.filter((p) => !p.waiting),
     [state.players],
   );
+
+  const rows = useMemo(() => {
+    if (!duel) {
+      return rankPlayers(contestants).map(({ player, rank }) => ({ player, rank }));
+    }
+    // A duel's order is survival, not score: the winner first.
+    const sorted = [...contestants].sort((a, b) => {
+      const aWon = a.id === state.winnerId ? 0 : 1;
+      const bWon = b.id === state.winnerId ? 0 : 1;
+      return aWon - bWon;
+    });
+    return sorted.map((player, i) => ({
+      player,
+      rank: state.winnerId === null ? 1 : i + 1,
+    }));
+  }, [duel, contestants, state.winnerId]);
+
   const waiting = state.players.filter((p) => p.waiting);
 
-  const winners = ranked.filter((entry) => entry.rank === 1);
-  const selfWon = winners.some((entry) => entry.player.id === selfId);
-  const title =
-    winners.length > 1
-      ? '🤝 It’s a tie!'
+  const winners = duel
+    ? rows.filter(({ player }) => player.id === state.winnerId).map((r) => r.player)
+    : rows.filter((entry) => entry.rank === 1).map((r) => r.player);
+  const selfWon = winners.some((player) => player.id === selfId);
+  const title = duel
+    ? state.winnerId === null
+      ? 'It’s a draw!'
       : selfWon
-        ? '🏆 You win!'
-        : `🏆 ${winners[0]?.player.name ?? 'Nobody'} wins!`;
+        ? 'You win the duel!'
+        : `${winners[0]?.name ?? 'Nobody'} wins the duel!`
+    : winners.length > 1
+      ? 'It’s a tie!'
+      : selfWon
+        ? 'You win!'
+        : `${winners[0]?.name ?? 'Nobody'} wins!`;
+
+  const duelOutcome = (player: BattlePlayer) =>
+    player.id === state.winnerId ? 'survived' : player.left ? 'left' : 'buried';
+
+  // A duel can only go again with both seats still filled.
+  const present = state.players.filter((p) => p.connected && !p.left).length;
+  const canRestart = !duel || present >= 2;
 
   return (
-    <div className="summary" role="dialog" aria-modal="true" aria-label="Battle finished">
+    <div className="summary" role="dialog" aria-modal="true" aria-label="Game finished">
       <div className="summary-inner">
         <header className="summary-header">
-          <span className="splash-eyebrow">Battle finished</span>
+          <span className="splash-eyebrow">{duel ? 'Duel finished' : 'Battle finished'}</span>
           <h1 className="summary-title">{title}</h1>
         </header>
 
         <section className="summary-section">
           <h2 className="summary-section-title">Standings</h2>
           <ol className="battle-results-list">
-            {ranked.map(({ player, rank }) => (
+            {rows.map(({ player, rank }) => (
               <li
                 key={player.id}
                 className={
@@ -69,9 +104,11 @@ export function BattleResults({
                 <span className="battle-results-name">
                   {player.name}
                   {player.id === selfId && <span className="battle-chip battle-chip-you">You</span>}
-                  {!player.connected && <span className="battle-results-left">left the game</span>}
+                  {player.left && <span className="battle-results-left">left the game</span>}
                 </span>
-                <span className="battle-results-score">{player.score}</span>
+                <span className="battle-results-score">
+                  {duel ? duelOutcome(player) : player.score}
+                </span>
               </li>
             ))}
           </ol>
@@ -85,9 +122,11 @@ export function BattleResults({
         <div className="summary-actions">
           {isHost ? (
             <>
-              <button type="button" className="btn btn-primary" onClick={onPlayAgain}>
-                Start another game
-              </button>
+              {canRestart && (
+                <button type="button" className="btn btn-primary" onClick={onPlayAgain}>
+                  Start another game
+                </button>
+              )}
               <button type="button" className="btn" onClick={onToLobby}>
                 Back to the lobby
               </button>
@@ -101,7 +140,7 @@ export function BattleResults({
             See the board
           </button>
           <button type="button" className="btn" onClick={onLeave}>
-            Leave battle
+            Leave game
           </button>
         </div>
       </div>

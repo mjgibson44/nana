@@ -16,6 +16,7 @@ interface MenuProps {
   onResetGame: (() => void) | null;
   onShowHowTo: () => void;
   onShowStats: () => void;
+  onShowSettings: () => void;
   /** Reopen the final-score breakdown; null while the game is still going. */
   onShowSummary: (() => void) | null;
   /** Leave the game and go back to the mode-picking splash screen. In a
@@ -30,6 +31,7 @@ export function Menu({
   onResetGame,
   onShowHowTo,
   onShowStats,
+  onShowSettings,
   onShowSummary,
   onReturnHome,
   battle = null,
@@ -92,7 +94,8 @@ export function Menu({
           {onShowSummary && item(battle ? 'Standings' : 'Final score', onShowSummary)}
           {item('How to play', onShowHowTo)}
           {item('Stats', onShowStats)}
-          {item(battle ? 'Leave battle' : 'Return home', onReturnHome)}
+          {item('Settings', onShowSettings)}
+          {item(battle ? 'Leave game' : 'Return home', onReturnHome)}
         </div>
       )}
     </div>
