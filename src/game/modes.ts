@@ -55,6 +55,21 @@ export function modeName(mode: GameMode): string {
   return MODES.find((m) => m.id === mode)?.name ?? mode;
 }
 
+/**
+ * Endless Battle's home-screen card. Not one of MODES: a battle isn't a solo
+ * mode of its own — each player's game runs as Endless, and the multiplayer
+ * wrapping (lobby, shared deal, standings) lives in src/game/battle.ts.
+ */
+export const BATTLE_INFO = {
+  name: 'Endless Battle',
+  tagline: 'Endless, against your friends.',
+  details: [
+    'Every player gets the same tiles',
+    'Host a lobby, or join with a code',
+    'Outlast the rest — top score wins',
+  ],
+};
+
 /* ------------------------------- Solo Timed ------------------------------- */
 
 const TIMED_FIRST_LEVEL_SECONDS = 180;

@@ -1,15 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { MenuIcon } from './icons';
 
+/** The battle-only entries: host controls, and leaving reads differently. */
+export interface MenuBattleControls {
+  isHost: boolean;
+  /** Host: reset everyone and deal a fresh shared game. */
+  onRestart: () => void;
+  /** Host: end the game and gather every player in the lobby. */
+  onToLobby: () => void;
+}
+
 interface MenuProps {
-  /** Start the current mode over from scratch. */
-  onResetGame: () => void;
+  /** Start the current mode over from scratch. Null hides the item — in a
+   * battle only the host restarts, through the battle controls instead. */
+  onResetGame: (() => void) | null;
   onShowHowTo: () => void;
   onShowStats: () => void;
   /** Reopen the final-score breakdown; null while the game is still going. */
   onShowSummary: (() => void) | null;
-  /** Leave the game and go back to the mode-picking splash screen. */
+  /** Leave the game and go back to the mode-picking splash screen. In a
+   * battle this leaves the battle (and, for the host, closes it). */
   onReturnHome: () => void;
+  /** Present only while playing a battle. */
+  battle?: MenuBattleControls | null;
 }
 
 /** Header menu for the actions that aren't part of playing a turn. */
@@ -19,6 +32,7 @@ export function Menu({
   onShowStats,
   onShowSummary,
   onReturnHome,
+  battle = null,
 }: MenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -72,11 +86,13 @@ export function Menu({
 
       {open && (
         <div className="menu-panel" role="menu">
-          {item('Reset game', onResetGame)}
-          {onShowSummary && item('Final score', onShowSummary)}
+          {onResetGame && item('Reset game', onResetGame)}
+          {battle?.isHost && item('Restart battle', battle.onRestart)}
+          {battle?.isHost && item('Everyone to the lobby', battle.onToLobby)}
+          {onShowSummary && item(battle ? 'Standings' : 'Final score', onShowSummary)}
           {item('How to play', onShowHowTo)}
           {item('Stats', onShowStats)}
-          {item('Return home', onReturnHome)}
+          {item(battle ? 'Leave battle' : 'Return home', onReturnHome)}
         </div>
       )}
     </div>
