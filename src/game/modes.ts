@@ -26,7 +26,7 @@ export const ENDLESS_INFO: ModeInfo = {
   tagline: 'Survive the ever-growing pile.',
   details: [
     '2:00 to place your first 20 tiles',
-    '+5 tiles every 30 seconds, growing to +7',
+    '+5 tiles a round — 45s rounds shrink to 30s, then batches grow to +7',
     'Over 20 loose tiles when a round ends and you’re out',
   ],
 };
@@ -71,27 +71,36 @@ export const ENDLESS_START_TILES = 20;
  * arriving — and before the loose-tile count switches on. */
 export const ENDLESS_INITIAL_SECONDS = 120;
 
-/** After the opening phase, every round is this long. */
-export const ENDLESS_DRIP_SECONDS = 30;
+/**
+ * The screw turns twice after the opening phase: five rounds of 45 seconds,
+ * then the clock tightens to 30-second rounds — five of those at the small
+ * batch, and after that every round deals the big batch forever.
+ */
+export const ENDLESS_SLOW_SECONDS = 45;
+export const ENDLESS_FAST_SECONDS = 30;
 
-/** The batch size rounds start at, and how many rounds it lasts. */
+/** How many drip rounds run at the slower opening pace. */
+export const ENDLESS_SLOW_ROUNDS = 5;
+
+/** The batch size rounds start at, and how many rounds it lasts — the five
+ * slow rounds plus the first five fast ones. */
 export const ENDLESS_SMALL_BATCH = 5;
-export const ENDLESS_SMALL_BATCH_ROUNDS = 5;
+export const ENDLESS_SMALL_BATCH_ROUNDS = 10;
 
 /** The batch size every round deals once the small rounds are spent. */
 export const ENDLESS_BIG_BATCH = 7;
 
 /**
- * How long the wait for the next batch is. Every drip round is the same
- * length now; the function stays so callers don't care.
+ * How long the wait for the next batch is, given how many drip intervals
+ * have already run out: 45 seconds for the first five, 30 forever after.
  */
-export function endlessDripSeconds(_intervalsElapsed: number): number {
-  return ENDLESS_DRIP_SECONDS;
+export function endlessDripSeconds(intervalsElapsed: number): number {
+  return intervalsElapsed < ENDLESS_SLOW_ROUNDS ? ENDLESS_SLOW_SECONDS : ENDLESS_FAST_SECONDS;
 }
 
 /**
  * How many tiles the batch landing after `intervalsElapsed` drip intervals
- * brings: five for each of the first five rounds, then seven forever.
+ * brings: five for each of the first ten rounds, then seven forever.
  */
 export function endlessDripTiles(intervalsElapsed: number): number {
   return intervalsElapsed < ENDLESS_SMALL_BATCH_ROUNDS ? ENDLESS_SMALL_BATCH : ENDLESS_BIG_BATCH;

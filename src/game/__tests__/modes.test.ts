@@ -4,6 +4,7 @@ import {
   DUEL_PILE_LIMIT,
   DUEL_ROUND_SECONDS,
   ENDLESS_BIG_BATCH,
+  ENDLESS_SLOW_ROUNDS,
   ENDLESS_SMALL_BATCH,
   ENDLESS_SMALL_BATCH_ROUNDS,
   duelAttackMultiplier,
@@ -17,23 +18,42 @@ import {
 } from '../modes';
 
 describe('endlessDripSeconds', () => {
-  it('is thirty seconds for every round', () => {
-    for (let i = 0; i <= 30; i++) {
-      expect(endlessDripSeconds(i)).toBe(30);
+  it('holds 45 seconds for the first five rounds', () => {
+    for (let i = 0; i < ENDLESS_SLOW_ROUNDS; i++) {
+      expect(endlessDripSeconds(i)).toBe(45);
+    }
+  });
+
+  it('tightens to 30 seconds forever after', () => {
+    expect(endlessDripSeconds(ENDLESS_SLOW_ROUNDS)).toBe(30);
+    expect(endlessDripSeconds(10)).toBe(30);
+    expect(endlessDripSeconds(100)).toBe(30);
+  });
+
+  it('only ever gets shorter', () => {
+    for (let i = 1; i <= 30; i++) {
+      expect(endlessDripSeconds(i)).toBeLessThanOrEqual(endlessDripSeconds(i - 1));
     }
   });
 });
 
 describe('endlessDripTiles', () => {
-  it('deals fives for the first five rounds', () => {
+  it('deals fives through the slow rounds and the first fast ones', () => {
     for (let i = 0; i < ENDLESS_SMALL_BATCH_ROUNDS; i++) {
       expect(endlessDripTiles(i)).toBe(ENDLESS_SMALL_BATCH);
     }
   });
 
+  it('keeps dealing fives when the clock first tightens', () => {
+    // The 30-second rounds start at interval 5; the batch only grows five
+    // rounds later.
+    expect(endlessDripTiles(ENDLESS_SLOW_ROUNDS)).toBe(ENDLESS_SMALL_BATCH);
+    expect(endlessDripTiles(ENDLESS_SMALL_BATCH_ROUNDS - 1)).toBe(ENDLESS_SMALL_BATCH);
+  });
+
   it('deals sevens forever after', () => {
     expect(endlessDripTiles(ENDLESS_SMALL_BATCH_ROUNDS)).toBe(ENDLESS_BIG_BATCH);
-    expect(endlessDripTiles(10)).toBe(ENDLESS_BIG_BATCH);
+    expect(endlessDripTiles(20)).toBe(ENDLESS_BIG_BATCH);
     expect(endlessDripTiles(100)).toBe(ENDLESS_BIG_BATCH);
   });
 

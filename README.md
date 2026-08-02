@@ -68,9 +68,10 @@ plain serializable data — which is exactly what lets multiplayer run with
 Picked from the home screen (`src/components/HomeScreen.tsx`); the rules live
 in `src/game/modes.ts`.
 
-- **Endless** — no levels. 2:00 to work the starting 20 tiles, then a batch
-  lands every 30 seconds: 5 tiles a round for the first five rounds, 7 a
-  round forever after. Clearing the pile pays a 25-point bonus and 5 more
+- **Endless** — no levels. 2:00 to work the starting 20 tiles, then batches
+  land on a tightening clock: five rounds of 5 tiles every 45 seconds, five
+  rounds of 5 tiles every 30 seconds, then 7 tiles every 30 seconds forever
+  after. Clearing the pile pays a 25-point bonus and 5 more
   tiles. Loose tiles — unplaced or not validly connected — are counted
   against the limit of 20 in the header: green while comfortable, orange
   near the limit, red once you're over. Going over doesn't end the game by

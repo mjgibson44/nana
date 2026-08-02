@@ -1267,10 +1267,13 @@ export default function App() {
           buried: player.buried || player.left,
         }));
         setSplash({ kind: 'round', standings, seconds, tiles: batch });
-      } else if (elapsed > 0 && batch > endlessDripTiles(elapsed - 1)) {
-        // Solo keeps the pressure card: the batches just grew, and the splash
-        // says so — holding the new clock until it's been read, the same way
-        // the opening splash does.
+      } else if (
+        elapsed > 0 &&
+        (seconds < endlessDripSeconds(elapsed - 1) || batch > endlessDripTiles(elapsed - 1))
+      ) {
+        // Solo keeps the pressure card: the wait got shorter or the batches
+        // grew, and the splash says so — holding the new clock until it's
+        // been read, the same way the opening splash does.
         setSplash({ kind: 'speedup', seconds, tiles: batch });
       }
       setEndlessPhase('drip');
