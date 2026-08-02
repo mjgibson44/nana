@@ -184,44 +184,19 @@ body {
   }
 }
 
-.score-block-health {
-  gap: 3px;
+/* The loose-tile count against the limit: green while comfortable, orange
+   when the limit is close, red once it's been blown. */
+.tile-count-ok {
+  color: #3f5c22;
 }
 
-.health-bar {
-  width: 88px;
-  height: 10px;
-  margin-top: 2px;
-  background: #e8ddbd;
-  border: 1px solid #c9a52c;
-  border-radius: 999px;
-  overflow: hidden;
+.tile-count-warn {
+  color: #9a4f0d;
 }
 
-.health-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width 300ms ease;
-}
-
-.health-ok {
-  background: #8fb573;
-}
-
-.health-warn {
-  background: #e08a3c;
-}
-
-.health-low {
-  background: #a33025;
+.tile-count-over {
+  color: #a33025;
   animation: timer-pulse 1s ease-in-out infinite;
-}
-
-.health-count {
-  font-size: 10px;
-  font-weight: 700;
-  opacity: 0.6;
-  white-space: nowrap;
 }
 
 /* ---------- tile-drop banner ---------- */
@@ -904,6 +879,61 @@ body {
   font-size: 14px;
   font-weight: 600;
   opacity: 0.75;
+}
+
+/* The between-rounds battle scoreboard: the splash card grown a list. */
+.splash-round {
+  min-width: min(320px, 80vw);
+}
+
+.splash-standings {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-self: stretch;
+  text-align: left;
+  font-size: 15px;
+}
+
+.splash-standing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  font-weight: 600;
+}
+
+.splash-standing-self {
+  background: #fff3c4;
+  border-radius: 8px;
+}
+
+.splash-standing-buried {
+  opacity: 0.55;
+}
+
+.splash-standing-place {
+  width: 18px;
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+.splash-standing-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.splash-standing-score {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- finish summary & stats page ---------- */
@@ -1718,7 +1748,7 @@ body {
 
 /* ---------- live standings (top-left of the board) ---------- */
 
-/* Holds the board viewport and anchors the standings panel over it. */
+/* Holds the board viewport. */
 .board-area {
   position: relative;
   flex: 1;
@@ -1728,111 +1758,6 @@ body {
 
 .board-area > .board-wrap {
   flex: 1;
-}
-
-.battle-standings {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 120;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-width: min(250px, 72vw);
-  padding: 8px;
-  background: rgba(255, 251, 234, 0.94);
-  border: 2px solid #c9a52c;
-  border-radius: 12px;
-  box-shadow: 0 3px 10px rgba(61, 53, 36, 0.18);
-  font-size: 13px;
-}
-
-.battle-standings-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 2px;
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-
-.battle-standings-rank {
-  font-size: 20px;
-  font-weight: 800;
-}
-
-.battle-standings-of {
-  font-size: 13px;
-  font-weight: 600;
-  opacity: 0.6;
-}
-
-.battle-standings-out {
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
-  background: #3d3524;
-  color: #ffd84d;
-}
-
-.battle-standings-fold {
-  margin-left: auto;
-  font-size: 12px;
-  opacity: 0.55;
-}
-
-.battle-standings-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.battle-standings-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 4px;
-  font-weight: 600;
-}
-
-.battle-standings-self {
-  background: #fff3c4;
-  border-radius: 6px;
-}
-
-.battle-standings-buried {
-  opacity: 0.55;
-}
-
-.battle-standings-place {
-  width: 16px;
-  text-align: right;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.6;
-}
-
-.battle-standings-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.battle-standings-score {
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-}
-
-.battle-standings-results {
-  align-self: stretch;
 }
 
 /* ---------- battle results ---------- */
@@ -1920,14 +1845,5 @@ body {
 @media (max-width: 540px) {
   .battle-code {
     font-size: 30px;
-  }
-
-  .battle-standings {
-    max-width: min(210px, 66vw);
-    font-size: 12px;
-  }
-
-  .battle-standings-rank {
-    font-size: 17px;
   }
 }

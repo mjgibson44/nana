@@ -32,14 +32,13 @@ import {
   startableDirections,
 } from './game/placement';
 import { loadStats, recordGame, type Stats } from './game/stats';
-import { codeFromHash, createTileStream, type BattleState, type TileStream } from './game/battle';
+import { codeFromHash, createTileStream, rankPlayers, type BattleState, type TileStream } from './game/battle';
 import type { CellKey, Direction, TileMap } from './game/types';
 import { keyOf, parseKey } from './game/types';
 import { hostBattle, joinBattle, type BattleEvents, type BattleHandle } from './net/battleSession';
 import { BattleLobby } from './components/BattleLobby';
 import { BattleMenu } from './components/BattleMenu';
 import { BattleResults } from './components/BattleResults';
-import { BattleStandings } from './components/BattleStandings';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
@@ -61,6 +60,9 @@ const UNDO_DEPTH = 50;
 
 /** How long the level splash stays up before bowing out. */
 const SPLASH_MS = 1700;
+
+/** The between-rounds battle scoreboard gets longer — five seconds of reading. */
+const ROUND_SPLASH_MS = 5000;
 
 /** Pinch limits, as a multiple of the stylesheet's cell size. */
 const MIN_ZOOM = 0.55;
@@ -319,10 +321,14 @@ export default function App() {
   /** Set when leaving a level early needs an answer first. */
   const [confirmSkip, setConfirmSkip] = useState<string | null>(null);
   /**
-   * Endless: the player's last move pushed them to the loose-tile limit. The
-   * game pauses on this dialog — take the move back, or accept the burial.
+   * Endless: a move just pushed the player over the loose-tile limit for the
+   * first time this game, and the one-off warning explaining the deadline is
+   * up. Being over only loses the game at the end of the round, so this is a
+   * notice, not a question.
    */
-  const [confirmLoss, setConfirmLoss] = useState(false);
+  const [limitWarning, setLimitWarning] = useState(false);
+  /** The warning fires once per game; after that the header count nags. */
+  const limitWarned = useRef(false);
   /** Cell size in px, driven by pinch on touch devices. */
   const [zoom, setZoom] = useState(1);
   /**
@@ -383,7 +389,8 @@ export default function App() {
     setHistory([]);
     setFuture([]);
     setConfirmSkip(null);
-    setConfirmLoss(false);
+    setLimitWarning(false);
+    limitWarned.current = false;
     moveJustMade.current = false;
     setSplash({ kind: 'level', level: 1 });
     setEndReason(null);
@@ -434,7 +441,7 @@ export default function App() {
     setCountdown(null);
     setShowSummary(false);
     setConfirmSkip(null);
-    setConfirmLoss(false);
+    setLimitWarning(false);
     setSplash(null);
   }, []);
 
@@ -475,7 +482,7 @@ export default function App() {
     setShowSummary(false);
     setShowBattleResults(false);
     setSplash(null);
-    setConfirmLoss(false);
+    setLimitWarning(false);
     setConfirmBattle(null);
   }, []);
 
@@ -491,7 +498,7 @@ export default function App() {
     setCountdown(null);
     setShowSummary(false);
     setSplash(null);
-    setConfirmLoss(false);
+    setLimitWarning(false);
     setScreen('home');
     setBattleNotice(message);
   }, []);
@@ -566,7 +573,7 @@ export default function App() {
     setCountdown(null);
     setShowSummary(false);
     setSplash(null);
-    setConfirmLoss(false);
+    setLimitWarning(false);
     setScreen('home');
   }, []);
 
@@ -604,8 +611,8 @@ export default function App() {
   /**
    * Whether the latest change to the board or pile was a player's move, as
    * opposed to the clock dealing tiles. Endless reads this when the loose-tile
-   * limit is hit: a move can be taken back, so it asks first — a timed drop
-   * can't, so it can't.
+   * limit is first exceeded: only the player's own move earns the one-off
+   * warning — tiles the clock dumped explain themselves.
    */
   const moveJustMade = useRef(false);
 
@@ -1016,6 +1023,9 @@ export default function App() {
       setEndReason(reason);
       setCountdown(null);
       setConfirmSkip(null);
+      // The game can end (a battle gets decided) with the limit warning still
+      // up — the frozen board answers it.
+      setLimitWarning(false);
       recordGame(runningScore, words.length);
       clearFocus();
     },
@@ -1101,10 +1111,12 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [mode, complete, boardScore.bonusEarned, drag, wordDrag, advanceLevel]);
 
-  // The splash announces and then gets out of the way.
+  // The splash announces and then gets out of the way. The between-rounds
+  // scoreboard has more to read, so it lingers longer.
   useEffect(() => {
     if (splash === null) return;
-    const timer = window.setTimeout(() => setSplash(null), SPLASH_MS);
+    const ms = splash.kind === 'round' ? ROUND_SPLASH_MS : SPLASH_MS;
+    const timer = window.setTimeout(() => setSplash(null), ms);
     return () => window.clearTimeout(timer);
   }, [splash]);
 
@@ -1114,7 +1126,7 @@ export default function App() {
   // Except in a battle: everyone's clock has to run as one, so nothing a
   // single player does — opening the tutorial, reading a splash — may stop
   // theirs while the others' tick on.
-  const clockPaused = !inBattle && (showHowTo || splash !== null || confirmLoss);
+  const clockPaused = !inBattle && (showHowTo || splash !== null || limitWarning);
 
   // Flip the clock between running and paused as overlays come and go. Written
   // as normalization (rather than one effect per transition) so a countdown
@@ -1184,6 +1196,20 @@ export default function App() {
    * the opening phase, which also switches the health bar on. The ref keeps
    * one expiry from being handled twice while the new countdown state lands.
    */
+  /**
+   * Endless's pressure gauge: tiles not yet doing their job — still in the
+   * pile, or on the board but not part of a valid, connected word. Going over
+   * the limit doesn't end the game by itself; still being over when a drip
+   * round ends does.
+   */
+  const looseTiles = useMemo(() => {
+    let onBoard = 0;
+    for (const status of cellStatus.values()) {
+      if (status !== 'valid') onBoard++;
+    }
+    return rack.length + onBoard;
+  }, [cellStatus, rack.length]);
+
   const expiryHandled = useRef<number | null>(null);
   useEffect(() => {
     if (complete || countdown?.kind !== 'running') return;
@@ -1196,14 +1222,36 @@ export default function App() {
       return;
     }
     if (mode === 'endless') {
+      // The round's reckoning comes before its new tiles: end a drip round
+      // still over the loose limit and the pile wins.
+      if (endlessPhase === 'drip' && looseTiles > ENDLESS_LOOSE_LIMIT) {
+        finishGame('buried');
+        return;
+      }
       dealBonusTiles(ENDLESS_DRIP_TILES, `+${ENDLESS_DRIP_TILES} tiles!`);
-      // The opening clock running out starts the drip phase; every expiry after
-      // that is one drip interval gone. Each few of them the wait gets shorter,
-      // and a splash says so — holding the new clock until it's been read, the
-      // same way a level-up splash does.
+      // The opening clock running out starts the drip phase; every expiry
+      // after that is one drip interval gone.
       const elapsed = endlessPhase === 'drip' ? dripsElapsed + 1 : 0;
       const seconds = endlessDripSeconds(elapsed);
-      if (elapsed > 0 && seconds < endlessDripSeconds(elapsed - 1)) {
+      if (inBattle && battle && battleState) {
+        // Between rounds a battle shows the whole field's scores — this
+        // player's own straight from their board, the rest as last reported.
+        const standings = rankPlayers(
+          battleState.players
+            .filter((p) => !p.waiting)
+            .map((p) => (p.id === battle.selfId ? { ...p, score: runningScore } : p)),
+        ).map(({ player, rank }) => ({
+          rank,
+          name: player.name,
+          score: player.score,
+          self: player.id === battle.selfId,
+          buried: player.buried || !player.connected,
+        }));
+        setSplash({ kind: 'round', standings, seconds });
+      } else if (elapsed > 0 && seconds < endlessDripSeconds(elapsed - 1)) {
+        // Solo keeps the speedup card: each few intervals the wait gets
+        // shorter, and the splash says so — holding the new clock until it's
+        // been read, the same way a level-up splash does.
         setSplash({ kind: 'speedup', seconds });
       }
       setEndlessPhase('drip');
@@ -1217,6 +1265,11 @@ export default function App() {
     mode,
     endlessPhase,
     dripsElapsed,
+    looseTiles,
+    inBattle,
+    battle,
+    battleState,
+    runningScore,
     finishGame,
     dealBonusTiles,
   ]);
@@ -1243,41 +1296,45 @@ export default function App() {
   }, [mode, complete, boardScore.bonusEarned, drag, wordDrag, dealBonusTiles]);
 
   /**
-   * The health bar's measure: tiles not yet doing their job — still in the
-   * pile, or on the board but not part of a valid, connected word. Hit the
-   * limit once the opening phase is over and the game is lost.
+   * The first time one of the player's own moves tips the pile over the loose
+   * limit, explain the stakes: get back under before the round ends or be
+   * buried. Once per game — after that the header count does the nagging.
+   * Solo stops the clock while the warning is read; a battle's shared clock
+   * can't stop for one player, so there it keeps running behind the notice.
+   * Tiles the clock deals aren't a move, so they never raise the warning.
    */
-  const looseTiles = useMemo(() => {
-    let onBoard = 0;
-    for (const status of cellStatus.values()) {
-      if (status !== 'valid') onBoard++;
-    }
-    return rack.length + onBoard;
-  }, [cellStatus, rack.length]);
-
   useEffect(() => {
-    if (mode !== 'endless' || complete || endlessPhase !== 'drip' || confirmLoss) return;
-    if (looseTiles < ENDLESS_LOOSE_LIMIT) return;
-    // A move did this and can be taken back, so the game pauses and asks
-    // before it ends. Tiles the clock dealt can't be taken back — that loss
-    // just happens. A battle can't pause for the question (everyone else's
-    // clock is running), so there a burial is a burial.
-    if (!inBattle && moveJustMade.current && history.length > 0) setConfirmLoss(true);
-    else finishGame('buried');
-  }, [mode, complete, endlessPhase, confirmLoss, looseTiles, history.length, finishGame, inBattle]);
-
-  /** Take back the move the burial warning is holding the game on. */
-  const undoLosingMove = useCallback(() => {
-    setConfirmLoss(false);
-    undo();
-  }, [undo]);
-
-  const acceptLoss = useCallback(() => {
-    setConfirmLoss(false);
-    finishGame('buried');
-  }, [finishGame]);
+    if (mode !== 'endless' || complete || endlessPhase !== 'drip') return;
+    if (looseTiles <= ENDLESS_LOOSE_LIMIT) return;
+    if (limitWarned.current || !moveJustMade.current) return;
+    limitWarned.current = true;
+    setLimitWarning(true);
+  }, [mode, complete, endlessPhase, looseTiles]);
 
   /* -------------------------------- battle ---------------------------------- */
+
+  /**
+   * This player's live place in the field, for the header. Their own score is
+   * read straight off the board — the host's echo of it can lag a beat — and
+   * everyone else's as last reported.
+   */
+  const battleRank = useMemo(() => {
+    if (!inBattle || !battle || !battleState) return null;
+    const contestants = battleState.players
+      .filter((p) => !p.waiting)
+      .map((p) =>
+        p.id === battle.selfId ? { ...p, score: complete ? finalScore : runningScore } : p,
+      );
+    if (contestants.length === 0) return null;
+    const ranked = rankPlayers(contestants);
+    const self = ranked.find((entry) => entry.player.id === battle.selfId);
+    if (!self) return null;
+    return {
+      place: self.rank,
+      of: ranked.length,
+      buried: self.player.buried || (complete && endReason === 'buried'),
+    };
+  }, [inBattle, battle, battleState, complete, finalScore, runningScore, endReason]);
 
   /**
    * Keep the host's standings current: every score change reports in, and a
@@ -1711,7 +1768,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       // The board owns the keyboard only while it's actually being played.
-      if (screen !== 'game' || showHowTo || confirmLoss || showBattleResults) return;
+      if (screen !== 'game' || showHowTo || limitWarning || showBattleResults) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
@@ -1785,7 +1842,7 @@ export default function App() {
   }, [
     screen,
     showHowTo,
-    confirmLoss,
+    limitWarning,
     showBattleResults,
     interaction,
     picks,
@@ -2102,15 +2159,21 @@ export default function App() {
               ? {
                   label: mode === 'endless' && endlessPhase === 'drip' ? 'Next tiles' : 'Time',
                   seconds: timerSeconds,
-                  urgent: mode === 'timed' && timerSeconds <= 15,
+                  // Over the loose limit, the round clock is the deadline to
+                  // dig back under — it pleads as hard as a dying timer.
+                  urgent:
+                    mode === 'timed'
+                      ? timerSeconds <= 15
+                      : endlessPhase === 'drip' && looseTiles > ENDLESS_LOOSE_LIMIT,
                 }
               : null
           }
-          health={
+          tiles={
             mode === 'endless' && endlessPhase === 'drip' && !complete
               ? { loose: looseTiles, limit: ENDLESS_LOOSE_LIMIT }
               : null
           }
+          rank={battleRank}
           pops={scorePops}
           onPopEnd={endScorePop}
         />
@@ -2180,18 +2243,8 @@ export default function App() {
         </div>
       )}
 
-      {/* The zoom rides on a CSS variable so only the tiles resize. The
-          board-area shell exists to anchor the battle standings over the
-          corner of the (scrolling) viewport. */}
+      {/* The zoom rides on a CSS variable so only the tiles resize. */}
       <div className="board-area">
-        {inBattle && battle && battleState && (
-          <BattleStandings
-            players={battleState.players}
-            selfId={battle.selfId}
-            finished={battlePhase === 'finished'}
-            onShowResults={() => setShowBattleResults(true)}
-          />
-        )}
       <div
         className="board-wrap"
         ref={boardWrapRef}
@@ -2344,19 +2397,21 @@ export default function App() {
         onCancel={() => setConfirmSkip(null)}
       />
 
-      {/* Endless holds its breath here: the last move hit the loose-tile
-          limit, and the clock waits while the player decides. */}
+      {/* The first move over the loose limit gets the rules spelled out, once.
+          Solo stops the clock to read them; a battle's shared clock ticks on. */}
       <ConfirmDialog
         message={
-          confirmLoss
-            ? `That move leaves you with ${looseTiles} loose tiles — at ` +
-              `${ENDLESS_LOOSE_LIMIT} you're buried. Take it back to stay in the game.`
+          limitWarning
+            ? `Limit exceeded! You have ${looseTiles} loose tiles — ` +
+              `${Math.max(1, looseTiles - ENDLESS_LOOSE_LIMIT)} over the limit of ` +
+              `${ENDLESS_LOOSE_LIMIT}. Get back to ${ENDLESS_LOOSE_LIMIT} or fewer before ` +
+              `the round ends, or you're buried.` +
+              (inBattle ? ' The clock is still running!' : '')
             : null
         }
-        confirmLabel="Accept defeat"
-        cancelLabel="Undo move"
-        onConfirm={acceptLoss}
-        onCancel={undoLosingMove}
+        confirmLabel="Got it"
+        cancelLabel={null}
+        onConfirm={() => setLimitWarning(false)}
       />
 
       {/* The end of a battle: who won, and what the host does next. */}

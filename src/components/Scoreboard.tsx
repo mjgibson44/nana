@@ -1,5 +1,9 @@
+import { ordinal } from '../game/battle';
 import { LEVEL_COUNT } from '../game/levels';
 import { formatSeconds } from '../game/modes';
+
+/** How close to the loose limit counts as "getting close" — the orange zone. */
+const TILES_WARN_MARGIN = 5;
 
 /** One floating "+12"/"−12" riding off a score change, alive until its
  * animation ends. */
@@ -24,9 +28,11 @@ interface ScoreboardProps {
   complete: boolean;
   /** The header clock, or null in modes without one. */
   timer: { label: string; seconds: number; urgent: boolean } | null;
-  /** Endless health: how many tiles are loose against the limit that ends the
-   * game. Null while the bar isn't in play. */
-  health: { loose: number; limit: number } | null;
+  /** Endless: how many tiles are loose against the limit that buries the
+   * player at a round's end. Null while the count isn't in play. */
+  tiles: { loose: number; limit: number } | null;
+  /** This player's place in a battle, or null outside one. */
+  rank: { place: number; of: number; buried: boolean } | null;
   /** Score changes still floating up beside the total. */
   pops: ScorePop[];
   /** A pop's animation finished; it can be dropped. */
@@ -40,14 +46,16 @@ export function Scoreboard({
   bonusAmount,
   complete,
   timer,
-  health,
+  tiles,
+  rank,
   pops,
   onPopEnd,
 }: ScoreboardProps) {
-  // The bar shows health draining as loose tiles pile up toward the limit.
-  const healthLeft = health ? Math.max(0, health.limit - health.loose) : 0;
-  const healthFraction = health ? healthLeft / health.limit : 0;
-  const healthTone = healthFraction > 0.5 ? 'ok' : healthFraction > 0.25 ? 'warn' : 'low';
+  // Over the limit is red — the count flips to how far over. At or near the
+  // limit is orange; comfortably under is green.
+  const over = tiles ? tiles.loose - tiles.limit : 0;
+  const tilesTone =
+    over > 0 ? 'over' : tiles && tiles.limit - tiles.loose <= TILES_WARN_MARGIN ? 'warn' : 'ok';
 
   return (
     <div className="scoreboard">
@@ -87,27 +95,37 @@ export function Scoreboard({
           </span>
         </div>
       )}
-      {health && (
+      {rank && (
+        <div className="score-block" title={`Your place among ${rank.of} players`}>
+          <span className="score-label">Position</span>
+          <span className="score-value">
+            {rank.buried && '💀 '}
+            {ordinal(rank.place)}
+            <span className="score-of"> of {rank.of}</span>
+          </span>
+        </div>
+      )}
+      {tiles && (
         <div
-          className="score-block score-block-health"
-          title={`${health.loose} of ${health.limit} loose tiles — reach ${health.limit} and the game is over`}
+          className="score-block"
+          title={
+            over > 0
+              ? `${tiles.loose} loose tiles — ${over} over the limit of ${tiles.limit}. ` +
+                `Get back under before the round ends or you're buried.`
+              : `${tiles.loose} of ${tiles.limit} loose tiles — end a round over the limit ` +
+                `and you're buried`
+          }
         >
-          <span className="score-label">Health</span>
-          <div
-            className="health-bar"
-            role="meter"
-            aria-label="Health"
-            aria-valuemin={0}
-            aria-valuemax={health.limit}
-            aria-valuenow={healthLeft}
-          >
-            <div
-              className={`health-fill health-${healthTone}`}
-              style={{ width: `${healthFraction * 100}%` }}
-            />
-          </div>
-          <span className="health-count">
-            {health.loose}/{health.limit} loose
+          <span className="score-label">{over > 0 ? 'Limit exceeded' : 'Loose tiles'}</span>
+          <span className={`score-value tile-count-${tilesTone}`}>
+            {over > 0 ? (
+              `+${over}`
+            ) : (
+              <>
+                {tiles.loose}
+                <span className="score-of">/{tiles.limit}</span>
+              </>
+            )}
           </span>
         </div>
       )}

@@ -90,22 +90,25 @@ in `src/game/modes.ts`.
 - **Endless** — no levels. 2:00 to work the starting 20 tiles, then 5 more
   tiles arrive on a clock that keeps tightening. Clearing the pile pays a
   25-point bonus and 5 more tiles. Loose tiles — unplaced or not validly
-  connected — are your health bar: reach 20 and you're buried. A move (as
-  opposed to the clock) that would bury you pauses the game and asks first,
-  with the option to undo it.
+  connected — are counted against the limit in the header: green while
+  comfortable, orange near 20, red once you're over. Going over the limit
+  doesn't end the game by itself; still being over when the round's clock
+  runs out is what buries you. The first move that takes you over gets a
+  one-time warning spelling that out (solo stops the clock to read it).
 - **Endless Battle** — Endless, against your friends. One player hosts a
   lobby and shares a 5-letter code (or an invite link that carries it);
   everyone enters a name to join. Every player fights the identical game:
   the same starting tiles, and the same letters in every batch after —
-  however they earn them. Your live position rides the top-left corner of
-  the board. Being buried knocks you out but the race runs on; the battle
-  ends when everyone is buried — or the moment the last player standing is
-  already strictly ahead, since nothing can change the outcome. Highest
-  score wins, and the final standings name the champion. The host can
-  restart the game or pull everyone back to the lobby at any time, and after
-  a finish chooses between another game and the lobby. There's no take-back
-  pause in a battle (everyone's clock must run as one) — a burial is a
-  burial.
+  however they earn them. Your live position sits in the header beside the
+  clock, and between rounds a five-second scoreboard shows the whole field.
+  Being buried knocks you out but the race runs on; the battle ends when
+  everyone is buried — or the moment the last player standing is already
+  strictly ahead, since nothing can change the outcome. Highest score wins,
+  and the final standings name the champion. The host can restart the game
+  or pull everyone back to the lobby at any time, and after a finish chooses
+  between another game and the lobby. Nothing one player does pauses a
+  battle (everyone's clock must run as one), so the limit warning shows with
+  the clock still ticking.
 
 A first-run "How to play" tutorial pops up on entering a game and then stays
 out of the way (a localStorage flag remembers it's been seen).

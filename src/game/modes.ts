@@ -46,7 +46,7 @@ export const MODES: ModeInfo[] = [
     details: [
       '2:00 to place your first 20 tiles',
       '+5 tiles a minute, and it speeds up',
-      '20 loose tiles and you’re buried',
+      'Over 20 loose tiles when a round ends and you’re buried',
     ],
   },
 ];
@@ -86,7 +86,7 @@ export function timedLevelSeconds(level: number): number {
 /* -------------------------------- Endless --------------------------------- */
 
 /** The opening phase: this long to work the starting pile before tiles start
- * arriving — and before the health bar switches on. */
+ * arriving — and before the loose-tile count switches on. */
 export const ENDLESS_INITIAL_SECONDS = 120;
 
 /**
@@ -120,7 +120,8 @@ export const ENDLESS_CLEAR_TILES = 5;
 export const ENDLESS_CONNECT_BONUS = 25;
 
 /** Loose tiles — in the pile, or on the board but not validly connected —
- * are the health bar. Reach this many and the game is over. */
+ * are the pressure gauge. Going over this limit is survivable; still being
+ * over it when a drip round ends is what buries the player. */
 export const ENDLESS_LOOSE_LIMIT = 20;
 
 /* --------------------------------- shared --------------------------------- */
