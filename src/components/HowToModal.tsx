@@ -38,9 +38,22 @@ function DemoWord({
 }
 
 /** A game button shown for what it looks like, not for pressing. */
-function DemoButton({ children, tone }: { children: React.ReactNode; tone?: 'confirm' }) {
+function DemoButton({
+  children,
+  tone,
+  inline,
+}: {
+  children: React.ReactNode;
+  tone?: 'confirm';
+  inline?: boolean;
+}) {
   return (
-    <span className={`icon-btn howto-btn${tone ? ` icon-btn-${tone}` : ''}`} aria-hidden="true">
+    <span
+      className={`icon-btn howto-btn${tone ? ` icon-btn-${tone}` : ''}${
+        inline ? ' howto-btn-inline' : ''
+      }`}
+      aria-hidden="true"
+    >
       {children}
     </span>
   );
@@ -89,23 +102,21 @@ export function HowToModal({ onClose }: HowToModalProps) {
           <h2 className="summary-section-title">What the colours mean</h2>
           <ul className="howto-list">
             <li className="howto-row">
-              <DemoWord letters={['n', 'a', 'n', 'a']} state="valid" />
+              <DemoTile letter="n" state="valid" />
               <span>
-                <strong>Green</strong> — a real word, connected to the rest of your board. This is
-                what you want everywhere.
+                <strong>Green</strong> — a real word, connected to the rest of the board.
               </span>
             </li>
             <li className="howto-row">
-              <DemoWord letters={['p', 'e', 'e', 'l']} state="disconnected" />
+              <DemoTile letter="p" state="disconnected" />
               <span>
-                <strong>Orange</strong> — a real word, but it&rsquo;s not connected to the rest of
-                your crossword yet. Everything has to join into one group.
+                <strong>Orange</strong> — a real word, not connected.
               </span>
             </li>
             <li className="howto-row">
-              <DemoWord letters={['x', 'q', 'z']} state="invalid" />
+              <DemoTile letter="x" state="invalid" />
               <span>
-                <strong>Red</strong> — not a word. Fix it before it costs you the board.
+                <strong>Red</strong> — not a real word.
               </span>
             </li>
           </ul>
@@ -117,56 +128,31 @@ export function HowToModal({ onClose }: HowToModalProps) {
             <li className="howto-row">
               <DemoTile state="cursor" />
               <span>
-                Tap any empty square and just start typing — your letters preview right on the
-                board as you go.
-              </span>
-            </li>
-            <li className="howto-row">
-              <DemoButton tone="confirm">
-                <CheckIcon />
-              </DemoButton>
-              <span>
-                Press <kbd>Enter</kbd> or the confirm button to place the word.
+                Tap an empty square, then{' '}
+                <DemoButton tone="confirm" inline>
+                  <CheckIcon />
+                </DemoButton>{' '}
+                or press <kbd>Enter</kbd> to confirm.
               </span>
             </li>
           </ul>
         </section>
 
         <section className="summary-section">
-          <h2 className="summary-section-title">Or spell first, then point</h2>
+          <h2 className="summary-section-title">Spell first, then point</h2>
           <ul className="howto-list">
             <li className="howto-row">
               <DemoWord letters={['b', 'o', 'a', 'r', 'd']} />
-              <span>
-                Type letters (or tap tiles in your pile) before choosing a square — they wait in
-                the bar at the bottom.
-              </span>
+              <span>Type out your word, then choose a cell to place it.</span>
             </li>
-            <li className="howto-row">
-              <DemoTile state="cursor" />
-              <span>Then tap the empty square where the word should start, and confirm.</span>
-            </li>
-          </ul>
-        </section>
-
-        <section className="summary-section">
-          <h2 className="summary-section-title">Overlap words easier with a gap letter</h2>
-          <ul className="howto-list">
             <li className="howto-row">
               <DemoButton>
                 <GapIcon />
               </DemoButton>
               <span>
-                The gap tile (or <kbd>Space</kbd>) leaves a hole in your word for a letter
-                that&rsquo;s already on the board.
-              </span>
-            </li>
-            <li className="howto-row">
-              <DemoWord letters={['b', null, 'a', 'r', 'd']} />
-              <span>
-                Spell around the hole — here <strong>B&nbsp;_&nbsp;A&nbsp;R&nbsp;D</strong> — then
-                tap an <strong>O</strong> on the board. The word lands with that letter filling
-                the gap, spelling BOARD.
+                Or use the gap tile (<kbd>Space</kbd>) in place of a letter that would overlap
+                with another word, then tap the letter on the board where the overlapped letter
+                would end up — the word places itself automatically.
               </span>
             </li>
           </ul>
@@ -179,29 +165,19 @@ export function HowToModal({ onClose }: HowToModalProps) {
               <DemoButton>
                 <RotateIcon to="down" />
               </DemoButton>
-              <span>
-                Words read <strong>across</strong> or <strong>down</strong>. The turn button (or
-                the arrow keys, or the little arrow on the square you picked) flips the direction
-                before you place.
-              </span>
+              <span>Rotate the selected word.</span>
             </li>
             <li className="howto-row">
               <DemoButton>
                 <CompassIcon />
               </DemoButton>
-              <span>
-                Tap a placed tile to select its word — a control pops up. Drag the compass handle
-                to move the whole word somewhere else, or turn it in place.
-              </span>
+              <span>Drag to move the selected word.</span>
             </li>
             <li className="howto-row">
               <DemoButton>
                 <TrashIcon />
               </DemoButton>
-              <span>
-                The word&rsquo;s trash button sends all its letters back to your pile. Single
-                tiles can also be dragged anywhere — or double-tapped to send them back.
-              </span>
+              <span>Remove this word, sending its tiles back to the pile.</span>
             </li>
           </ul>
         </section>
