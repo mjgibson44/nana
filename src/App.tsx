@@ -1016,6 +1016,9 @@ export default function App() {
       setEndReason(reason);
       setCountdown(null);
       setConfirmSkip(null);
+      // The battle can be decided while the burial question is still open —
+      // the frozen board answers it.
+      setConfirmLoss(false);
       recordGame(runningScore, words.length);
       clearFocus();
     },
@@ -1256,13 +1259,21 @@ export default function App() {
   }, [cellStatus, rack.length]);
 
   useEffect(() => {
-    if (mode !== 'endless' || complete || endlessPhase !== 'drip' || confirmLoss) return;
+    if (mode !== 'endless' || complete || endlessPhase !== 'drip') return;
     if (looseTiles < ENDLESS_LOOSE_LIMIT) return;
-    // A move did this and can be taken back, so the game pauses and asks
-    // before it ends. Tiles the clock dealt can't be taken back — that loss
-    // just happens. A battle can't pause for the question (everyone else's
-    // clock is running), so there a burial is a burial.
-    if (!inBattle && moveJustMade.current && history.length > 0) setConfirmLoss(true);
+    // A move did this and can be taken back, so the game asks before it ends.
+    // Tiles the clock dealt can't be taken back — that loss just happens.
+    // A battle asks too, but nothing a single player does may stop the shared
+    // clock, so there the question waits with the clock still running — and a
+    // drip landing mid-question settles it: clock tiles bury, no taking back.
+    if (confirmLoss) {
+      if (inBattle && !moveJustMade.current) {
+        setConfirmLoss(false);
+        finishGame('buried');
+      }
+      return;
+    }
+    if (moveJustMade.current && history.length > 0) setConfirmLoss(true);
     else finishGame('buried');
   }, [mode, complete, endlessPhase, confirmLoss, looseTiles, history.length, finishGame, inBattle]);
 
@@ -2345,12 +2356,14 @@ export default function App() {
       />
 
       {/* Endless holds its breath here: the last move hit the loose-tile
-          limit, and the clock waits while the player decides. */}
+          limit. Solo waits with the clock stopped; a battle's shared clock
+          keeps running, and the next drip decides for the ditherer. */}
       <ConfirmDialog
         message={
           confirmLoss
             ? `That move leaves you with ${looseTiles} loose tiles — at ` +
-              `${ENDLESS_LOOSE_LIMIT} you're buried. Take it back to stay in the game.`
+              `${ENDLESS_LOOSE_LIMIT} you're buried. Take it back to stay in the game.` +
+              (inBattle ? ' Quick — the clock is still running!' : '')
             : null
         }
         confirmLabel="Accept defeat"
