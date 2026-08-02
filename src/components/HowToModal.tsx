@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { CheckIcon, CloseIcon, CompassIcon, GapIcon, RotateIcon, TrashIcon } from './icons';
+import { CheckIcon, CloseIcon, CompassIcon, RotateIcon, TrashIcon } from './icons';
 
 interface HowToModalProps {
   onClose: () => void;
@@ -142,17 +142,16 @@ export function HowToModal({ onClose }: HowToModalProps) {
           <h2 className="summary-section-title">Spell first, then point</h2>
           <ul className="howto-list">
             <li className="howto-row">
-              <DemoWord letters={['b', 'o', 'a', 'r', 'd']} />
+              <DemoWord letters={['w', 'o', 'r', 'd']} />
               <span>Type out your word, then choose a cell to place it.</span>
             </li>
             <li className="howto-row">
-              <DemoButton>
-                <GapIcon />
-              </DemoButton>
+              <DemoWord letters={['w', null, 'r', 'd']} />
               <span>
                 Or use the gap tile (<kbd>Space</kbd>) in place of a letter that would overlap
-                with another word, then tap the letter on the board where the overlapped letter
-                would end up — the word places itself automatically.
+                with another word.
+                <br />
+                Then tap the letter on the board where the overlapped letter would end up.
               </span>
             </li>
           </ul>
