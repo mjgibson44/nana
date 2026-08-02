@@ -32,8 +32,14 @@ import {
   startableDirections,
 } from './game/placement';
 import { loadStats, recordGame, type Stats } from './game/stats';
+import { codeFromHash, createTileStream, type BattleState, type TileStream } from './game/battle';
 import type { CellKey, Direction, TileMap } from './game/types';
 import { keyOf, parseKey } from './game/types';
+import { hostBattle, joinBattle, type BattleEvents, type BattleHandle } from './net/battleSession';
+import { BattleLobby } from './components/BattleLobby';
+import { BattleMenu } from './components/BattleMenu';
+import { BattleResults } from './components/BattleResults';
+import { BattleStandings } from './components/BattleStandings';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
@@ -109,6 +115,9 @@ function measureTiles(
 
 /** Once set, the tutorial stays put — it only auto-opens on the first game. */
 const HOWTO_SEEN_KEY = 'nana.howto.v1';
+
+/** The name last used in a battle lobby, so it's typed once per device. */
+const PLAYER_NAME_KEY = 'nana.player.v1';
 
 /** How the game came to an end — the summary's headline depends on it. */
 type EndReason = 'won' | 'timeout' | 'buried';
@@ -199,9 +208,46 @@ function shuffleArray<T>(items: T[]): T[] {
 }
 
 export default function App() {
-  /** Which screen is up: the mode-picking splash, or a game. */
-  const [screen, setScreen] = useState<'home' | 'game'>('home');
+  /** Which screen is up: the mode-picking splash, the battle door/lobby, or a game. */
+  const [screen, setScreen] = useState<'home' | 'battle' | 'game'>('home');
   const [mode, setMode] = useState<GameMode>('puzzle');
+
+  /* ------------------------------ battle state ------------------------------ */
+
+  /** The live battle connection, or null outside Endless Battle. */
+  const [battle, setBattle] = useState<BattleHandle | null>(null);
+  /** The host's latest broadcast: roster, scores, phase. */
+  const [battleState, setBattleState] = useState<BattleState | null>(null);
+  /** What connecting is currently doing ("Opening a lobby…"), or null. */
+  const [battleBusy, setBattleBusy] = useState<string | null>(null);
+  /** Why the last host/join attempt failed, shown on the battle menu. */
+  const [battleError, setBattleError] = useState<string | null>(null);
+  /** Why a battle ended out from under us, shown once back home. */
+  const [battleNotice, setBattleNotice] = useState<string | null>(null);
+  /** Whether the end-of-battle standings are up. */
+  const [showBattleResults, setShowBattleResults] = useState(false);
+  /** A host action that deserves a second thought before hitting everyone. */
+  const [confirmBattle, setConfirmBattle] = useState<'restart' | 'lobby' | 'leave' | null>(null);
+  /** A code carried in by a share link, waiting on the join form. */
+  const [joinCodePrefill, setJoinCodePrefill] = useState('');
+  const [playerName, setPlayerName] = useState(() => {
+    try {
+      return window.localStorage.getItem(PLAYER_NAME_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  });
+  /**
+   * The shared deal. Every client grows the same batches from the seed the
+   * host announced, so nobody's tiles ever cross the network. Non-null only
+   * while a battle game is being played (or looked back on).
+   */
+  const battleStream = useRef<TileStream | null>(null);
+  /** The battle connection for callbacks that shouldn't re-bind on renders. */
+  const battleRef = useRef<BattleHandle | null>(null);
+
+  const inBattle = battle !== null;
+  const battlePhase = battleState?.phase ?? null;
   /** Whether the how-to tutorial is up (auto on first game, or from a menu). */
   const [showHowTo, setShowHowTo] = useState(false);
   /** The clock, in modes that have one. Null in Solo Puzzle and once a game ends. */
@@ -317,9 +363,11 @@ export default function App() {
   /** A game already recorded to stats must not record again — see finishGame. */
   const finished = useRef(false);
 
-  const newGame = useCallback((nextMode: GameMode) => {
+  /** Start a fresh game. Battles hand in the shared deal's opening letters;
+   * solo games draw their own at random. */
+  const newGame = useCallback((nextMode: GameMode, dealtLetters?: string[]) => {
     setMode(nextMode);
-    setRack(generatePuzzle(COMMON_WORDS, tilesAddedForLevel(1)).letters);
+    setRack(dealtLetters ?? generatePuzzle(COMMON_WORDS, tilesAddedForLevel(1)).letters);
     setBoard({});
     setDrag(null);
     setWordDrag(null);
@@ -389,6 +437,165 @@ export default function App() {
     setConfirmLoss(false);
     setSplash(null);
   }, []);
+
+  /* --------------------------- battle lifecycle ----------------------------- */
+
+  // A share link opens straight onto the join form, code filled in. The hash
+  // is then dropped so a later refresh doesn't replay a stale invitation.
+  useEffect(() => {
+    const code = codeFromHash(window.location.hash);
+    if (code === null) return;
+    setJoinCodePrefill(code);
+    setScreen('battle');
+    try {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    } catch {
+      // Leaving the hash in place is harmless.
+    }
+  }, []);
+
+  /** The host said "go": grow the shared deal from the seed and dive in. */
+  const handleBattleStart = useCallback(
+    (seed: string) => {
+      const stream = createTileStream(seed);
+      battleStream.current = stream;
+      setShowBattleResults(false);
+      setConfirmBattle(null);
+      newGame('endless', stream.next(tilesAddedForLevel(1)));
+      setScreen('game');
+    },
+    [newGame],
+  );
+
+  /** The host gathered everyone back in the lobby. */
+  const handleBattleStop = useCallback(() => {
+    battleStream.current = null;
+    setScreen('battle');
+    setCountdown(null);
+    setShowSummary(false);
+    setShowBattleResults(false);
+    setSplash(null);
+    setConfirmLoss(false);
+    setConfirmBattle(null);
+  }, []);
+
+  /** The battle is gone — connection lost or lobby closed. Land back home
+   * with a note saying why. */
+  const handleBattleEnded = useCallback((message: string) => {
+    battleStream.current = null;
+    battleRef.current = null;
+    setBattle(null);
+    setBattleState(null);
+    setShowBattleResults(false);
+    setConfirmBattle(null);
+    setCountdown(null);
+    setShowSummary(false);
+    setSplash(null);
+    setConfirmLoss(false);
+    setScreen('home');
+    setBattleNotice(message);
+  }, []);
+
+  const battleEvents = useMemo<BattleEvents>(
+    () => ({
+      onState: setBattleState,
+      onStart: handleBattleStart,
+      onStop: handleBattleStop,
+      onEnded: handleBattleEnded,
+    }),
+    [handleBattleStart, handleBattleStop, handleBattleEnded],
+  );
+
+  const rememberPlayerName = useCallback((name: string) => {
+    setPlayerName(name);
+    try {
+      window.localStorage.setItem(PLAYER_NAME_KEY, name);
+    } catch {
+      // It'll just need typing again next time.
+    }
+  }, []);
+
+  const hostGame = useCallback(
+    async (name: string) => {
+      rememberPlayerName(name);
+      setBattleBusy('Opening a lobby…');
+      setBattleError(null);
+      try {
+        const handle = await hostBattle(name, battleEvents);
+        battleRef.current = handle;
+        setBattle(handle);
+        setBattleState(handle.snapshot());
+      } catch (err) {
+        setBattleError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBattleBusy(null);
+      }
+    },
+    [battleEvents, rememberPlayerName],
+  );
+
+  const joinGame = useCallback(
+    async (name: string, code: string) => {
+      rememberPlayerName(name);
+      setBattleBusy('Joining the game…');
+      setBattleError(null);
+      try {
+        const handle = await joinBattle(code, name, battleEvents);
+        battleRef.current = handle;
+        setBattle(handle);
+        setBattleState(handle.snapshot());
+      } catch (err) {
+        setBattleError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBattleBusy(null);
+      }
+    },
+    [battleEvents, rememberPlayerName],
+  );
+
+  /** Walk out — and, as the host, take the lobby down. Always by choice, so
+   * no notice needed on the way home. */
+  const leaveBattle = useCallback(() => {
+    battleRef.current?.leave();
+    battleRef.current = null;
+    battleStream.current = null;
+    setBattle(null);
+    setBattleState(null);
+    setShowBattleResults(false);
+    setConfirmBattle(null);
+    setCountdown(null);
+    setShowSummary(false);
+    setSplash(null);
+    setConfirmLoss(false);
+    setScreen('home');
+  }, []);
+
+  /** Host controls, with a pause for thought while a game is still running —
+   * these land on every player at once. */
+  const requestBattleRestart = useCallback(() => {
+    if (battlePhase === 'playing') setConfirmBattle('restart');
+    else battleRef.current?.start();
+  }, [battlePhase]);
+
+  const requestBattleLobby = useCallback(() => {
+    if (battlePhase === 'playing') setConfirmBattle('lobby');
+    else battleRef.current?.stop();
+  }, [battlePhase]);
+
+  /** Leaving deserves a second thought when it costs something: a host with
+   * guests takes the lobby down, and a live board is abandoned mid-game. */
+  const requestLeaveBattle = useCallback(() => {
+    const handle = battleRef.current;
+    if (!handle) {
+      leaveBattle();
+      return;
+    }
+    const players = battleState?.players ?? [];
+    const self = players.find((p) => p.id === handle.selfId);
+    const playingNow = battlePhase === 'playing' && self !== undefined && !self.waiting;
+    if ((handle.isHost && players.length > 1) || playingNow) setConfirmBattle('leave');
+    else leaveBattle();
+  }, [battleState, battlePhase, leaveBattle]);
 
   /**
    * Remember the board and pile as they are, so the change about to be made can
@@ -803,14 +1010,16 @@ export default function App() {
       setFinalScore(runningScore);
       setFinalWords(words);
       setComplete(true);
-      setShowSummary(true);
+      // A battle's own standings screen does the announcing there — and only
+      // once the whole battle is decided, not when one player goes under.
+      setShowSummary(!inBattle);
       setEndReason(reason);
       setCountdown(null);
       setConfirmSkip(null);
       recordGame(runningScore, words.length);
       clearFocus();
     },
-    [validation, runningScore, clearFocus],
+    [validation, runningScore, clearFocus, inBattle],
   );
 
   /**
@@ -902,7 +1111,10 @@ export default function App() {
   /* ------------------------------- the clock -------------------------------- */
 
   // Anything worth reading over the board stops the clock while it's up.
-  const clockPaused = showHowTo || splash !== null || confirmLoss;
+  // Except in a battle: everyone's clock has to run as one, so nothing a
+  // single player does — opening the tutorial, reading a splash — may stop
+  // theirs while the others' tick on.
+  const clockPaused = !inBattle && (showHowTo || splash !== null || confirmLoss);
 
   // Flip the clock between running and paused as overlays come and go. Written
   // as normalization (rather than one effect per transition) so a countdown
@@ -943,19 +1155,24 @@ export default function App() {
    */
   const dealBonusTiles = useCallback(
     (count: number, message: string) => {
-      const dealt = extendPuzzle(board, bounds, COMMON_WORDS, count);
-      setRack((prev) => [...prev, ...dealt.letters]);
+      // Battles deal from the shared stream so every player draws the same
+      // letters; solo games grow them off this player's own board.
+      const letters =
+        battleRef.current !== null && battleStream.current !== null
+          ? battleStream.current.next(count)
+          : extendPuzzle(board, bounds, COMMON_WORDS, count).letters;
+      setRack((prev) => [...prev, ...letters]);
       // The dealt tiles join every remembered pile too: undoing a move must
       // take back the move alone, never disappear tiles the clock has dealt.
       setHistory((past) =>
-        past.map((snap) => ({ ...snap, rack: [...snap.rack, ...dealt.letters] })),
+        past.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
       );
       setFuture((ahead) =>
-        ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...dealt.letters] })),
+        ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
       );
       moveJustMade.current = false;
       const serial = ++dropSerial.current;
-      setTileDrop({ count: dealt.letters.length, serial });
+      setTileDrop({ count: letters.length, serial });
       setToast({ text: message, serial });
     },
     [board, bounds],
@@ -1043,10 +1260,11 @@ export default function App() {
     if (looseTiles < ENDLESS_LOOSE_LIMIT) return;
     // A move did this and can be taken back, so the game pauses and asks
     // before it ends. Tiles the clock dealt can't be taken back — that loss
-    // just happens.
-    if (moveJustMade.current && history.length > 0) setConfirmLoss(true);
+    // just happens. A battle can't pause for the question (everyone else's
+    // clock is running), so there a burial is a burial.
+    if (!inBattle && moveJustMade.current && history.length > 0) setConfirmLoss(true);
     else finishGame('buried');
-  }, [mode, complete, endlessPhase, confirmLoss, looseTiles, history.length, finishGame]);
+  }, [mode, complete, endlessPhase, confirmLoss, looseTiles, history.length, finishGame, inBattle]);
 
   /** Take back the move the burial warning is holding the game on. */
   const undoLosingMove = useCallback(() => {
@@ -1058,6 +1276,45 @@ export default function App() {
     setConfirmLoss(false);
     finishGame('buried');
   }, [finishGame]);
+
+  /* -------------------------------- battle ---------------------------------- */
+
+  /**
+   * Keep the host's standings current: every score change reports in, and a
+   * burial reports itself the moment the board freezes. The host aggregates
+   * these into the state everyone sees.
+   */
+  useEffect(() => {
+    if (!battle || battlePhase !== 'playing' || screen !== 'game') return;
+    battle.reportProgress(complete ? finalScore : runningScore, endReason === 'buried');
+  }, [battle, battlePhase, screen, runningScore, complete, finalScore, endReason]);
+
+  /**
+   * The battle is decided. Freeze this board where it stands — survivors
+   * keep the score they're on, exactly what the host ranked them by — and
+   * raise the standings. The ref keeps later re-renders (the board can still
+   * be fiddled with behind the results) from re-raising them.
+   */
+  const battleFinishSeen = useRef(false);
+  useEffect(() => {
+    if (!battle || battlePhase !== 'finished' || screen !== 'game') {
+      battleFinishSeen.current = false;
+      return;
+    }
+    if (battleFinishSeen.current) return;
+    battleFinishSeen.current = true;
+    finishGame('won');
+    setShowBattleResults(true);
+  }, [battle, battlePhase, screen, finishGame]);
+
+  // Being buried in a battle isn't the end of the show — say so, once, while
+  // the survivors race on.
+  useEffect(() => {
+    if (!inBattle || battlePhase !== 'playing') return;
+    if (!complete || endReason !== 'buried') return;
+    const serial = ++dropSerial.current;
+    setToast({ text: '🫠 You’re buried! The race goes on…', serial });
+  }, [inBattle, battlePhase, complete, endReason]);
 
   // Banners and landing animations clean themselves up.
   useEffect(() => {
@@ -1454,7 +1711,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       // The board owns the keyboard only while it's actually being played.
-      if (screen !== 'game' || showHowTo || confirmLoss) return;
+      if (screen !== 'game' || showHowTo || confirmLoss || showBattleResults) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
@@ -1529,6 +1786,7 @@ export default function App() {
     screen,
     showHowTo,
     confirmLoss,
+    showBattleResults,
     interaction,
     picks,
     typeLetter,
@@ -1764,11 +2022,68 @@ export default function App() {
       <div className="app">
         <HomeScreen
           onPlay={startGame}
+          onBattle={() => {
+            setBattleNotice(null);
+            setBattleError(null);
+            setScreen('battle');
+          }}
           onShowHowTo={() => setShowHowTo(true)}
           onShowStats={() => setStatsView(loadStats())}
         />
+        {battleNotice && (
+          <button type="button" className="battle-notice" onClick={() => setBattleNotice(null)}>
+            {battleNotice}
+          </button>
+        )}
         {showHowTo && <HowToModal onClose={dismissHowTo} />}
         <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
+      </div>
+    );
+  }
+
+  if (screen === 'battle') {
+    return (
+      <div className="app">
+        {battle && battleState ? (
+          <BattleLobby
+            state={battleState}
+            code={battle.code}
+            selfId={battle.selfId}
+            isHost={battle.isHost}
+            onStart={() => battleRef.current?.start()}
+            onLeave={requestLeaveBattle}
+          />
+        ) : (
+          <BattleMenu
+            initialName={playerName}
+            initialCode={joinCodePrefill}
+            busy={battleBusy}
+            error={battleError}
+            onHost={hostGame}
+            onJoin={joinGame}
+            onBack={() => {
+              setBattleError(null);
+              setJoinCodePrefill('');
+              setScreen('home');
+            }}
+          />
+        )}
+        <ConfirmDialog
+          message={
+            confirmBattle === 'leave'
+              ? battle?.isHost
+                ? 'You’re the host — leaving closes the lobby for everyone.'
+                : 'Leave the battle? The others play on without you.'
+              : null
+          }
+          confirmLabel={battle?.isHost ? 'Close the lobby' : 'Leave battle'}
+          cancelLabel="Stay"
+          onConfirm={() => {
+            setConfirmBattle(null);
+            leaveBattle();
+          }}
+          onCancel={() => setConfirmBattle(null)}
+        />
       </div>
     );
   }
@@ -1801,15 +2116,19 @@ export default function App() {
         />
         <div className="header-actions">
           {complete ? (
-            <button
-              className="btn btn-primary"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                newGame(mode);
-              }}
-            >
-              Play again
-            </button>
+            // In a battle the next game is the host's call, made from the
+            // standings screen — a lone "Play again" here would fork the lobby.
+            inBattle ? null : (
+              <button
+                className="btn btn-primary"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  newGame(mode);
+                }}
+              >
+                Play again
+              </button>
+            )
           ) : mode !== 'endless' ? (
             <button
               className="btn btn-primary"
@@ -1828,11 +2147,28 @@ export default function App() {
             </button>
           ) : null}
           <Menu
-            onResetGame={() => newGame(mode)}
+            onResetGame={inBattle ? null : () => newGame(mode)}
             onShowHowTo={() => setShowHowTo(true)}
             onShowStats={() => setStatsView(loadStats())}
-            onShowSummary={complete ? () => setShowSummary(true) : null}
-            onReturnHome={returnHome}
+            onShowSummary={
+              inBattle
+                ? battlePhase === 'finished'
+                  ? () => setShowBattleResults(true)
+                  : null
+                : complete
+                  ? () => setShowSummary(true)
+                  : null
+            }
+            onReturnHome={inBattle ? requestLeaveBattle : returnHome}
+            battle={
+              inBattle && battle
+                ? {
+                    isHost: battle.isHost,
+                    onRestart: requestBattleRestart,
+                    onToLobby: requestBattleLobby,
+                  }
+                : null
+            }
           />
         </div>
       </header>
@@ -1844,7 +2180,18 @@ export default function App() {
         </div>
       )}
 
-      {/* The zoom rides on a CSS variable so only the tiles resize. */}
+      {/* The zoom rides on a CSS variable so only the tiles resize. The
+          board-area shell exists to anchor the battle standings over the
+          corner of the (scrolling) viewport. */}
+      <div className="board-area">
+        {inBattle && battle && battleState && (
+          <BattleStandings
+            players={battleState.players}
+            selfId={battle.selfId}
+            finished={battlePhase === 'finished'}
+            onShowResults={() => setShowBattleResults(true)}
+          />
+        )}
       <div
         className="board-wrap"
         ref={boardWrapRef}
@@ -1876,6 +2223,7 @@ export default function App() {
           onWordRotate={rotateWord}
           onWordRemove={removeWord}
         />
+      </div>
       </div>
 
       {/* Nothing is ever a valid word without the dictionary, so the one thing
@@ -1961,7 +2309,7 @@ export default function App() {
 
       <LevelSplash splash={splash} mode={mode} onDismiss={() => setSplash(null)} />
 
-      {showSummary && (
+      {showSummary && !inBattle && (
         <GameSummary
           words={finalWords}
           score={totalScore}
@@ -2009,6 +2357,49 @@ export default function App() {
         cancelLabel="Undo move"
         onConfirm={acceptLoss}
         onCancel={undoLosingMove}
+      />
+
+      {/* The end of a battle: who won, and what the host does next. */}
+      {showBattleResults && battle && battleState && (
+        <BattleResults
+          state={battleState}
+          selfId={battle.selfId}
+          isHost={battle.isHost}
+          onPlayAgain={() => battleRef.current?.start()}
+          onToLobby={() => battleRef.current?.stop()}
+          onLeave={requestLeaveBattle}
+          onClose={() => setShowBattleResults(false)}
+        />
+      )}
+
+      {/* Host actions that hit every player mid-game get a second thought. */}
+      <ConfirmDialog
+        message={
+          confirmBattle === 'restart'
+            ? 'Restart the battle? Every player’s board resets and a fresh game starts for everyone.'
+            : confirmBattle === 'lobby'
+              ? 'End this game and send every player back to the lobby?'
+              : confirmBattle === 'leave'
+                ? battle?.isHost
+                  ? 'You’re the host — leaving ends the battle for everyone.'
+                  : 'Leave the battle? The others play on without you.'
+                : null
+        }
+        confirmLabel={
+          confirmBattle === 'restart'
+            ? 'Restart for everyone'
+            : confirmBattle === 'lobby'
+              ? 'Back to the lobby'
+              : 'Leave battle'
+        }
+        cancelLabel="Keep playing"
+        onConfirm={() => {
+          setConfirmBattle(null);
+          if (confirmBattle === 'restart') battleRef.current?.start();
+          else if (confirmBattle === 'lobby') battleRef.current?.stop();
+          else if (confirmBattle === 'leave') leaveBattle();
+        }}
+        onCancel={() => setConfirmBattle(null)}
       />
     </div>
   );

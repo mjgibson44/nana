@@ -1,16 +1,19 @@
-import { MODES, type GameMode } from '../game/modes';
+import { BATTLE_INFO, MODES, type GameMode } from '../game/modes';
 
 interface HomeScreenProps {
   onPlay: (mode: GameMode) => void;
+  /** Head for the Endless Battle door: host or join a multiplayer lobby. */
+  onBattle: () => void;
   onShowHowTo: () => void;
   onShowStats: () => void;
 }
 
 /**
  * The splash screen the app opens on: the game's name up top and a card per
- * mode underneath. Picking a card starts a fresh game in that mode.
+ * mode underneath. Picking a card starts a fresh game in that mode — except
+ * Endless Battle, which heads to its lobby screens first.
  */
-export function HomeScreen({ onPlay, onShowHowTo, onShowStats }: HomeScreenProps) {
+export function HomeScreen({ onPlay, onBattle, onShowHowTo, onShowStats }: HomeScreenProps) {
   return (
     <div className="home">
       <div className="home-inner">
@@ -39,6 +42,18 @@ export function HomeScreen({ onPlay, onShowHowTo, onShowStats }: HomeScreenProps
               <span className="mode-card-play">Play &rarr;</span>
             </button>
           ))}
+          <button type="button" className="mode-card" onClick={onBattle}>
+            <span className="mode-card-name">{BATTLE_INFO.name}</span>
+            <span className="mode-card-tagline">{BATTLE_INFO.tagline}</span>
+            <span className="mode-card-details">
+              {BATTLE_INFO.details.map((detail) => (
+                <span key={detail} className="mode-card-detail">
+                  {detail}
+                </span>
+              ))}
+            </span>
+            <span className="mode-card-play">Play &rarr;</span>
+          </button>
         </div>
 
         <div className="home-actions">

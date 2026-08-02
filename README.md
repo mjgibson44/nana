@@ -52,9 +52,31 @@ public/dictionary.txt   # ENABLE word list, fetched at runtime
 ```
 
 Everything under `src/game/` is deliberately framework-free and operates on
-plain serializable data. When multiplayer arrives, the same modules can run
-on the server: deal one shared pile, validate each player's board
-authoritatively, and sync boards as plain `TileMap` objects over a socket.
+plain serializable data — which is exactly what lets Endless Battle run with
+**no game server at all**.
+
+## Multiplayer (Endless Battle)
+
+- `src/game/rng.ts` — a tiny seeded PRNG (xmur3 + mulberry32) that slots into
+  the generator's injectable `rng` parameter.
+- `src/game/battle.ts` — the pure battle brain: join codes, the shared tile
+  stream, rankings, and the referee that decides when a battle is over.
+- `src/net/battleSession.ts` — WebRTC plumbing via PeerJS. The host's browser
+  is the authority: it owns the roster, starts/stops games, aggregates
+  scores, and broadcasts state. The join code doubles as the host's peer id,
+  so joining is just dialing `nana-battle-<code>`.
+
+Tiles are never sent over the wire. The host shares one random seed per game
+and every client grows the identical deal from it: the generator builds the
+same hidden crossword batch by batch because its RNG, word pool, and call
+sequence match everywhere. Every batch after the opening one is the same
+size (a timed drip and a pile-clear both deal 5), so player boards can
+diverge freely while batch *N* stays identical for everyone.
+
+Signaling defaults to PeerJS's free public cloud; only introductions run
+through it — gameplay flows peer to peer. To use your own broker (e.g.
+`npx peer --port 9000`), set `VITE_PEER_HOST` (and optionally
+`VITE_PEER_PORT`, `VITE_PEER_PATH`, `VITE_PEER_SECURE=false`) at build time.
 
 ## Game modes
 
@@ -65,12 +87,25 @@ in `src/game/modes.ts`.
 - **Solo Timed** — the same climb against the clock: 3:00 for level 1, 2:00
   for level 2, and 15 seconds less for each level after. Out of time is game
   over.
-- **Endless** — no levels. 2:00 to work the starting 20 tiles, then 3 more
-  tiles arrive every minute. Clearing the pile pays a 25-point bonus and 3
-  more tiles. Loose tiles — unplaced or not validly connected — are your
-  health bar: reach 20 and you're buried. A move (as opposed to the clock)
-  that would bury you pauses the game and asks first, with the option to
-  undo it.
+- **Endless** — no levels. 2:00 to work the starting 20 tiles, then 5 more
+  tiles arrive on a clock that keeps tightening. Clearing the pile pays a
+  25-point bonus and 5 more tiles. Loose tiles — unplaced or not validly
+  connected — are your health bar: reach 20 and you're buried. A move (as
+  opposed to the clock) that would bury you pauses the game and asks first,
+  with the option to undo it.
+- **Endless Battle** — Endless, against your friends. One player hosts a
+  lobby and shares a 5-letter code (or an invite link that carries it);
+  everyone enters a name to join. Every player fights the identical game:
+  the same starting tiles, and the same letters in every batch after —
+  however they earn them. Your live position rides the top-left corner of
+  the board. Being buried knocks you out but the race runs on; the battle
+  ends when everyone is buried — or the moment the last player standing is
+  already strictly ahead, since nothing can change the outcome. Highest
+  score wins, and the final standings name the champion. The host can
+  restart the game or pull everyone back to the lobby at any time, and after
+  a finish chooses between another game and the lobby. There's no take-back
+  pause in a battle (everyone's clock must run as one) — a burial is a
+  burial.
 
 A first-run "How to play" tutorial pops up on entering a game and then stays
 out of the way (a localStorage flag remembers it's been seen).
@@ -79,5 +114,7 @@ out of the way (a localStorage flag remembers it's been seen).
 
 - [x] Single-player: 20-tile solvable deal, drag & drop, live validation
 - [x] Timed and endless ("peel"-style) modes
+- [x] Multiplayer: Endless Battle — shared deal from one seed, lobbies with
+      codes/invite links, live standings, host controls, final rankings
 - [ ] Hints powered by the generator's known solution
-- [ ] Multiplayer: shared pile, live opponent boards, first-to-finish wins
+- [ ] Live opponent boards (spectate other players' crosswords mid-battle)
