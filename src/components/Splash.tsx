@@ -43,7 +43,7 @@ export function SplashCard({ splash, onDismiss }: SplashCardProps) {
     return (
       <div className="splash-backdrop" onClick={onDismiss} role="presentation">
         <div className="splash splash-round" role="status" aria-live="polite">
-          <span className="splash-eyebrow">Endless battle</span>
+          <span className="splash-eyebrow">Survival</span>
           <span className="splash-name">Round over!</span>
           <ol className="splash-standings">
             {splash.standings.map((standing, i) => (
@@ -78,7 +78,7 @@ export function SplashCard({ splash, onDismiss }: SplashCardProps) {
       ? { eyebrow: splash.eyebrow, name: splash.title, note: splash.note }
       : splash.kind === 'speedup'
         ? {
-            eyebrow: 'Endless mode',
+            eyebrow: 'Solo mode',
             name: 'Speeding up!',
             note: `+${splash.tiles} tiles every ${formatSeconds(splash.seconds)} from here`,
           }

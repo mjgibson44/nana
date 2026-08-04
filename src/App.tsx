@@ -460,7 +460,9 @@ export default function App() {
       nextMode === 'endless'
         ? {
             kind: 'start',
-            eyebrow: 'Endless mode',
+            // The same Endless game opens both doors; the card names the one
+            // this player walked through.
+            eyebrow: battleRef.current ? 'Survival' : 'Solo mode',
             title: 'Game on!',
             note: `${opening.length} tiles · ${formatSeconds(ENDLESS_INITIAL_SECONDS)} to place them`,
           }
