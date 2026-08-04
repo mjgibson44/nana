@@ -4,8 +4,9 @@
  * One board and one set of rules for building words, played three ways:
  *
  *  - Endless: no levels. New tiles keep arriving on a clock; let too many
- *    pile up loose and the game ends. Played solo, or as Endless Battle —
- *    the same game raced by several players on one shared deal.
+ *    pile up loose and the game ends. Played solo — at either of two paces,
+ *    see SoloPace — or as Endless Battle, the same game raced by several
+ *    players on one shared deal.
  *  - Duel: head-to-head for exactly two players. Placed words are permanent,
  *    and every word you place sends tiles to your opponent. First player to
  *    overflow their pile loses.
@@ -14,6 +15,22 @@
 
 export type GameMode = 'endless' | 'duel' | 'tutorial';
 
+/**
+ * How hard Endless leans on a solo player. Both paces are the same game —
+ * same board, same loose limit, same clear bonus — and differ only in how
+ * long the opening phase runs, how long a round is, and how many tiles a
+ * round deals:
+ *
+ *  - `relaxed`: two minutes to open, then five-tile rounds of 45 seconds
+ *    tightening to 30, and batches that grow to seven.
+ *  - `blitz`: one minute to open, then a 15-second round forever, starting at
+ *    three tiles and growing by one every eight rounds up to ten.
+ *
+ * Survival always runs at the relaxed pace: every player works one shared
+ * deal, so the pacing has to be the same for everybody.
+ */
+export type SoloPace = 'relaxed' | 'blitz';
+
 export interface ModeInfo {
   name: string;
   tagline: string;
@@ -21,8 +38,8 @@ export interface ModeInfo {
   details: string[];
 }
 
-export const ENDLESS_INFO: ModeInfo = {
-  name: 'Solo',
+export const SOLO_RELAXED_INFO: ModeInfo = {
+  name: 'Solo Relaxed',
   tagline: 'Survive the ever-growing pile.',
   details: [
     '2:00 to place your first 20 tiles',
@@ -31,10 +48,26 @@ export const ENDLESS_INFO: ModeInfo = {
   ],
 };
 
+export const SOLO_BLITZ_INFO: ModeInfo = {
+  name: 'Solo Blitz',
+  tagline: 'The same pile, arriving four times as fast.',
+  details: [
+    '1:00 to place your first 20 tiles',
+    '+3 tiles every 15s — the batch grows every 8 rounds, up to +10',
+    'Over 20 loose tiles when a round ends and you’re out',
+  ],
+};
+
+/** Each solo pace's card, for looking one up by pace. */
+export const SOLO_INFO: Record<SoloPace, ModeInfo> = {
+  relaxed: SOLO_RELAXED_INFO,
+  blitz: SOLO_BLITZ_INFO,
+};
+
 /**
  * Survival's home-screen card — Endless raced by several players. Each
- * player's game runs as Endless, and the multiplayer wrapping (lobby, shared
- * deal, standings) lives in src/game/battle.ts.
+ * player's game runs as Endless at the relaxed pace, and the multiplayer
+ * wrapping (lobby, shared deal, standings) lives in src/game/battle.ts.
  */
 export const BATTLE_INFO: ModeInfo = {
   name: 'Survival',
@@ -64,12 +97,14 @@ export const TUTORIAL_INFO: ModeInfo = {
 
 /* -------------------------------- Endless --------------------------------- */
 
-/** Tiles in the opening Endless deal. */
+/** Tiles in the opening Endless deal, at either pace. */
 export const ENDLESS_START_TILES = 20;
 
 /** The opening phase: this long to work the starting pile before tiles start
- * arriving — and before the loose-tile count switches on. */
+ * arriving — and before the loose-tile count switches on. Blitz gives you
+ * half as long for the same twenty tiles. */
 export const ENDLESS_INITIAL_SECONDS = 120;
+export const BLITZ_INITIAL_SECONDS = 60;
 
 /**
  * The screw turns twice after the opening phase: five rounds of 45 seconds,
@@ -90,19 +125,44 @@ export const ENDLESS_SMALL_BATCH_ROUNDS = 10;
 /** The batch size every round deals once the small rounds are spent. */
 export const ENDLESS_BIG_BATCH = 7;
 
+/** Blitz never touches its clock: every round after the opening minute is
+ * fifteen seconds, and the batch is what grows instead. */
+export const BLITZ_DRIP_SECONDS = 15;
+
+/** The batch blitz opens on, and the one it tops out at. */
+export const BLITZ_SMALL_BATCH = 3;
+export const BLITZ_MAX_BATCH = 10;
+
+/** How many blitz rounds a batch size lasts before growing by one — eight
+ * fifteen-second rounds, so two minutes at each size. */
+export const BLITZ_BATCH_ROUNDS = 8;
+
+/** How long the opening phase runs at `pace`. */
+export function endlessInitialSeconds(pace: SoloPace): number {
+  return pace === 'blitz' ? BLITZ_INITIAL_SECONDS : ENDLESS_INITIAL_SECONDS;
+}
+
 /**
- * How long the wait for the next batch is, given how many drip intervals
- * have already run out: 45 seconds for the first five, 30 forever after.
+ * How long the wait for the next batch is, given how many drip intervals have
+ * already run out. Relaxed: 45 seconds for the first five, 30 forever after.
+ * Blitz: fifteen seconds, always.
  */
-export function endlessDripSeconds(intervalsElapsed: number): number {
+export function endlessDripSeconds(intervalsElapsed: number, pace: SoloPace): number {
+  if (pace === 'blitz') return BLITZ_DRIP_SECONDS;
   return intervalsElapsed < ENDLESS_SLOW_ROUNDS ? ENDLESS_SLOW_SECONDS : ENDLESS_FAST_SECONDS;
 }
 
 /**
  * How many tiles the batch landing after `intervalsElapsed` drip intervals
- * brings: five for each of the first ten rounds, then seven forever.
+ * brings. Relaxed: five for each of the first ten rounds, then seven forever.
+ * Blitz: three to begin with, one more every eight rounds, and no more than
+ * ten however long you last.
  */
-export function endlessDripTiles(intervalsElapsed: number): number {
+export function endlessDripTiles(intervalsElapsed: number, pace: SoloPace): number {
+  if (pace === 'blitz') {
+    const grown = Math.floor(Math.max(0, intervalsElapsed) / BLITZ_BATCH_ROUNDS);
+    return Math.min(BLITZ_MAX_BATCH, BLITZ_SMALL_BATCH + grown);
+  }
   return intervalsElapsed < ENDLESS_SMALL_BATCH_ROUNDS ? ENDLESS_SMALL_BATCH : ENDLESS_BIG_BATCH;
 }
 

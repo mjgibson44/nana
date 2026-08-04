@@ -1,4 +1,4 @@
-import { formatSeconds } from '../game/modes';
+import { SOLO_INFO, formatSeconds, type SoloPace } from '../game/modes';
 
 /** One line of the between-rounds battle scoreboard. */
 export interface RoundStanding {
@@ -14,13 +14,14 @@ export interface RoundStanding {
  * What the card is announcing:
  *
  *  - `start`: a game opening — how many tiles and how long to place them.
- *  - `speedup`: Endless turning the screw (bigger batches from here).
+ *  - `speedup`: Endless turning the screw (bigger batches from here), badged
+ *    with the solo pace the game is being played at.
  *  - `round`: an Endless Battle round ending, with the whole field's scores.
  *  - `duelRound`: a Duel round starting, with its multiplier and drip.
  */
 export type Splash =
   | { kind: 'start'; title: string; eyebrow: string; note: string }
-  | { kind: 'speedup'; seconds: number; tiles: number }
+  | { kind: 'speedup'; seconds: number; tiles: number; pace: SoloPace }
   | { kind: 'round'; standings: RoundStanding[]; seconds: number; tiles: number }
   | { kind: 'duelRound'; round: number; final: boolean; multiplier: number; dripTiles: number };
 
@@ -78,7 +79,7 @@ export function SplashCard({ splash, onDismiss }: SplashCardProps) {
       ? { eyebrow: splash.eyebrow, name: splash.title, note: splash.note }
       : splash.kind === 'speedup'
         ? {
-            eyebrow: 'Solo mode',
+            eyebrow: SOLO_INFO[splash.pace].name,
             name: 'Speeding up!',
             note: `+${splash.tiles} tiles every ${formatSeconds(splash.seconds)} from here`,
           }
