@@ -1,16 +1,24 @@
 /**
- * The game's four sounds, and the preference that silences them.
+ * The game's sounds, and the preference that silences them.
  *
- * Nothing is loaded from disk: every sound is a handful of oscillators drawn
- * on the fly through the Web Audio API. Four short cues, none of them longer
- * than a third of a second, so a fast player never hears one sound land on top
- * of the last:
+ * Nothing is loaded from disk: every sound is a handful of oscillators drawn on
+ * the fly through the Web Audio API.
  *
- *  - `tick`   — the last five seconds before an Endless round deals its tiles.
- *  - `deal`   — tiles arriving in your own pile, in any mode.
- *  - `attack` — the same thing, but sent by the opponent in a Duel: lower and
- *               falling, so incoming trouble never sounds like a gift.
- *  - `commit` — a word going down on the board.
+ * The four that play while a game is running are all short — under a third of a
+ * second — so a fast player never hears one land on top of the last:
+ *
+ *  - `tick`     — the last few seconds before an Endless round deals its tiles.
+ *  - `deal`     — tiles arriving in your own pile, in any mode.
+ *  - `attack`   — the same thing, but sent by the opponent in a Duel: lower and
+ *                 falling, so incoming trouble never sounds like a gift.
+ *  - `commit`   — a word going down on the board.
+ *  - `overflow` — the loose pile has just gone over the limit. A warning, not a
+ *                 verdict: the round's clock is now the deadline to dig under.
+ *
+ * The two that end a game may take their time, since nothing follows them:
+ *
+ *  - `lose`     — buried, or out of time. Four notes falling away.
+ *  - `win`      — a multiplayer game taken. The same shape climbing.
  *
  * Browsers won't let audio start until the player has touched the page, so the
  * context is built on the first gesture (see `primeSound`) and every play nudges
@@ -19,7 +27,14 @@
 
 const STORAGE_KEY = 'nana.sound.v1';
 
-export type SoundName = 'tick' | 'deal' | 'attack' | 'commit';
+export type SoundName =
+  | 'tick'
+  | 'deal'
+  | 'attack'
+  | 'commit'
+  | 'overflow'
+  | 'lose'
+  | 'win';
 
 /** One oscillator's worth of a sound. */
 interface Blip {
@@ -54,6 +69,26 @@ const VOICES: Record<SoundName, readonly Blip[]> = {
   commit: [
     { freq: 660, at: 0, dur: 0.05, gain: 0.13, type: 'triangle' },
     { freq: 990, at: 0.035, dur: 0.1, gain: 0.1, type: 'triangle' },
+  ],
+  // Over the limit: a two-tone alarm, the second note lower than the first.
+  // Nagging enough to look up at, and plainly not the sound of losing.
+  overflow: [
+    { freq: 466, at: 0, dur: 0.11, gain: 0.15, type: 'square' },
+    { freq: 370, at: 0.13, dur: 0.16, gain: 0.15, type: 'square' },
+  ],
+  // Four notes falling away, the last one left ringing.
+  lose: [
+    { freq: 392, at: 0, dur: 0.16, gain: 0.14, type: 'triangle' },
+    { freq: 311, at: 0.15, dur: 0.16, gain: 0.14, type: 'triangle' },
+    { freq: 262, at: 0.3, dur: 0.16, gain: 0.14, type: 'triangle' },
+    { freq: 196, at: 0.45, dur: 0.5, gain: 0.15, type: 'sawtooth' },
+  ],
+  // The same shape climbing, and up an octave by the end of it.
+  win: [
+    { freq: 523, at: 0, dur: 0.13, gain: 0.13, type: 'triangle' },
+    { freq: 659, at: 0.1, dur: 0.13, gain: 0.13, type: 'triangle' },
+    { freq: 784, at: 0.2, dur: 0.13, gain: 0.13, type: 'triangle' },
+    { freq: 1047, at: 0.3, dur: 0.45, gain: 0.14, type: 'triangle' },
   ],
 };
 
