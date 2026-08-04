@@ -125,7 +125,10 @@ Two things front a first game, each shown once and never again (remembered in
 `src/game/onboarding.ts`):
 
 - The **tutorial**, before anybody's very first game. Pick any mode on the home
-  screen and the tutorial comes first, with that mode waiting behind it.
+  screen and the tutorial is offered first — on its own card, so nobody is
+  dropped into a lesson unannounced — with that mode waiting behind it.
+  *Continue* starts it; *Skip* goes straight to the game. Being offered it is
+  what counts as having seen it, so skipping means never being asked again.
   Finishing it, skipping every step, or shutting it with the X all lead the same
   way: on to the game you picked.
 - A one-card **explainer** for each mode — what it is and its three headline

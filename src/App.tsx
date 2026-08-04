@@ -22,6 +22,7 @@ import {
   PUZZLE_BATCH_TILES,
   PUZZLE_SIZE_OPTIONS,
   PUZZLE_START_TILES,
+  TUTORIAL_INFO,
   duelAttackMultiplier,
   duelAttackTiles,
   duelDripTiles,
@@ -345,6 +346,9 @@ export default function App() {
     door: GameDoor;
     at: 'tutorial' | 'explainer';
   } | null>(null);
+  /** Whether the tutorial's own card is up, offering the lesson before it
+   * starts. Any door waiting behind it is in `pendingDoor`. */
+  const [tutorialIntro, setTutorialIntro] = useState(false);
   /** The clock, in modes that have one. Null in the tutorial, in a duel's
    * final round, and once a game ends. */
   const [countdown, setCountdown] = useState<Countdown | null>(null);
@@ -581,11 +585,9 @@ export default function App() {
     [puzzleSize],
   );
 
-  /** Start a mode and put its board on screen. Reaching the tutorial at all
-   * counts as having been offered it, however far it's played. */
+  /** Start a mode and put its board on screen. */
   const startGame = useCallback(
     (nextMode: GameMode, pace: SoloPace = 'regular', size?: PuzzleSize) => {
-      if (nextMode === 'tutorial') markTutorialSeen();
       newGame(nextMode, pace, undefined, size);
       setScreen('game');
     },
@@ -649,6 +651,25 @@ export default function App() {
   }, [screen, returnHome]);
 
   /**
+   * Offer the tutorial: its own card first, so nobody is dropped into a lesson
+   * unannounced — least of all a first-timer who asked for a game and got this.
+   * `door` is the game waiting behind it, or null when the tutorial was picked
+   * for its own sake. Being offered it is what counts as having seen it, so
+   * skipping from the card means never being asked again.
+   */
+  const offerTutorial = useCallback((door: GameDoor | null) => {
+    markTutorialSeen();
+    setPendingDoor(door === null ? null : { door, at: 'tutorial' });
+    setTutorialIntro(true);
+  }, []);
+
+  /** Read the card and start the lesson it describes. */
+  const startTutorial = useCallback(() => {
+    setTutorialIntro(false);
+    startGame('tutorial');
+  }, [startGame]);
+
+  /**
    * A door picked on the home screen. Two things can stand in front of it, each
    * shown once ever: the tutorial, before anybody's first game, and then the
    * mode's own explainer. Both come to the same end — `enterDoor`.
@@ -656,8 +677,7 @@ export default function App() {
   const chooseDoor = useCallback(
     (door: GameDoor) => {
       if (!tutorialSeen()) {
-        setPendingDoor({ door, at: 'tutorial' });
-        startGame('tutorial');
+        offerTutorial(door);
         return;
       }
       if (!doorSeen(door)) {
@@ -666,7 +686,7 @@ export default function App() {
       }
       enterDoor(door);
     },
-    [startGame, enterDoor],
+    [offerTutorial, enterDoor],
   );
 
   /** The explainer has been read: remember that, and in we go. */
@@ -677,12 +697,13 @@ export default function App() {
   }, [pendingDoor, enterDoor]);
 
   /**
-   * Done with the tutorial, by any road — finished, skipped through, or shut
-   * with the X. A first-timer came here on their way to a game, so hand them
-   * on to it (by way of its explainer); anyone who picked the tutorial for its
-   * own sake goes back to the menu.
+   * Done with the tutorial, by any road — skipped from its card, finished,
+   * skipped step by step, or shut with the X. A first-timer came here on their
+   * way to a game, so hand them on to it (by way of its explainer); anyone who
+   * picked the tutorial for its own sake goes back to the menu.
    */
   const leaveTutorial = useCallback(() => {
+    setTutorialIntro(false);
     if (pendingDoor?.at !== 'tutorial') {
       returnHome();
       return;
@@ -2846,7 +2867,7 @@ export default function App() {
       <div className="app">
         <HomeScreen
           onPlay={chooseDoor}
-          onTutorial={() => startGame('tutorial')}
+          onTutorial={() => offerTutorial(null)}
           onShowHowTo={() => setShowHowTo(true)}
           onShowStats={() => setStatsView(loadStats())}
           onShowSettings={() => setSettingsOpen(true)}
@@ -2856,8 +2877,21 @@ export default function App() {
             {battleNotice}
           </button>
         )}
+        {/* The lesson about to start, and the way past it. Skipping carries on
+            to whatever game was picked, exactly as leaving mid-lesson does. */}
+        <ModeInfoDialog
+          info={tutorialIntro ? TUTORIAL_INFO : null}
+          confirmLabel="Continue"
+          onConfirm={startTutorial}
+          skipLabel="Skip"
+          onSkip={leaveTutorial}
+        />
         {/* What the door they just picked leads to, the first time through. */}
-        <ModeInfoDialog info={explainer} onPlay={playPendingDoor} />
+        <ModeInfoDialog
+          info={explainer}
+          confirmLabel="Let’s play"
+          onConfirm={playPendingDoor}
+        />
         {doorChooser}
         {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
         <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
@@ -3313,7 +3347,7 @@ export default function App() {
       />
 
       {/* Straight after the tutorial: what the game waiting behind this is. */}
-      <ModeInfoDialog info={explainer} onPlay={playPendingDoor} />
+      <ModeInfoDialog info={explainer} confirmLabel="Let’s play" onConfirm={playPendingDoor} />
       {doorChooser}
 
       {/* Connection trouble: our own redial, or the host pausing for someone. */}

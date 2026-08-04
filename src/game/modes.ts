@@ -116,9 +116,14 @@ export const DUEL_INFO: ModeInfo = {
   ],
 };
 
+/**
+ * The card that offers the tutorial, before it starts. It fronts a first
+ * player's very first game as well as the tutorial they pick deliberately, so
+ * it reads as an offer either way — and either way it can be skipped.
+ */
 export const TUTORIAL_INFO: ModeInfo = {
   name: 'Tutorial',
-  tagline: 'Learn the game in three quick steps.',
+  tagline: 'New here? Learn the game in three quick steps.',
   details: [
     'Place your first word',
     'Cross it on a shared letter',

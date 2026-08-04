@@ -3,22 +3,38 @@ import type { ModeInfo } from '../game/modes';
 interface ModeInfoDialogProps {
   /** The mode being introduced, or null while nothing is up. */
   info: ModeInfo | null;
-  /** Read it and carry on into the game. Clicking the backdrop does the same —
-   * there is nothing to go back to, so every way out of this leads forward. */
-  onPlay: () => void;
+  /** The label on the button that carries on into what this introduces. */
+  confirmLabel: string;
+  onConfirm: () => void;
+  /**
+   * A way past the thing being introduced, for the cards that have somewhere
+   * to be instead — the tutorial's does, a mode's own card doesn't. It's also
+   * what clicking the backdrop does; without it every way out leads forward,
+   * since there's nothing behind a card that only says what you chose.
+   */
+  skipLabel?: string;
+  onSkip?: () => void;
 }
 
 /**
- * What a mode is, shown once: the first time a player opens each door, this
- * stands between the choice and the game. It's the only place the rules of a
- * mode are spelled out, so it says its piece and then gets out of the way for
- * good.
+ * A mode's card, standing between choosing it and playing it: what it is, and
+ * its three headline rules. Each is shown once ever — a mode's the first time
+ * its door is opened, the tutorial's before a player's first game — so it says
+ * its piece and then gets out of the way for good.
  */
-export function ModeInfoDialog({ info, onPlay }: ModeInfoDialogProps) {
+export function ModeInfoDialog({
+  info,
+  confirmLabel,
+  onConfirm,
+  skipLabel,
+  onSkip,
+}: ModeInfoDialogProps) {
   if (info === null) return null;
 
+  const dismiss = onSkip ?? onConfirm;
+
   return (
-    <div className="splash-backdrop" onClick={onPlay} role="presentation">
+    <div className="splash-backdrop" onClick={dismiss} role="presentation">
       <div
         className="dialog mode-info"
         role="dialog"
@@ -37,8 +53,15 @@ export function ModeInfoDialog({ info, onPlay }: ModeInfoDialogProps) {
           ))}
         </span>
         <div className="dialog-actions">
-          <button type="button" className="btn btn-primary" onClick={onPlay}>
-            Let’s play
+          {/* A plain button, not the red back-out one: passing on an offer is
+              not the same kind of act as abandoning a game. */}
+          {skipLabel !== undefined && (
+            <button type="button" className="btn" onClick={onSkip}>
+              {skipLabel}
+            </button>
+          )}
+          <button type="button" className="btn btn-primary" onClick={onConfirm}>
+            {confirmLabel}
           </button>
         </div>
       </div>
