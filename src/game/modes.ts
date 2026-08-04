@@ -17,9 +17,16 @@ export type GameMode = 'endless' | 'duel' | 'tutorial';
 export interface ModeInfo {
   name: string;
   tagline: string;
-  /** Short bullet lines for the mode's card on the home screen. */
+  /** Short bullet lines for the explainer that fronts the mode's first game. */
   details: string[];
 }
+
+/**
+ * The doors out of the home screen. Not quite the same list as GameMode:
+ * Survival and Duel lead to a lobby before any game starts, and Survival is
+ * Endless played against other people.
+ */
+export type GameDoor = 'solo' | 'survival' | 'duel';
 
 export const ENDLESS_INFO: ModeInfo = {
   name: 'Solo',
@@ -64,6 +71,13 @@ export const TUTORIAL_INFO: ModeInfo = {
     'Cross it on a shared letter',
     'Borrow a letter with the gap tile',
   ],
+};
+
+/** Which explainer each door raises the first time it's opened. */
+export const DOOR_INFO: Record<GameDoor, ModeInfo> = {
+  solo: ENDLESS_INFO,
+  survival: BATTLE_INFO,
+  duel: DUEL_INFO,
 };
 
 /* -------------------------------- Endless --------------------------------- */

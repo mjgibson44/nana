@@ -106,8 +106,22 @@ in `src/game/modes.ts`.
   waits for its own word, "Skip" plays the word for you, and there is no clock
   and no score.
 
-A "How to play" reference pops up before the first game and stays available
-from the menu afterwards.
+### Meeting the game for the first time
+
+Two things front a first game, each shown once and never again (remembered in
+`src/game/onboarding.ts`):
+
+- The **tutorial**, before anybody's very first game. Pick any mode on the home
+  screen and the tutorial comes first, with that mode waiting behind it.
+  Finishing it, skipping every step, or shutting it with the X all lead the same
+  way: on to the game you picked.
+- A one-card **explainer** for each mode — what it is and its three headline
+  rules — the first time you open that door. It's the last thing between the
+  choice and the game, which is why there's no ⓘ on the mode buttons: the
+  details arrive when they're wanted, unasked.
+
+The fuller "How to play" reference never interrupts; it waits on the home screen
+and in the in-game menu.
 
 ## Multiplayer (Survival & Duel)
 

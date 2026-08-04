@@ -1407,16 +1407,7 @@ body {
   gap: 12px;
 }
 
-/* A mode's launch button and its ⓘ, sharing one row at equal height. */
-.mode-card-row {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-}
-
 .mode-card {
-  flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1452,35 +1443,6 @@ body {
   box-shadow: 0 2px 0 var(--line);
 }
 
-/* The details door: same construction as the card, scaled to one glyph. */
-.mode-info-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 60px;
-  padding: 0;
-  font-size: 23px;
-  color: var(--ink);
-  background: var(--surface);
-  border: 3px solid var(--line);
-  border-radius: 16px;
-  box-shadow: 0 3px 0 var(--line);
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
-}
-
-.mode-info-btn:hover {
-  background: var(--surface-alt);
-  transform: translateY(-2px);
-  box-shadow: 0 5px 0 var(--line);
-}
-
-.mode-info-btn:active {
-  transform: translateY(1px);
-  box-shadow: 0 2px 0 var(--line);
-}
-
 .mode-card-name {
   font-size: 21px;
   font-weight: 800;
@@ -1492,7 +1454,7 @@ body {
   opacity: 0.75;
 }
 
-/* The bullet rundown, now living in the ⓘ dialog rather than on the card. */
+/* The bullet rundown, which lives in the explainer rather than on the card. */
 .mode-card-details {
   display: flex;
   flex-direction: column;
@@ -1511,7 +1473,8 @@ body {
   opacity: 0.7;
 }
 
-/* A mode's details, raised by its ⓘ: the card's text at dialog size. */
+/* The explainer that fronts a mode's first game: the card's text, at dialog
+   size, with room to read it. */
 .mode-info {
   display: flex;
   flex-direction: column;
@@ -1526,14 +1489,12 @@ body {
 /*
  * The things that aren't a game, two by two under the modes: a block of four
  * quieter tiles rather than four more full-width rows, so the modes stay the
- * column the eye runs down. The ⓘ column's width is left clear on the right so
- * the block lines up with the mode buttons above it.
+ * column the eye runs down.
  */
 .home-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-right: 70px;
 }
 
 .home-action {
@@ -1554,13 +1515,6 @@ body {
   flex-shrink: 0;
   font-size: 24px;
   opacity: 0.8;
-}
-
-@media (max-width: 560px) {
-  /* No room to spare for the ⓘ column's alignment on a phone. */
-  .home-actions {
-    margin-right: 0;
-  }
 }
 
 /* ---------- tutorial ---------- */

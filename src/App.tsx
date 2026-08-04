@@ -5,6 +5,7 @@ import { loadDictionary } from './game/dictionary';
 import { extendPuzzle, generatePuzzle } from './game/generator';
 import { boardBounds, scoreBoard, wordScore } from './game/levels';
 import {
+  DOOR_INFO,
   DUEL_DRIP_SECONDS,
   DUEL_PILE_LIMIT,
   DUEL_PILE_URGENT,
@@ -24,8 +25,10 @@ import {
   endlessDripSeconds,
   endlessDripTiles,
   formatSeconds,
+  type GameDoor,
   type GameMode,
 } from './game/modes';
+import { doorSeen, markDoorSeen, markTutorialSeen, tutorialSeen } from './game/onboarding';
 import {
   GAP,
   anchorForGapTarget,
@@ -62,6 +65,7 @@ import { HomeScreen } from './components/HomeScreen';
 import { HowToModal } from './components/HowToModal';
 import { CloseIcon } from './components/icons';
 import { Menu } from './components/Menu';
+import { ModeInfoDialog } from './components/ModeInfoDialog';
 import { PileTools } from './components/PileTools';
 import { Rack } from './components/Rack';
 import { Scoreboard, type ScorePop } from './components/Scoreboard';
@@ -160,9 +164,6 @@ function alignPinch(
   wrap.scrollLeft += rect.left - wrapRect.left + note.fx * rect.width - note.viewX;
   wrap.scrollTop += rect.top - wrapRect.top + note.fy * rect.height - note.viewY;
 }
-
-/** Once set, the how-to stays put — it only auto-opens on the first game. */
-const HOWTO_SEEN_KEY = 'nana.howto.v1';
 
 /** The name last used in a multiplayer lobby, so it's typed once per device. */
 const PLAYER_NAME_KEY = 'nana.player.v1';
@@ -317,8 +318,19 @@ export default function App() {
 
   const inBattle = battle !== null;
   const battlePhase = battleState?.phase ?? null;
-  /** Whether the how-to reference is up (auto on first game, or from a menu). */
+  /** Whether the how-to reference is up, opened from a menu. */
   const [showHowTo, setShowHowTo] = useState(false);
+  /**
+   * A door chosen on the home screen that hasn't been walked through yet, and
+   * what's holding it up: the tutorial, for a player's very first game, and
+   * then the mode's own explainer, the first time through that door. Null the
+   * rest of the time, which is most of it — both are shown once and never
+   * again.
+   */
+  const [pendingDoor, setPendingDoor] = useState<{
+    door: GameDoor;
+    at: 'tutorial' | 'explainer';
+  } | null>(null);
   /** The clock, in modes that have one. Null in the tutorial, in a duel's
    * final round, and once a game ends. */
   const [countdown, setCountdown] = useState<Countdown | null>(null);
@@ -338,6 +350,9 @@ export default function App() {
    * — then TUTORIAL_GRADUATION for the closing dialog, and TUTORIAL_FREE_PLAY
    * for the free practice after it. */
   const [tutorialStep, setTutorialStep] = useState(1);
+  /** Tutorial: how many steps were skipped rather than played. Skip the lot and
+   * the closing summary is spared you — see the effect that watches this. */
+  const [tutorialSkips, setTutorialSkips] = useState(0);
   /** How the finished game ended, for the summary's headline. */
   const [endReason, setEndReason] = useState<EndReason | null>(null);
   /** The banner riding over the board ("+5 tiles!"), keyed so repeats replay. */
@@ -491,6 +506,7 @@ export default function App() {
     duelDripIndex.current = 0;
     setDuelDrip(nextMode === 'duel' ? runningCountdown(DUEL_DRIP_SECONDS) : null);
     setTutorialStep(1);
+    setTutorialSkips(0);
     setToast(null);
     setTileDrop(null);
     setZoom(1);
@@ -507,32 +523,16 @@ export default function App() {
     setGameId((id) => id + 1);
   }, []);
 
-  /** Pick a mode on the splash screen and dive in. The how-to reference
-   * fronts the very first real game; the tutorial explains itself. */
+  /** Start a mode and put its board on screen. Reaching the tutorial at all
+   * counts as having been offered it, however far it's played. */
   const startGame = useCallback(
     (nextMode: GameMode) => {
+      if (nextMode === 'tutorial') markTutorialSeen();
       newGame(nextMode);
       setScreen('game');
-      if (nextMode === 'tutorial') return;
-      let seen = false;
-      try {
-        seen = window.localStorage.getItem(HOWTO_SEEN_KEY) !== null;
-      } catch {
-        // Storage blocked — show it this time; there's nothing to remember by.
-      }
-      if (!seen) setShowHowTo(true);
     },
     [newGame],
   );
-
-  const dismissHowTo = useCallback(() => {
-    setShowHowTo(false);
-    try {
-      window.localStorage.setItem(HOWTO_SEEN_KEY, String(Date.now()));
-    } catch {
-      // Storage full or blocked — it'll just show again next time.
-    }
-  }, []);
 
   const returnHome = useCallback(() => {
     setScreen('home');
@@ -541,6 +541,87 @@ export default function App() {
     setShowSummary(false);
     setSplash(null);
   }, []);
+
+  /* ------------------------------ the front door ---------------------------- */
+
+  /**
+   * Walk through a door for real: Solo straight into a game, the multiplayer
+   * pair into their lobby. Whatever had to be read first has been read by now.
+   */
+  const enterDoor = useCallback(
+    (door: GameDoor) => {
+      setPendingDoor(null);
+      if (door === 'solo') {
+        startGame('endless');
+        return;
+      }
+      setBattleNotice(null);
+      setBattleError(null);
+      setBattleIntent(door === 'survival' ? 'endless' : 'duel');
+      setScreen('battle');
+    },
+    [startGame],
+  );
+
+  /**
+   * A door picked on the home screen. Two things can stand in front of it, each
+   * shown once ever: the tutorial, before anybody's first game, and then the
+   * mode's own explainer. Both come to the same end — `enterDoor`.
+   */
+  const chooseDoor = useCallback(
+    (door: GameDoor) => {
+      if (!tutorialSeen()) {
+        setPendingDoor({ door, at: 'tutorial' });
+        startGame('tutorial');
+        return;
+      }
+      if (!doorSeen(door)) {
+        setPendingDoor({ door, at: 'explainer' });
+        return;
+      }
+      enterDoor(door);
+    },
+    [startGame, enterDoor],
+  );
+
+  /** The explainer has been read: remember that, and in we go. */
+  const playPendingDoor = useCallback(() => {
+    if (!pendingDoor) return;
+    markDoorSeen(pendingDoor.door);
+    enterDoor(pendingDoor.door);
+  }, [pendingDoor, enterDoor]);
+
+  /**
+   * Done with the tutorial, by any road — graduated, skipped through, or shut
+   * with the X. A first-timer came here on their way to a game, so hand them
+   * on to it (by way of its explainer); anyone who picked the tutorial for its
+   * own sake goes back to the menu.
+   */
+  const leaveTutorial = useCallback(() => {
+    // Whatever the tutorial had on screen — its banner, its closing summary —
+    // is finished with, and mustn't be left showing behind what comes next.
+    setTutorialStep(TUTORIAL_FREE_PLAY);
+    if (pendingDoor?.at !== 'tutorial') {
+      returnHome();
+      return;
+    }
+    if (doorSeen(pendingDoor.door)) enterDoor(pendingDoor.door);
+    else setPendingDoor({ door: pendingDoor.door, at: 'explainer' });
+  }, [pendingDoor, enterDoor, returnHome]);
+
+  /** The mode being introduced right now, or null while nothing is up. */
+  const explainer = pendingDoor?.at === 'explainer' ? DOOR_INFO[pendingDoor.door] : null;
+
+  // Skipped from end to end, the tutorial has nothing to sum up: hand the
+  // player on rather than make them dismiss a lesson they opted out of.
+  // `leaveTutorial` steps past the summary, which is what holds this to a
+  // single handoff — what it hands off to is itself a state change, and would
+  // otherwise bring this straight back round.
+  useEffect(() => {
+    if (mode !== 'tutorial' || tutorialStep !== TUTORIAL_GRADUATION) return;
+    if (tutorialSkips < TUTORIAL_STEPS) return;
+    leaveTutorial();
+  }, [mode, tutorialStep, tutorialSkips, leaveTutorial]);
 
   /* --------------------------- battle lifecycle ----------------------------- */
 
@@ -1105,9 +1186,13 @@ export default function App() {
     scoreTrail.current = { gameId, score: totalScore };
     // A new deal resets the score; that's not a move worth announcing.
     if (from === null || from === totalScore) return;
+    // A pop is dropped when its animation ends, so one raised where no score is
+    // shown would never be shown or dropped — it would just be waiting in the
+    // corner of the next game that does keep score.
+    if (mode === 'tutorial') return;
     const pop = { id: ++popSerial.current, delta: totalScore - from };
     setScorePops((pops) => [...pops, pop]);
-  }, [gameId, totalScore]);
+  }, [gameId, totalScore, mode]);
 
   const endScorePop = useCallback((id: number) => {
     setScorePops((pops) => pops.filter((pop) => pop.id !== id));
@@ -1848,6 +1933,7 @@ export default function App() {
   const skipTutorialStep = useCallback(() => {
     const step = TUTORIAL_SCRIPT[tutorialStep - 1];
     if (!step) return;
+    setTutorialSkips((skipped) => skipped + 1);
     const played = scriptedPlacement(board, bounds, step, rack);
     if (played) commit(keyOf(played.anchor.row, played.anchor.col), played.dir, played.picks);
     else advanceTutorial(tutorialStep, lastDir);
@@ -2005,6 +2091,8 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       // The board owns the keyboard only while it's actually being played.
       if (screen !== 'game' || showHowTo || showBattleResults || battlePaused) return;
+      // The explainer stands over the tutorial's board on the way to a game.
+      if (explainer !== null) return;
       if (settingsOpen || statsView !== null) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
@@ -2083,6 +2171,7 @@ export default function App() {
     battlePaused,
     settingsOpen,
     statsView,
+    explainer,
     interaction,
     picks,
     typeLetter,
@@ -2597,19 +2686,7 @@ export default function App() {
     return (
       <div className="app">
         <HomeScreen
-          onPlayEndless={() => startGame('endless')}
-          onBattle={() => {
-            setBattleNotice(null);
-            setBattleError(null);
-            setBattleIntent('endless');
-            setScreen('battle');
-          }}
-          onDuel={() => {
-            setBattleNotice(null);
-            setBattleError(null);
-            setBattleIntent('duel');
-            setScreen('battle');
-          }}
+          onPlay={chooseDoor}
           onTutorial={() => startGame('tutorial')}
           onShowHowTo={() => setShowHowTo(true)}
           onShowStats={() => setStatsView(loadStats())}
@@ -2620,7 +2697,9 @@ export default function App() {
             {battleNotice}
           </button>
         )}
-        {showHowTo && <HowToModal onClose={dismissHowTo} />}
+        {/* What the door they just picked leads to, the first time through. */}
+        <ModeInfoDialog info={explainer} onPlay={playPendingDoor} />
+        {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
         <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
         <SettingsPage
           open={settingsOpen}
@@ -2773,7 +2852,7 @@ export default function App() {
               aria-label="Leave the tutorial"
               onClick={(e) => {
                 e.currentTarget.blur();
-                returnHome();
+                leaveTutorial();
               }}
             >
               <CloseIcon />
@@ -3012,7 +3091,7 @@ export default function App() {
         />
       )}
 
-      {showHowTo && <HowToModal onClose={dismissHowTo} />}
+      {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
 
       <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
 
@@ -3032,11 +3111,21 @@ export default function App() {
               'You’re ready.'
             : null
         }
-        confirmLabel="Back to the menu"
+        // A first-timer is here on the way to a game, and that's where
+        // confirming takes them; anyone who came for the tutorial itself
+        // goes back to the menu.
+        confirmLabel={
+          pendingDoor?.at === 'tutorial'
+            ? `Play ${DOOR_INFO[pendingDoor.door].name}`
+            : 'Back to the menu'
+        }
         cancelLabel="Keep practicing"
-        onConfirm={returnHome}
+        onConfirm={leaveTutorial}
         onCancel={() => setTutorialStep(TUTORIAL_FREE_PLAY)}
       />
+
+      {/* Straight after the tutorial: what the game waiting behind this is. */}
+      <ModeInfoDialog info={explainer} onPlay={playPendingDoor} />
 
       {/* Connection trouble: our own redial, or the host pausing for someone. */}
       <ConnectionOverlay
