@@ -15,7 +15,6 @@ interface MenuProps {
    * battle only the host restarts, through the battle controls instead. */
   onResetGame: (() => void) | null;
   onShowHowTo: () => void;
-  onShowStats: () => void;
   onShowSettings: () => void;
   /** Reopen the final-score breakdown; null while the game is still going. */
   onShowSummary: (() => void) | null;
@@ -30,7 +29,6 @@ interface MenuProps {
 export function Menu({
   onResetGame,
   onShowHowTo,
-  onShowStats,
   onShowSettings,
   onShowSummary,
   onReturnHome,
@@ -93,7 +91,6 @@ export function Menu({
           {battle?.isHost && item('Everyone to the lobby', battle.onToLobby)}
           {onShowSummary && item(battle ? 'Standings' : 'Final score', onShowSummary)}
           {item('How to play', onShowHowTo)}
-          {item('Stats', onShowStats)}
           {item('Settings', onShowSettings)}
           {item(battle ? 'Leave game' : 'Return home', onReturnHome)}
         </div>

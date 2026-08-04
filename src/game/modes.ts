@@ -58,8 +58,12 @@ export const DUEL_INFO: ModeInfo = {
 
 export const TUTORIAL_INFO: ModeInfo = {
   name: 'Tutorial',
-  tagline: 'Learn the game in two quick steps.',
-  details: ['Place your first word', 'Cross words with the gap tile', 'No clock, no pressure'],
+  tagline: 'Learn the game in three quick steps.',
+  details: [
+    'Place your first word',
+    'Cross it on a shared letter',
+    'Borrow a letter with the gap tile',
+  ],
 };
 
 /* -------------------------------- Endless --------------------------------- */

@@ -81,7 +81,7 @@ export function HowToModal({ onClose }: HowToModalProps) {
     <div className="howto" role="dialog" aria-modal="true" aria-label="How to play">
       <button
         type="button"
-        className="icon-btn howto-close"
+        className="icon-btn page-close"
         onClick={onClose}
         title="Close"
         aria-label="Close"

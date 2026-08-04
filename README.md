@@ -98,8 +98,13 @@ in `src/game/modes.ts`.
   a drip of 1 then 2 tiles every 20 seconds; the final round has no clock,
   ×2 attacks, and 4 tiles every 20 seconds. Let your pile exceed 25 tiles —
   for any reason, at any moment — and you lose. Last one standing wins.
-- **Tutorial** — a guided two-step walkthrough: place your first word, then
-  cross a placed word using the gap tile. No clock, no pressure.
+- **Tutorial** — a guided three-step walkthrough, scripted in
+  `src/game/tutorial.ts`: SOLAR spelled out in the pile to place, then ORBIT
+  dealt an R short so it has to cross the one already down, then POLE dealt two
+  short so it has to borrow the board's O with a gap tile — that last step won't
+  accept the word played any other way. Each step deals only its own tiles and
+  waits for its own word, "Skip" plays the word for you, and there is no clock
+  and no score.
 
 A "How to play" reference pops up before the first game and stays available
 from the menu afterwards.

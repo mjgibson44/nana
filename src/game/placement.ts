@@ -245,7 +245,7 @@ export function cursorCell(
  * and is not already spoken for by the word being built.
  */
 export function findAvailable(
-  rack: string[],
+  rack: readonly string[],
   letter: string,
   taken: readonly number[],
 ): number {

@@ -17,6 +17,12 @@ interface ScoreboardProps {
    * bonuses banked along the way.
    */
   score: number;
+  /**
+   * The tutorial's progress, which takes the score's corner while it runs —
+   * there's nothing to win there, and the step in hand is what's worth a
+   * glance. Null in the modes that keep score.
+   */
+  step: { current: number; of: number } | null;
   /** Every tile placed on a valid board — the bonus is already in `score`. */
   bonusEarned: boolean;
   /** What that bonus is worth in the current mode. */
@@ -45,6 +51,7 @@ interface ScoreboardProps {
 
 export function Scoreboard({
   score,
+  step,
   bonusEarned,
   bonusAmount,
   complete,
@@ -75,25 +82,36 @@ export function Scoreboard({
 
   return (
     <div className="scoreboard">
-      <div className="score-block score-block-points">
-        <span className="score-label">{complete ? 'Final score' : 'Score'}</span>
-        {/* Keyed by value so every change replays the little bump. */}
-        <span key={score} className="score-value score-value-points">
-          {score}
-        </span>
-        {/* Decoration only — the score itself already reads the new total. */}
-        <div className="score-pops" aria-hidden="true">
-          {pops.map((pop) => (
-            <span
-              key={pop.id}
-              className={`score-pop ${pop.delta > 0 ? 'score-pop-gain' : 'score-pop-loss'}`}
-              onAnimationEnd={() => onPopEnd(pop.id)}
-            >
-              {pop.delta > 0 ? `+${pop.delta}` : `−${-pop.delta}`}
-            </span>
-          ))}
+      {step ? (
+        <div className="score-block">
+          <span className="score-label">Step</span>
+          {/* Keyed like the score, so stepping forward gets the same bump. */}
+          <span key={step.current} className="score-value score-value-points">
+            {step.current}
+            <span className="score-of"> of {step.of}</span>
+          </span>
         </div>
-      </div>
+      ) : (
+        <div className="score-block score-block-points">
+          <span className="score-label">{complete ? 'Final score' : 'Score'}</span>
+          {/* Keyed by value so every change replays the little bump. */}
+          <span key={score} className="score-value score-value-points">
+            {score}
+          </span>
+          {/* Decoration only — the score itself already reads the new total. */}
+          <div className="score-pops" aria-hidden="true">
+            {pops.map((pop) => (
+              <span
+                key={pop.id}
+                className={`score-pop ${pop.delta > 0 ? 'score-pop-gain' : 'score-pop-loss'}`}
+                onAnimationEnd={() => onPopEnd(pop.id)}
+              >
+                {pop.delta > 0 ? `+${pop.delta}` : `−${-pop.delta}`}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       {round !== null && (
         <div className="score-block">
           <span className="score-label">Round</span>
