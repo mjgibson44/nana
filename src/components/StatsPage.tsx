@@ -1,4 +1,5 @@
 import type { Stats } from '../game/stats';
+import { CloseIcon } from './icons';
 
 interface StatsPageProps {
   /** Null while the page is closed — nothing renders. */
@@ -12,7 +13,7 @@ const timestamp = new Intl.DateTimeFormat(undefined, {
 });
 
 /**
- * The stats page, reached from the hamburger menu: how many games have been
+ * The stats page, reached from the home screen: how many games have been
  * finished, and the recent ones with their scores and when they were played.
  */
 export function StatsPage({ stats, onClose }: StatsPageProps) {
@@ -22,6 +23,16 @@ export function StatsPage({ stats, onClose }: StatsPageProps) {
 
   return (
     <div className="summary" role="dialog" aria-modal="true" aria-label="Stats">
+      <button
+        type="button"
+        className="icon-btn page-close"
+        onClick={onClose}
+        title="Close"
+        aria-label="Close"
+      >
+        <CloseIcon />
+      </button>
+
       <div className="summary-inner">
         <header className="summary-header">
           <span className="splash-eyebrow">Your record</span>

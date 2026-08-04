@@ -1,17 +1,8 @@
-import { useState } from 'react';
-import {
-  BATTLE_INFO,
-  DUEL_INFO,
-  SOLO_BLITZ_INFO,
-  SOLO_RELAXED_INFO,
-  type ModeInfo,
-  type SoloPace,
-} from '../game/modes';
+import { DOOR_INFO, type GameDoor } from '../game/modes';
 import {
   BlitzIcon,
   DuelIcon,
   HelpIcon,
-  InfoIcon,
   PlayersIcon,
   SettingsIcon,
   SoloIcon,
@@ -20,12 +11,10 @@ import {
 } from './icons';
 
 interface HomeScreenProps {
-  /** Start a solo Endless game at the chosen pace. */
-  onPlaySolo: (pace: SoloPace) => void;
-  /** Head for the Survival door: host or join a multiplayer lobby. */
-  onBattle: () => void;
-  /** Head for the Duel door: the two-player lobby flow. */
-  onDuel: () => void;
+  /** Head through one of the game doors. What happens next is the door's
+   * business: a solo pace starts a game, the multiplayer pair open a lobby,
+   * and a first-timer gets the tutorial before any of it. */
+  onPlay: (door: GameDoor) => void;
   /** Start the guided tutorial. */
   onTutorial: () => void;
   onShowHowTo: () => void;
@@ -33,42 +22,15 @@ interface HomeScreenProps {
   onShowSettings: () => void;
 }
 
-/**
- * One mode: a full-width button carrying its icon and name, and a little ⓘ
- * beside it for the details. The button says only what the mode is called —
- * everything else is a tap away, so the choice reads at a glance.
- */
-function ModeCard({
-  info,
-  icon,
-  onClick,
-  onInfo,
-}: {
-  info: ModeInfo;
-  icon: React.ReactNode;
-  onClick: () => void;
-  onInfo: () => void;
-}) {
-  return (
-    <div className="mode-card-row">
-      <button type="button" className="mode-card" onClick={onClick}>
-        <span className="mode-card-icon">{icon}</span>
-        <span className="mode-card-name">{info.name}</span>
-      </button>
-      <button
-        type="button"
-        className="mode-info-btn"
-        title={`About ${info.name}`}
-        aria-label={`About ${info.name}`}
-        onClick={onInfo}
-      >
-        <InfoIcon />
-      </button>
-    </div>
-  );
-}
+/** The doors, in the order they're offered. */
+const DOORS: Array<{ door: GameDoor; icon: React.ReactNode }> = [
+  { door: 'relaxed', icon: <SoloIcon /> },
+  { door: 'blitz', icon: <BlitzIcon /> },
+  { door: 'survival', icon: <PlayersIcon /> },
+  { door: 'duel', icon: <DuelIcon /> },
+];
 
-/** The utility row's buttons: an icon and a label, matching the mode buttons. */
+/** The utility grid's buttons: an icon over a label. */
 function HomeAction({
   icon,
   label,
@@ -88,25 +50,22 @@ function HomeAction({
 
 /**
  * The splash screen the app opens on: the game's name up top, then one column
- * of buttons — the modes, then the things that aren't a game. Picking a mode
- * starts it, except the multiplayer ones, which head to their lobby first.
+ * of buttons — the modes, then the things that aren't a game. A mode button
+ * says only what the mode is called; what it *is* gets explained once, in the
+ * popover that fronts its first game, rather than sitting behind an ⓘ nobody
+ * presses.
  *
  * The column stays a single column at every width: it keeps the buttons under
  * one another wherever the thumb already is, and a four-across row of huge
  * targets on a desktop looked like a toolbar rather than a choice.
  */
 export function HomeScreen({
-  onPlaySolo,
-  onBattle,
-  onDuel,
+  onPlay,
   onTutorial,
   onShowHowTo,
   onShowStats,
   onShowSettings,
 }: HomeScreenProps) {
-  /** The mode whose details are up, or null while the sheet is closed. */
-  const [infoOf, setInfoOf] = useState<ModeInfo | null>(null);
-
   return (
     <div className="home">
       <div className="home-inner">
@@ -116,30 +75,12 @@ export function HomeScreen({
         </header>
 
         <div className="home-modes">
-          <ModeCard
-            info={SOLO_RELAXED_INFO}
-            icon={<SoloIcon />}
-            onClick={() => onPlaySolo('relaxed')}
-            onInfo={() => setInfoOf(SOLO_RELAXED_INFO)}
-          />
-          <ModeCard
-            info={SOLO_BLITZ_INFO}
-            icon={<BlitzIcon />}
-            onClick={() => onPlaySolo('blitz')}
-            onInfo={() => setInfoOf(SOLO_BLITZ_INFO)}
-          />
-          <ModeCard
-            info={BATTLE_INFO}
-            icon={<PlayersIcon />}
-            onClick={onBattle}
-            onInfo={() => setInfoOf(BATTLE_INFO)}
-          />
-          <ModeCard
-            info={DUEL_INFO}
-            icon={<DuelIcon />}
-            onClick={onDuel}
-            onInfo={() => setInfoOf(DUEL_INFO)}
-          />
+          {DOORS.map(({ door, icon }) => (
+            <button key={door} type="button" className="mode-card" onClick={() => onPlay(door)}>
+              <span className="mode-card-icon">{icon}</span>
+              <span className="mode-card-name">{DOOR_INFO[door].name}</span>
+            </button>
+          ))}
         </div>
 
         <div className="home-actions">
@@ -149,33 +90,6 @@ export function HomeScreen({
           <HomeAction icon={<SettingsIcon />} label="Settings" onClick={onShowSettings} />
         </div>
       </div>
-
-      {infoOf && (
-        <div className="splash-backdrop" onClick={() => setInfoOf(null)} role="presentation">
-          <div
-            className="dialog mode-info"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`About ${infoOf.name}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <span className="mode-card-name">{infoOf.name}</span>
-            <span className="mode-card-tagline">{infoOf.tagline}</span>
-            <span className="mode-card-details">
-              {infoOf.details.map((detail) => (
-                <span key={detail} className="mode-card-detail">
-                  {detail}
-                </span>
-              ))}
-            </span>
-            <div className="dialog-actions">
-              <button type="button" className="btn btn-primary" onClick={() => setInfoOf(null)}>
-                Got it
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

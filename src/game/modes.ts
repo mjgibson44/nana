@@ -34,9 +34,17 @@ export type SoloPace = 'relaxed' | 'blitz';
 export interface ModeInfo {
   name: string;
   tagline: string;
-  /** Short bullet lines for the mode's card on the home screen. */
+  /** Short bullet lines for the explainer that fronts the mode's first game. */
   details: string[];
 }
+
+/**
+ * The doors out of the home screen — the four buttons that lead to a game.
+ * Not the same list as GameMode: the solo paces are one mode played two ways,
+ * Survival and Duel lead to a lobby before any game starts, and Survival is
+ * Endless played against other people.
+ */
+export type GameDoor = SoloPace | 'survival' | 'duel';
 
 export const SOLO_RELAXED_INFO: ModeInfo = {
   name: 'Solo Relaxed',
@@ -91,8 +99,20 @@ export const DUEL_INFO: ModeInfo = {
 
 export const TUTORIAL_INFO: ModeInfo = {
   name: 'Tutorial',
-  tagline: 'Learn the game in two quick steps.',
-  details: ['Place your first word', 'Cross words with the gap tile', 'No clock, no pressure'],
+  tagline: 'Learn the game in three quick steps.',
+  details: [
+    'Place your first word',
+    'Cross it on a shared letter',
+    'Borrow a letter with the gap tile',
+  ],
+};
+
+/** Which explainer each door raises the first time it's opened. */
+export const DOOR_INFO: Record<GameDoor, ModeInfo> = {
+  relaxed: SOLO_RELAXED_INFO,
+  blitz: SOLO_BLITZ_INFO,
+  survival: BATTLE_INFO,
+  duel: DUEL_INFO,
 };
 
 /* -------------------------------- Endless --------------------------------- */

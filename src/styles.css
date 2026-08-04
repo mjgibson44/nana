@@ -327,11 +327,12 @@ body {
 
 /* ---------- tile-drop banner ---------- */
 
-/* Floats just under the header so it never hides the score or the board's
-   working area for long. */
+/* Hangs from the top of the board, clear of whatever the header strip above it
+   holds — including the tutorial's instructions — and gone again in a moment, so
+   it never hides the board's working area for long. */
 .game-toast {
-  position: fixed;
-  top: 68px;
+  position: absolute;
+  top: 10px;
   left: 50%;
   z-index: 150;
   padding: 8px 18px;
@@ -1433,16 +1434,7 @@ body {
   gap: 12px;
 }
 
-/* A mode's launch button and its ⓘ, sharing one row at equal height. */
-.mode-card-row {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-}
-
 .mode-card {
-  flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1478,35 +1470,6 @@ body {
   box-shadow: 0 2px 0 var(--line);
 }
 
-/* The details door: same construction as the card, scaled to one glyph. */
-.mode-info-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 60px;
-  padding: 0;
-  font-size: 23px;
-  color: var(--ink);
-  background: var(--surface);
-  border: 3px solid var(--line);
-  border-radius: 16px;
-  box-shadow: 0 3px 0 var(--line);
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
-}
-
-.mode-info-btn:hover {
-  background: var(--surface-alt);
-  transform: translateY(-2px);
-  box-shadow: 0 5px 0 var(--line);
-}
-
-.mode-info-btn:active {
-  transform: translateY(1px);
-  box-shadow: 0 2px 0 var(--line);
-}
-
 .mode-card-name {
   font-size: 21px;
   font-weight: 800;
@@ -1518,7 +1481,7 @@ body {
   opacity: 0.75;
 }
 
-/* The bullet rundown, now living in the ⓘ dialog rather than on the card. */
+/* The bullet rundown, which lives in the explainer rather than on the card. */
 .mode-card-details {
   display: flex;
   flex-direction: column;
@@ -1537,7 +1500,8 @@ body {
   opacity: 0.7;
 }
 
-/* A mode's details, raised by its ⓘ: the card's text at dialog size. */
+/* The explainer that fronts a mode's first game: the card's text, at dialog
+   size, with room to read it. */
 .mode-info {
   display: flex;
   flex-direction: column;
@@ -1550,40 +1514,34 @@ body {
 }
 
 /*
- * The things that aren't a game, carrying on the same column: full-width
- * rows, quieter than the mode buttons but lined up with them. The ⓘ column's
- * width is left clear on the right so every label starts on the same edge.
+ * The things that aren't a game, two by two under the modes: a block of four
+ * quieter tiles rather than four more full-width rows, so the modes stay the
+ * column the eye runs down.
  */
 .home-actions {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-right: 70px;
 }
 
 .home-action {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 13px 18px;
-  font-size: 16px;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 10px;
+  font-size: 15px;
   font-weight: 700;
-  text-align: left;
+  text-align: center;
   border-radius: 12px;
 }
 
 .home-action-icon {
   display: flex;
   flex-shrink: 0;
-  font-size: 21px;
+  font-size: 24px;
   opacity: 0.8;
-}
-
-@media (max-width: 560px) {
-  /* No room to spare for the ⓘ column's alignment on a phone. */
-  .home-actions {
-    margin-right: 0;
-  }
 }
 
 /* ---------- tutorial ---------- */
@@ -1599,18 +1557,6 @@ body {
   line-height: 1.45;
   background: var(--surface);
   border-bottom: 1px solid var(--line-soft);
-}
-
-.tutorial-step {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  color: var(--ink-invert);
-  background: var(--accent);
-  border-radius: 999px;
 }
 
 .tutorial-text {
@@ -1629,6 +1575,30 @@ body {
   white-space: nowrap;
 }
 
+/* The way past a step that isn't landing. Sits at the far end of the banner,
+   clear of the instructions it's opting out of. */
+.tutorial-skip {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 10px;
+}
+
+/* ---------- full-page overlays ---------- */
+
+/* The way out of a full-page overlay — how-to, stats, settings. The X rides the
+   viewport rather than the page, so it's always in reach however far the page
+   has been scrolled, and sits above the page's own content (both overlays make
+   a stacking context of their own, so a small z-index is enough). */
+.page-close {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 10;
+}
+
 /* ---------- how-to modal ---------- */
 
 .howto {
@@ -1638,15 +1608,6 @@ body {
   overflow-y: auto;
   background: var(--bg);
   animation: splash-in 180ms ease-out;
-}
-
-/* The X rides the viewport, not the page — always in reach however far the
-   tutorial has been scrolled. */
-.howto-close {
-  position: fixed;
-  top: 14px;
-  right: 16px;
-  z-index: 410;
 }
 
 .howto-inner {
@@ -1855,7 +1816,6 @@ body {
   }
 
   .game-toast {
-    top: 58px;
     max-width: calc(100vw - 24px);
     white-space: normal;
     text-align: center;
@@ -1882,8 +1842,14 @@ body {
 
   .tutorial-banner {
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     padding: 10px 12px;
+  }
+
+  /* Stacked, the auto margin has no row left to push along. */
+  .tutorial-skip {
+    margin-left: 0;
+    align-self: flex-end;
   }
 }
 

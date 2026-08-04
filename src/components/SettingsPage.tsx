@@ -1,4 +1,5 @@
 import type { ThemePref } from '../theme';
+import { CloseIcon } from './icons';
 
 interface SettingsPageProps {
   /** False while the page is closed — nothing renders. */
@@ -24,6 +25,16 @@ export function SettingsPage({ open, theme, onTheme, onClose }: SettingsPageProp
 
   return (
     <div className="summary" role="dialog" aria-modal="true" aria-label="Settings">
+      <button
+        type="button"
+        className="icon-btn page-close"
+        onClick={onClose}
+        title="Close"
+        aria-label="Close"
+      >
+        <CloseIcon />
+      </button>
+
       <div className="summary-inner">
         <header className="summary-header">
           <span className="splash-eyebrow">Options</span>

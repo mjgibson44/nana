@@ -105,11 +105,30 @@ in `src/game/modes.ts`.
   a drip of 1 then 2 tiles every 20 seconds; the final round has no clock,
   ×2 attacks, and 4 tiles every 20 seconds. Let your pile exceed 25 tiles —
   for any reason, at any moment — and you lose. Last one standing wins.
-- **Tutorial** — a guided two-step walkthrough: place your first word, then
-  cross a placed word using the gap tile. No clock, no pressure.
+- **Tutorial** — a guided three-step walkthrough, scripted in
+  `src/game/tutorial.ts`: SOLAR spelled out in the pile to place, then ORBIT
+  dealt an R short so it has to cross the one already down, then POLE dealt two
+  short so it has to borrow the board's O with a gap tile — that last step won't
+  accept the word played any other way. Each step deals only its own tiles and
+  waits for its own word, "Skip" plays the word for you, and there is no clock
+  and no score.
 
-A "How to play" reference pops up before the first game and stays available
-from the menu afterwards.
+### Meeting the game for the first time
+
+Two things front a first game, each shown once and never again (remembered in
+`src/game/onboarding.ts`):
+
+- The **tutorial**, before anybody's very first game. Pick any mode on the home
+  screen and the tutorial comes first, with that mode waiting behind it.
+  Finishing it, skipping every step, or shutting it with the X all lead the same
+  way: on to the game you picked.
+- A one-card **explainer** for each mode — what it is and its three headline
+  rules — the first time you open that door. It's the last thing between the
+  choice and the game, which is why there's no ⓘ on the mode buttons: the
+  details arrive when they're wanted, unasked.
+
+The fuller "How to play" reference never interrupts; it waits on the home screen
+and in the in-game menu.
 
 ## Multiplayer (Survival & Duel)
 
