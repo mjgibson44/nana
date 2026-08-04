@@ -22,7 +22,7 @@ export interface ModeInfo {
 }
 
 export const ENDLESS_INFO: ModeInfo = {
-  name: 'Endless',
+  name: 'Solo',
   tagline: 'Survive the ever-growing pile.',
   details: [
     '2:00 to place your first 20 tiles',
@@ -32,13 +32,13 @@ export const ENDLESS_INFO: ModeInfo = {
 };
 
 /**
- * Endless Battle's home-screen card. Each player's game runs as Endless, and
- * the multiplayer wrapping (lobby, shared deal, standings) lives in
- * src/game/battle.ts.
+ * Survival's home-screen card — Endless raced by several players. Each
+ * player's game runs as Endless, and the multiplayer wrapping (lobby, shared
+ * deal, standings) lives in src/game/battle.ts.
  */
 export const BATTLE_INFO: ModeInfo = {
-  name: 'Endless Battle',
-  tagline: 'Endless, against your friends.',
+  name: 'Survival',
+  tagline: 'Outlive your friends (2+ players)',
   details: [
     'Every player gets the same tiles',
     'Host a lobby, or join with a code',

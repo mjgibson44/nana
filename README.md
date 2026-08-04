@@ -69,7 +69,7 @@ plain serializable data — which is exactly what lets multiplayer run with
 Picked from the home screen (`src/components/HomeScreen.tsx`); the rules live
 in `src/game/modes.ts`.
 
-- **Endless** — no levels. 2:00 to work the starting 20 tiles, then batches
+- **Solo** (Endless) — no levels. 2:00 to work the starting 20 tiles, then batches
   land on a tightening clock: five rounds of 5 tiles every 45 seconds, five
   rounds of 5 tiles every 30 seconds, then 7 tiles every 30 seconds forever
   after. Clearing the pile pays a 25-point bonus and 5 more
@@ -78,7 +78,7 @@ in `src/game/modes.ts`.
   near the limit, red once you're over. Going over doesn't end the game by
   itself; still being over when the round's clock runs out is what buries
   you.
-- **Endless Battle** — Endless, against your friends. One player hosts a
+- **Survival** (Endless Battle) — Solo, against your friends. One player hosts a
   lobby and shares a 5-letter code (or an invite link that carries it);
   everyone enters a name to join. Every player fights the identical game:
   the same starting tiles, and the same letters in every batch after —
@@ -104,7 +104,7 @@ in `src/game/modes.ts`.
 A "How to play" reference pops up before the first game and stays available
 from the menu afterwards.
 
-## Multiplayer (Endless Battle & Duel)
+## Multiplayer (Survival & Duel)
 
 - `src/game/rng.ts` — a tiny seeded PRNG (xmur3 + mulberry32) that slots into
   the generator's injectable `rng` parameter.
@@ -146,7 +146,7 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
 
 - [x] Single-player: solvable deals, drag & drop, live validation
 - [x] Endless ("peel"-style) mode
-- [x] Multiplayer: Endless Battle — shared deal from one seed, lobbies with
+- [x] Multiplayer: Survival (Endless Battle) — shared deal from one seed, lobbies with
       codes/invite links, live standings, host controls, final rankings
 - [x] Duel mode: permanent words, attack tiles, escalating rounds
 - [x] Light/dark/system theme and a settings screen

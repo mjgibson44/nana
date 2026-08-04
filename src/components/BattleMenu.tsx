@@ -19,7 +19,7 @@ interface BattleMenuProps {
 
 const COPY: Record<BattleMode, { title: string; tagline: string; host: string }> = {
   endless: {
-    title: 'Endless Battle',
+    title: 'Survival',
     tagline:
       'Everyone digs out of the same tiles — the last board standing, or the highest score, takes it.',
     host: 'Host a game',

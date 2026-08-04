@@ -72,7 +72,7 @@ export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: B
     <div className="home">
       <div className="home-inner battle-inner">
         <header className="home-header">
-          <span className="splash-eyebrow">{duel ? 'Duel' : 'Endless Battle'}</span>
+          <span className="splash-eyebrow">{duel ? 'Duel' : 'Survival'}</span>
           <h1 className="home-title battle-lobby-title">Lobby</h1>
         </header>
 

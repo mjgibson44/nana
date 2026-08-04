@@ -1395,16 +1395,25 @@ body {
 
 .home-modes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 14px;
 }
 
+/* A mode's launch button and its ⓘ, sharing one row at equal height. */
+.mode-card-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
 .mode-card {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  padding: 20px 18px;
+  gap: 6px;
+  padding: 18px;
   font: inherit;
   text-align: left;
   color: var(--ink);
@@ -1427,6 +1436,35 @@ body {
   box-shadow: 0 2px 0 var(--line);
 }
 
+/* The details door: same construction as the card, scaled to one glyph. */
+.mode-info-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  padding: 0;
+  font-size: 22px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 3px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 3px 0 var(--line);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.mode-info-btn:hover {
+  background: var(--surface-alt);
+  transform: translateY(-2px);
+  box-shadow: 0 5px 0 var(--line);
+}
+
+.mode-info-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 0 var(--line);
+}
+
 .mode-card-name {
   font-size: 21px;
   font-weight: 800;
@@ -1438,6 +1476,7 @@ body {
   opacity: 0.75;
 }
 
+/* The bullet rundown, now living in the ⓘ dialog rather than on the card. */
 .mode-card-details {
   display: flex;
   flex-direction: column;
@@ -1456,14 +1495,16 @@ body {
   opacity: 0.7;
 }
 
-.mode-card-play {
-  margin-top: auto;
-  padding: 6px 14px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ink-invert);
-  background: var(--accent);
-  border-radius: 999px;
+/* A mode's details, raised by its ⓘ: the card's text at dialog size. */
+.mode-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: min(320px, 84vw);
+}
+
+.mode-info .dialog-actions {
+  margin-top: 12px;
 }
 
 .home-actions {

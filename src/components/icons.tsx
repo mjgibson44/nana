@@ -137,6 +137,17 @@ export function CloseIcon(props: IconProps) {
   );
 }
 
+/** An i in a ring: there's more to read about this. */
+export function InfoIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11.5V16" />
+      <path d="M12 8h.01" />
+    </Svg>
+  );
+}
+
 /** A trash can: the word comes off the board and its letters go back to the
  * pile. */
 export function TrashIcon(props: IconProps) {
