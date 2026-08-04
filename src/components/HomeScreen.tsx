@@ -4,8 +4,8 @@ import {
   DuelIcon,
   HelpIcon,
   PlayersIcon,
+  PuzzleIcon,
   SettingsIcon,
-  SoloIcon,
   StatsIcon,
   TutorialIcon,
 } from './icons';
@@ -24,8 +24,8 @@ interface HomeScreenProps {
 
 /** The doors, in the order they're offered. */
 const DOORS: Array<{ door: GameDoor; icon: React.ReactNode }> = [
-  { door: 'relaxed', icon: <SoloIcon /> },
   { door: 'blitz', icon: <BlitzIcon /> },
+  { door: 'puzzle', icon: <PuzzleIcon /> },
   { door: 'survival', icon: <PlayersIcon /> },
   { door: 'duel', icon: <DuelIcon /> },
 ];
