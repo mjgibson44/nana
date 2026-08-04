@@ -137,6 +137,24 @@ function measureTiles(
   };
 }
 
+/**
+ * Scroll the board so the point `fx,fy` of its width and height sits exactly
+ * at `viewX,viewY` in the viewport — how a pinch keeps the board point it
+ * grabbed glued to the fingers. Aiming at an absolute spot makes re-running
+ * this harmless: a second call with the same note moves nothing.
+ */
+function alignPinch(
+  wrap: HTMLElement,
+  note: { fx: number; fy: number; viewX: number; viewY: number },
+): void {
+  const boardEl = wrap.querySelector('.board') as HTMLElement | null;
+  if (!boardEl) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  const rect = boardEl.getBoundingClientRect();
+  wrap.scrollLeft += rect.left - wrapRect.left + note.fx * rect.width - note.viewX;
+  wrap.scrollTop += rect.top - wrapRect.top + note.fy * rect.height - note.viewY;
+}
+
 /** Once set, the how-to stays put — it only auto-opens on the first game. */
 const HOWTO_SEEN_KEY = 'nana.howto.v1';
 
@@ -2333,13 +2351,27 @@ export default function App() {
    * Handled here rather than left to the browser because tiles set
    * `touch-action: none` for dragging, which stops native pinch reaching them.
    */
-  const pinch = useRef<{ startGap: number; startZoom: number } | null>(null);
+  /**
+   * The gesture's grip on the board: the finger spread and zoom it started
+   * at, and the board point (as a fraction of the board's size) that sat
+   * between the fingers. That point is anchored once, at first touch — every
+   * frame then aims it back at the fingers, so rounding errors never
+   * compound, and moving both fingers together pans the board with them.
+   */
+  const pinch = useRef<{
+    startGap: number;
+    startZoom: number;
+    fx: number;
+    fy: number;
+  } | null>(null);
 
   /**
-   * A pinch's scroll compensation, waiting for its zoom to reach the DOM.
-   * Holds where the point between the fingers sat — as a fraction of the
-   * board, and as a spot in the viewport — so the board can be scrolled to
-   * put that same point straight back under the fingers.
+   * Where the anchored board point should sit right now: the fingers'
+   * current midpoint, in the viewport, plus the zoom that placement was
+   * computed for. It lives for the whole gesture — skipping any one zoom's
+   * correction is a frame of the board drifting away and snapping back —
+   * and one commit past it, since React can land the gesture's last zoom
+   * after the fingers have already lifted.
    */
   const pendingPinch = useRef<{
     zoom: number;
@@ -2348,6 +2380,12 @@ export default function App() {
     viewX: number;
     viewY: number;
   } | null>(null);
+
+  /** The rendered zoom, readable from handlers that bind once per screen. */
+  const zoomLive = useRef(zoom);
+  useLayoutEffect(() => {
+    zoomLive.current = zoom;
+  }, [zoom]);
 
   useEffect(() => {
     const wrap = boardWrapRef.current;
@@ -2359,37 +2397,77 @@ export default function App() {
       return Math.hypot(dx, dy);
     };
 
+    // Touch events arrive faster than frames can render, so moves only note
+    // the fingers' latest position and one animation-frame callback applies
+    // it — the board changes size at most once a frame, never mid-frame.
+    let raf = 0;
+    let latest: { gap: number; midX: number; midY: number } | null = null;
+
+    const applyPinch = () => {
+      raf = 0;
+      const grip = pinch.current;
+      const move = latest;
+      if (!grip || !move) return;
+      const next = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, grip.startZoom * (move.gap / grip.startGap)),
+      );
+      const wrapRect = wrap.getBoundingClientRect();
+      pendingPinch.current = {
+        zoom: next,
+        fx: grip.fx,
+        fy: grip.fy,
+        viewX: move.midX - wrapRect.left,
+        viewY: move.midY - wrapRect.top,
+      };
+      if (next !== zoomLive.current) {
+        // The layout effect aligns the anchor once the new size renders.
+        setZoom(next);
+      } else {
+        // Same size — the spread hit a zoom limit, or the fingers are just
+        // panning. No render is coming, so align the anchor right now.
+        alignPinch(wrap, pendingPinch.current);
+      }
+    };
+
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return;
-      pinch.current = { startGap: gap(e.touches), startZoom: zoom };
+      const boardEl = wrap.querySelector('.board') as HTMLElement | null;
+      if (!boardEl) return;
+      const rect = boardEl.getBoundingClientRect();
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      pinch.current = {
+        startGap: gap(e.touches),
+        startZoom: zoomLive.current,
+        fx: (midX - rect.left) / rect.width,
+        fy: (midY - rect.top) / rect.height,
+      };
+      latest = null;
     };
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 2 || !pinch.current) return;
       e.preventDefault(); // don't let it turn into a page scroll
-      const ratio = gap(e.touches) / pinch.current.startGap;
-      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.current.startZoom * ratio));
-      if (next === zoom) return;
-      // The zoom must grow the board out from between the fingers, not from
-      // its top-left corner: note where the midpoint sits before resizing so
-      // the scroll can cancel the drift once the new size renders.
-      const boardEl = wrap.querySelector('.board') as HTMLElement | null;
-      if (boardEl) {
-        const wrapRect = wrap.getBoundingClientRect();
-        const rect = boardEl.getBoundingClientRect();
-        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        pendingPinch.current = {
-          zoom: next,
-          fx: (midX - rect.left) / rect.width,
-          fy: (midY - rect.top) / rect.height,
-          viewX: midX - wrapRect.left,
-          viewY: midY - wrapRect.top,
-        };
-      }
-      setZoom(next);
+      latest = {
+        gap: gap(e.touches),
+        midX: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        midY: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      };
+      if (raf === 0) raf = requestAnimationFrame(applyPinch);
     };
     const onTouchEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) pinch.current = null;
+      if (e.touches.length >= 2) return;
+      // The fingers' last few milliseconds still count: a move noted but
+      // still waiting on its animation frame is applied now, not dropped.
+      if (raf !== 0) {
+        cancelAnimationFrame(raf);
+        applyPinch();
+      }
+      // The gesture is over — but its last zoom may still be on its way
+      // through React, so the anchor note stays for the alignment effect
+      // to spend. Only the grip is released here.
+      pinch.current = null;
+      latest = null;
     };
 
     wrap.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -2401,25 +2479,29 @@ export default function App() {
       wrap.removeEventListener('touchmove', onTouchMove);
       wrap.removeEventListener('touchend', onTouchEnd);
       wrap.removeEventListener('touchcancel', onTouchEnd);
+      if (raf !== 0) cancelAnimationFrame(raf);
     };
     // `screen` re-runs this once the game (and its board) is actually up —
     // on the home screen there is no board to listen on yet.
-  }, [zoom, screen]);
+  }, [screen]);
 
-  // The second half of the pinch: the tiles have rendered at their new size,
-  // so scroll the board point that was between the fingers straight back
-  // under them. Grid cells scale uniformly, so the fraction carries over.
+  // The second half of the pinch: this commit rendered a new zoom, so put
+  // the gesture's anchored board point straight back under the fingers
+  // before the frame paints. Zoom and scroll landing in the same frame is
+  // what keeps the board from tearing away and snapping back.
   useLayoutEffect(() => {
     const wrap = boardWrapRef.current;
     const pending = pendingPinch.current;
-    if (!wrap || !pending || pending.zoom !== zoom) return;
-    pendingPinch.current = null;
-    const boardEl = wrap.querySelector('.board') as HTMLElement | null;
-    if (!boardEl) return;
-    const wrapRect = wrap.getBoundingClientRect();
-    const rect = boardEl.getBoundingClientRect();
-    wrap.scrollLeft += rect.left - wrapRect.left + pending.fx * rect.width - pending.viewX;
-    wrap.scrollTop += rect.top - wrapRect.top + pending.fy * rect.height - pending.viewY;
+    if (!wrap || !pending) return;
+    if (pinch.current === null) {
+      // The fingers are up, so this zoom is either the gesture's own last
+      // one still landing — which still needs its alignment — or somebody
+      // else's (the auto-fit, a new game's reset), which must not be
+      // steered by a dead gesture. Either way the note is now spent.
+      pendingPinch.current = null;
+      if (pending.zoom !== zoom) return;
+    }
+    alignPinch(wrap, pending);
   }, [zoom]);
 
   const timerSeconds = remainingMs === null ? null : Math.ceil(remainingMs / 1000);
