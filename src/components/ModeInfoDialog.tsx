@@ -1,4 +1,5 @@
 import type { ModeInfo } from '../game/modes';
+import { CloseIcon } from './icons';
 
 interface ModeInfoDialogProps {
   /** The mode being introduced, or null while nothing is up. */
@@ -9,8 +10,9 @@ interface ModeInfoDialogProps {
   /**
    * A way past the thing being introduced, for the cards that have somewhere
    * to be instead — the tutorial's does, a mode's own card doesn't. It's also
-   * what clicking the backdrop does; without it every way out leads forward,
-   * since there's nothing behind a card that only says what you chose.
+   * what the corner X and a click on the backdrop do; without it every way out
+   * leads forward, since there's nothing behind a card that only says what you
+   * chose.
    */
   skipLabel?: string;
   onSkip?: () => void;
@@ -43,6 +45,15 @@ export function ModeInfoDialog({
         // Clicking inside shouldn't count as clicking the backdrop away.
         onClick={(e) => e.stopPropagation()}
       >
+        <button
+          type="button"
+          className="icon-btn dialog-close"
+          onClick={dismiss}
+          title="Close"
+          aria-label="Close"
+        >
+          <CloseIcon />
+        </button>
         <span className="mode-card-name">{info.name}</span>
         <span className="mode-card-tagline">{info.tagline}</span>
         <span className="mode-card-details">

@@ -1289,13 +1289,84 @@ body {
   opacity: 0.6;
 }
 
+/* A setting that's simply on or off: the same slab as an option, with the
+   label on the left and the switch pinned to the right. */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.settings-toggle:hover {
+  background: var(--surface-alt);
+}
+
+.settings-toggle-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The track. Off it's a hollow outline; on it fills with ink, so the state
+   reads at a glance without relying on colour alone — the knob moves too. */
+.settings-switch {
+  flex: none;
+  position: relative;
+  width: 46px;
+  height: 26px;
+  background: var(--surface-alt);
+  border: 2px solid var(--line);
+  border-radius: 13px;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.settings-toggle.is-on .settings-switch {
+  background: var(--ok-bg);
+  border-color: var(--ok-edge);
+}
+
+.settings-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  background: var(--ink);
+  border-radius: 50%;
+  transition: transform 140ms ease;
+}
+
+.settings-toggle.is-on .settings-switch-knob {
+  transform: translateX(20px);
+}
+
 .dialog {
+  position: relative;
   max-width: 380px;
   padding: 22px;
   background: var(--surface);
   border: 3px solid var(--ink);
   border-radius: 16px;
   box-shadow: 0 10px 28px var(--shadow-strong);
+}
+
+/* The X in a dialog's own corner, for the cards that are worth reading but
+   never worth being trapped by. It sits over the card's name, which keeps its
+   distance with padding of its own. */
+.dialog-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
 }
 
 .dialog-message {
@@ -1522,6 +1593,11 @@ body {
 
 .mode-info .dialog-actions {
   margin-top: 12px;
+}
+
+/* Keeps a long mode name out from under the corner X. */
+.mode-info .mode-card-name {
+  padding-right: 34px;
 }
 
 /* The options popup a configurable mode raises on the way in: Blitz's pace,

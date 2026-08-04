@@ -1,3 +1,5 @@
+import { CloseIcon } from './icons';
+
 export interface ChoiceOption {
   label: string;
   detail: string;
@@ -10,14 +12,15 @@ interface ChoiceDialogProps {
   subtitle: string;
   options: readonly ChoiceOption[];
   onPick: (index: number) => void;
-  /** Walk away without starting anything — also what the backdrop does. */
+  /** Walk away without starting anything — also what the corner X and a click
+   * on the backdrop do. */
   onDismiss: () => void;
 }
 
 /**
  * The popup a configurable mode raises on the way in: Blitz asking which
  * pace, Puzzle asking which board. One tap on an option starts the game;
- * clicking outside backs out of the mode altogether.
+ * the X, or a click outside, backs out of the mode altogether.
  */
 export function ChoiceDialog({ title, subtitle, options, onPick, onDismiss }: ChoiceDialogProps) {
   return (
@@ -30,6 +33,15 @@ export function ChoiceDialog({ title, subtitle, options, onPick, onDismiss }: Ch
         // Clicking inside shouldn't count as clicking the backdrop away.
         onClick={(e) => e.stopPropagation()}
       >
+        <button
+          type="button"
+          className="icon-btn dialog-close"
+          onClick={onDismiss}
+          title="Close"
+          aria-label="Close"
+        >
+          <CloseIcon />
+        </button>
         <span className="mode-card-name">{title}</span>
         <span className="mode-card-tagline">{subtitle}</span>
         <div className="choice-options">
