@@ -37,6 +37,12 @@ describe('TUTORIAL_SCRIPT', () => {
     expect(TUTORIAL_SCRIPT.map((step) => step.needsGap)).toEqual([false, false, true]);
   });
 
+  it('has something to say the moment each word lands', () => {
+    for (const step of TUTORIAL_SCRIPT) {
+      expect(step.done).toContain(step.word.toUpperCase());
+    }
+  });
+
   it('counts its own steps', () => {
     expect(TUTORIAL_STEPS).toBe(3);
   });

@@ -23,15 +23,31 @@ export interface TutorialStep {
    * refuses the word without one — otherwise the lesson can be walked past.
    */
   needsGap: boolean;
+  /**
+   * Called out over the board the moment the word lands. The banner can't say
+   * this: by the time it's read it has already moved on to asking for the next
+   * word, so nothing else marks the step as done.
+   */
+  done: string;
 }
 
 export const TUTORIAL_SCRIPT: readonly TutorialStep[] = [
   // Spelled out in a row in the pile: the first word is there to be read off.
-  { tiles: ['s', 'o', 'l', 'a', 'r'], word: 'solar', needsGap: false },
+  { tiles: ['s', 'o', 'l', 'a', 'r'], word: 'solar', needsGap: false, done: 'SOLAR is down!' },
   // No R — ORBIT crosses the one SOLAR just left on the board.
-  { tiles: ['o', 'b', 'i', 't'], word: 'orbit', needsGap: false },
+  {
+    tiles: ['o', 'b', 'i', 't'],
+    word: 'orbit',
+    needsGap: false,
+    done: 'ORBIT crossed on the R!',
+  },
   // No O either, and this time the board's O has to be claimed with a gap.
-  { tiles: ['p', 'l', 'e'], word: 'pole', needsGap: true },
+  {
+    tiles: ['p', 'l', 'e'],
+    word: 'pole',
+    needsGap: true,
+    done: 'POLE played through the gap — that’s the whole game!',
+  },
 ];
 
 /** How many steps the player is walked through. */
