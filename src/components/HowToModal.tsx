@@ -167,7 +167,7 @@ export function HowToModal({ onClose }: HowToModalProps) {
               <DemoButton>
                 <RotateIcon to="down" />
               </DemoButton>
-              <span>Rotate the selected word.</span>
+              <span>Rotate the selected word — or double-click its first letter.</span>
             </li>
             <li className="howto-row">
               <DemoButton>

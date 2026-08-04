@@ -21,7 +21,8 @@ npm run build   # type-check + production build
   word's preview around, and let go where it should land.
 - **Drag** individual tiles from the pile onto the board to build words by
   hand, drag them between cells to rearrange, or drag them back down to the
-  pile (double-click/double-tap a placed tile to send it back instantly).
+  pile (double-click/double-tap a placed tile to send it back instantly —
+  except a word's first letter, which turns the whole word instead).
 - Every horizontal and vertical run of 2+ letters is checked live against a
   ~173k-word dictionary (ENABLE). Invalid words turn **red**, loose tiles turn
   **amber**, valid words go **green**.
