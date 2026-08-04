@@ -33,6 +33,7 @@ import {
   planPlacement,
   planWordCells,
   startableDirections,
+  type Pick as PilePick,
 } from './game/placement';
 import { loadStats, recordGame, type Stats } from './game/stats';
 import {
@@ -1658,11 +1659,23 @@ export default function App() {
     setInteraction((prev) => withPicks(prev, [...picksOf(prev), GAP]));
   }, []);
 
-  /** Drop the planned tiles onto the board and spend the pile letters they used. */
+  /**
+   * A placement was refused — say why. A refusal that changes nothing on
+   * screen reads as a bug, so it always gets a banner.
+   */
+  const rejectToast = useCallback((text: string) => {
+    setToast({ text, serial: ++dropSerial.current });
+  }, []);
+
+  /**
+   * Drop the planned tiles onto the board and spend the pile letters they
+   * used. Places the staged word by default; a drag-and-dropped tile passes
+   * its own single pick instead, so every landing goes through the same rules.
+   */
   const commit = useCallback(
-    (anchor: CellKey, dir: Direction) => {
-      if (pickList.length === 0) return;
-      const result = planPlacement(board, bounds, parseKey(anchor), dir, pickList);
+    (anchor: CellKey, dir: Direction, picksToPlace: PilePick[] = pickList) => {
+      if (picksToPlace.length === 0) return;
+      const result = planPlacement(board, bounds, parseKey(anchor), dir, picksToPlace);
       if (result.steps.length === 0 || !result.complete) return;
 
       const next = { ...board };
@@ -1676,13 +1689,27 @@ export default function App() {
 
       // A Duel placement is forever, so only real words are allowed down —
       // and a lone letter spelling nothing isn't a word at all.
-      if (
-        mode === 'duel' &&
-        (!dictionary ||
-          newRuns.length === 0 ||
-          newRuns.some((run) => run.word.length < MIN_WORD_LENGTH || !dictionary.has(run.word)))
-      ) {
-        return;
+      if (mode === 'duel') {
+        if (!dictionary) {
+          rejectToast('Hold on — the dictionary is still loading.');
+          return;
+        }
+        if (newRuns.length === 0) {
+          rejectToast('A lone letter has to join a word.');
+          return;
+        }
+        const bad = newRuns.filter(
+          (run) => run.word.length < MIN_WORD_LENGTH || !dictionary.has(run.word),
+        );
+        if (bad.length > 0) {
+          const words = bad.map((run) => run.word.toUpperCase());
+          rejectToast(
+            words.length === 1
+              ? `${words[0]} isn’t a word`
+              : `${words.join(', ')} aren’t words`,
+          );
+          return;
+        }
       }
 
       remember();
@@ -1692,11 +1719,24 @@ export default function App() {
       setLastDir(dir);
 
       // Duel: the word that just landed hits the opponent — one tile per
-      // letter past three, scaled by the round. The longest word the
-      // placement made counts, so extending a word is worth the whole word.
+      // letter past three, scaled by the round. Only the growth counts: a
+      // word extended (or bridged) from words already on the board is worth
+      // the difference, not the whole word again. The best-paying word the
+      // placement made is the one that counts.
       if (mode === 'duel' && battleRef.current) {
-        const wordLength = newRuns.reduce((top, run) => Math.max(top, run.word.length), 0);
-        const attack = duelAttackTiles(wordLength, duelRound);
+        const oldRuns = extractRuns(board);
+        const attack = newRuns.reduce((top, run) => {
+          const cells = new Set(run.cells);
+          // The runs this word swallowed: same direction, every cell now
+          // inside it. Anything merely crossed keeps its own cells outside.
+          const grewFrom = oldRuns
+            .filter(
+              (old) =>
+                old.direction === run.direction && old.cells.every((cell) => cells.has(cell)),
+            )
+            .map((old) => old.word.length);
+          return Math.max(top, duelAttackTiles(run.word.length, duelRound, grewFrom));
+        }, 0);
         if (attack > 0) {
           battleRef.current.sendAttack(attack);
           const serial = ++dropSerial.current;
@@ -1710,7 +1750,7 @@ export default function App() {
       // The tutorial watches for its two milestones: any word placed, then a
       // word placed through a gap.
       if (mode === 'tutorial') {
-        const usedGap = pickList.some((pick) => pick.letter === null);
+        const usedGap = picksToPlace.some((pick) => pick.letter === null);
         setTutorialStep((step) => (step === 1 ? 2 : step === 2 && usedGap ? 3 : step));
       }
 
@@ -1718,7 +1758,7 @@ export default function App() {
       // no anchored cell, no selection ring, no word controls left behind.
       clearFocus();
     },
-    [board, bounds, pickList, mode, duelRound, dictionary, remember, clearFocus],
+    [board, bounds, pickList, mode, duelRound, dictionary, remember, clearFocus, rejectToast],
   );
 
   /**
@@ -1752,7 +1792,12 @@ export default function App() {
         const plan = planPlacement(board, bounds, anchor, dir, pickList);
         return plan.complete && plan.steps.length > 0 ? [{ anchor, dir, plan }] : [];
       });
-      if (fits.length === 0) return false;
+      if (fits.length === 0) {
+        // The gap was aimed but the word has no room either way round — say
+        // so, or the dead tap looks like a bug.
+        rejectToast('That word doesn’t fit over this letter.');
+        return false;
+      }
 
       // When the word fits both ways, prefer the way that spells real words.
       const best =
@@ -1770,7 +1815,7 @@ export default function App() {
       commit(keyOf(best.anchor.row, best.anchor.col), best.dir);
       return true;
     },
-    [board, pickList, wordsByCell, lastDir, bounds, dictionary, commit],
+    [board, pickList, wordsByCell, lastDir, bounds, dictionary, commit, rejectToast],
   );
 
   /**
@@ -1999,9 +2044,20 @@ export default function App() {
         return;
       }
 
-      // A Duel pile tile only moves through the word flow — dragging it onto
-      // the board would dodge the attack rules, so the drop just fizzles.
-      if (mode === 'duel') return;
+      // A Duel drop goes through the same commit flow as a typed word, so the
+      // dictionary judging and attack rules still apply to a dragged tile.
+      if (mode === 'duel') {
+        const duelTarget = document.elementFromPoint(x, y);
+        const duelCell = duelTarget?.closest('[data-cell]') as HTMLElement | null;
+        if (duelCell && source.type === 'rack') {
+          const key = keyOf(Number(duelCell.dataset.row), Number(duelCell.dataset.col));
+          if (!(key in board)) {
+            commit(key, 'across', [{ letter, rackIndex: source.index }]);
+          }
+          swallowNextClick();
+        }
+        return;
+      }
 
       const target = document.elementFromPoint(x, y);
       const cellEl = target?.closest('[data-cell]') as HTMLElement | null;
@@ -2038,7 +2094,7 @@ export default function App() {
         }
       }
     },
-    [drag, mode, board, togglePick, selectTile, remember, swallowNextClick],
+    [drag, mode, board, togglePick, selectTile, remember, swallowNextClick, commit],
   );
 
   useEffect(() => {
@@ -2102,13 +2158,35 @@ export default function App() {
       if (lastPress.current?.key === key && now - lastPress.current.time < 350) {
         lastPress.current = null;
         e.preventDefault();
+        // A double-press on a word's first letter turns the word about it;
+        // on any other tile it returns the letter to the pile.
+        const leads = (wordsByCell.get(key) ?? []).filter((run) => run.cells[0] === key);
+        if (leads.length > 0) {
+          const word =
+            leads.find((run) => run.direction === 'across' && canRotate(run)) ??
+            leads.find(canRotate);
+          if (word) rotateWord(word);
+          else rejectToast(`No room to turn ${leads[0].word.toUpperCase()}`);
+          swallowNextClick();
+          return;
+        }
         returnToRack(key);
         return;
       }
       lastPress.current = { key, time: now };
       startDrag(letter, { type: 'board', key }, e);
     },
-    [mode, selectTile, swallowNextClick, returnToRack, startDrag],
+    [
+      mode,
+      selectTile,
+      swallowNextClick,
+      returnToRack,
+      startDrag,
+      wordsByCell,
+      canRotate,
+      rotateWord,
+      rejectToast,
+    ],
   );
 
   const shufflePile = useCallback(() => {
@@ -2294,6 +2372,19 @@ export default function App() {
 
   const timerSeconds = remainingMs === null ? null : Math.ceil(remainingMs / 1000);
 
+  /**
+   * Duel: the header counts down to the next tile drop — the clock the player
+   * is actually racing — while the round chip says where the match stands.
+   * The round clock still runs underneath to advance the rounds.
+   */
+  const duelDripMs =
+    duelDrip === null
+      ? null
+      : duelDrip.kind === 'paused'
+        ? duelDrip.remainingMs
+        : Math.max(0, duelDrip.endsAt - clockNow);
+  const duelDripSeconds = duelDripMs === null ? null : Math.ceil(duelDripMs / 1000);
+
   /* --------------------------------- screens -------------------------------- */
 
   if (screen === 'home') {
@@ -2398,23 +2489,23 @@ export default function App() {
           bonusAmount={allTilesBonus}
           complete={complete}
           timer={
-            timerSeconds !== null && !complete
-              ? {
-                  label:
-                    mode === 'duel'
-                      ? 'Round ends'
-                      : mode === 'endless' && endlessPhase === 'drip'
-                        ? 'Next tiles'
-                        : 'Time',
-                  seconds: timerSeconds,
-                  // Over the loose limit, the round clock is the deadline to
-                  // dig back under — it pleads as hard as a dying timer.
-                  urgent:
-                    mode === 'endless' &&
-                    endlessPhase === 'drip' &&
-                    looseTiles > ENDLESS_LOOSE_LIMIT,
-                }
-              : null
+            mode === 'duel'
+              ? duelDripSeconds !== null && !complete
+                ? { label: 'Next tiles', seconds: duelDripSeconds, urgent: false }
+                : null
+              : timerSeconds !== null && !complete
+                ? {
+                    label:
+                      mode === 'endless' && endlessPhase === 'drip' ? 'Next tiles' : 'Time',
+                    seconds: timerSeconds,
+                    // Over the loose limit, the round clock is the deadline to
+                    // dig back under — it pleads as hard as a dying timer.
+                    urgent:
+                      mode === 'endless' &&
+                      endlessPhase === 'drip' &&
+                      looseTiles > ENDLESS_LOOSE_LIMIT,
+                  }
+                : null
           }
           round={
             mode === 'duel' && !complete

@@ -21,7 +21,8 @@ npm run build   # type-check + production build
   word's preview around, and let go where it should land.
 - **Drag** individual tiles from the pile onto the board to build words by
   hand, drag them between cells to rearrange, or drag them back down to the
-  pile (double-click/double-tap a placed tile to send it back instantly).
+  pile (double-click/double-tap a placed tile to send it back instantly —
+  except a word's first letter, which turns the whole word instead).
 - Every horizontal and vertical run of 2+ letters is checked live against a
   ~173k-word dictionary (ENABLE). Invalid words turn **red**, loose tiles turn
   **amber**, valid words go **green**.
@@ -90,7 +91,9 @@ in `src/game/modes.ts`.
   host/join lobby flow. Both duellists draw the identical letters. A placed
   word is **permanent** — no moving, no taking back — and only real words
   are allowed down. Every word you place sends tiles to your opponent: one
-  per letter past three (4 letters → 1 tile, 5 → 2, …). Three rounds turn
+  per letter past three (4 letters → 1 tile, 5 → 2, …). Extending a word
+  already on the board sends only the difference — what the longer word is
+  worth minus what the old one already was. Three rounds turn
   the screw: rounds one and two last 3:00, with attacks at ×1 then ×1.5 and
   a drip of 1 then 2 tiles every 20 seconds; the final round has no clock,
   ×2 attacks, and 4 tiles every 20 seconds. Let your pile exceed 25 tiles —
