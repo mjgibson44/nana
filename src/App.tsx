@@ -48,6 +48,7 @@ import {
   startableDirections,
   type Pick as PilePick,
 } from './game/placement';
+import { playSound, primeSound, setSoundEnabled, soundEnabled } from './game/sounds';
 import { loadStats, recordGame, type Stats } from './game/stats';
 import { TUTORIAL_SCRIPT, TUTORIAL_STEPS, scriptedPlacement } from './game/tutorial';
 import {
@@ -103,6 +104,12 @@ const HOLD_DRAG_MS = 300;
  * their room over to the way out.
  */
 const TUTORIAL_DONE = TUTORIAL_STEPS + 1;
+
+/**
+ * How many seconds of an Endless round tick down to the tiles landing. Five
+ * beats is long enough to be a warning and short enough not to be a metronome.
+ */
+const ENDLESS_TICK_FROM = 5;
 
 /** Pinch limits, as a multiple of the stylesheet's cell size. */
 const MIN_ZOOM = 0.55;
@@ -289,6 +296,21 @@ export default function App() {
     saveThemePref(pref);
   }, []);
 
+  /* ------------------------------ sound ------------------------------------- */
+
+  const [soundOn, setSoundOn] = useState(() => soundEnabled());
+
+  const chooseSound = useCallback((on: boolean) => {
+    setSoundOn(on);
+    setSoundEnabled(on);
+    // Switching sound on plays one, so the switch demonstrates itself.
+    if (on) playSound('commit');
+  }, []);
+
+  // Browsers won't open an audio context before the visit's first gesture, and
+  // the first sound the game plays may well be a tick nobody triggered.
+  useEffect(() => primeSound(), []);
+
   /* ------------------------------ battle state ------------------------------ */
 
   /** Which multiplayer door the battle screen opens: Endless Battle or Duel. */
@@ -360,7 +382,7 @@ export default function App() {
    * same schedule. */
   const [soloPace, setSoloPace] = useState<SoloPace>('regular');
   /** Puzzle: the fixed board being played on, chosen on the way in. */
-  const [puzzleSize, setPuzzleSize] = useState<PuzzleSize>(16);
+  const [puzzleSize, setPuzzleSize] = useState<PuzzleSize>(13);
   /** Puzzle: the elapsed clock, counting up. Null in every other mode. */
   const [stopwatch, setStopwatch] = useState<Stopwatch | null>(null);
   /** Puzzle: whether the Finish button is asking "really?". */
@@ -651,15 +673,14 @@ export default function App() {
   }, [screen, returnHome]);
 
   /**
-   * Offer the tutorial: its own card first, so nobody is dropped into a lesson
-   * unannounced — least of all a first-timer who asked for a game and got this.
-   * `door` is the game waiting behind it, or null when the tutorial was picked
-   * for its own sake. Being offered it is what counts as having seen it, so
+   * Offer the tutorial: its own card first, so a first-timer who asked for a
+   * game isn't dropped into a lesson unannounced. `door` is the game waiting
+   * behind it. Being offered the tutorial is what counts as having seen it, so
    * skipping from the card means never being asked again.
    */
-  const offerTutorial = useCallback((door: GameDoor | null) => {
+  const offerTutorial = useCallback((door: GameDoor) => {
     markTutorialSeen();
-    setPendingDoor(door === null ? null : { door, at: 'tutorial' });
+    setPendingDoor({ door, at: 'tutorial' });
     setTutorialIntro(true);
   }, []);
 
@@ -668,6 +689,18 @@ export default function App() {
     setTutorialIntro(false);
     startGame('tutorial');
   }, [startGame]);
+
+  /**
+   * The Tutorial button on the home screen. Nothing stands in the way: a card
+   * asking whether they'd like the tutorial they just pressed Tutorial for
+   * would only be describing the button they'd already read. It still counts
+   * as having seen the offer, so their first game won't raise it either.
+   */
+  const openTutorial = useCallback(() => {
+    markTutorialSeen();
+    setPendingDoor(null);
+    startTutorial();
+  }, [startTutorial]);
 
   /**
    * A door picked on the home screen. Two things can stand in front of it, each
@@ -794,6 +827,9 @@ export default function App() {
     if (!stream || count <= 0 || finished.current) return;
     const letters = stream.next(count);
     setRack((prev) => [...prev, ...letters]);
+    // Tiles you were sent get their own sound — lower and falling, so incoming
+    // trouble never sounds like the arrival of tiles you earned.
+    playSound('attack');
     const serial = ++dropSerial.current;
     setTileDrop({ count: letters.length, serial });
     setToast({
@@ -1439,6 +1475,7 @@ export default function App() {
       setFuture((ahead) =>
         ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
       );
+      playSound('deal');
       const serial = ++dropSerial.current;
       setTileDrop({ count: letters.length, serial });
       setToast({ text: message, serial });
@@ -1548,6 +1585,25 @@ export default function App() {
     finishGame,
     dealBonusTiles,
   ]);
+
+  /**
+   * The last five seconds before an Endless round ends tick, once a second, so
+   * the tiles about to land are heard coming without anyone having to watch the
+   * clock. Keyed by the round's end and the second it's counting, so a tick
+   * plays once each — the clock is read four times a second — and a paused
+   * clock (a splash is up) goes quiet.
+   */
+  const tickedAt = useRef<string | null>(null);
+  useEffect(() => {
+    if (mode !== 'endless' || complete || countdown?.kind !== 'running') return;
+    if (remainingMs === null) return;
+    const second = Math.ceil(remainingMs / 1000);
+    if (second < 1 || second > ENDLESS_TICK_FROM) return;
+    const key = `${countdown.endsAt}:${second}`;
+    if (tickedAt.current === key) return;
+    tickedAt.current = key;
+    playSound('tick');
+  }, [mode, complete, countdown, remainingMs]);
 
   /* --------------------------------- duel ----------------------------------- */
 
@@ -1950,6 +2006,7 @@ export default function App() {
       // back the move alone, never disappear tiles the tutorial has dealt.
       setHistory((past) => past.map((snap) => ({ ...snap, rack: [...snap.rack, ...tiles] })));
       setFuture((ahead) => ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...tiles] })));
+      playSound('deal');
       setTileDrop({ count: tiles.length, serial: ++dropSerial.current });
     },
     [leaveTutorial],
@@ -2024,6 +2081,9 @@ export default function App() {
       const spent = new Set(result.steps.map((step) => step.rackIndex));
       setRack((prev) => prev.filter((_, i) => !spent.has(i)));
       setLastDir(dir);
+      // Every road to a landing runs through here — the staged word, a dragged
+      // tile, a skipped tutorial step — so this is the one place the click goes.
+      playSound('commit');
 
       // Duel: the word that just landed hits the opponent — one tile per
       // letter past three, scaled by the round. Only the growth counts: a
@@ -2867,7 +2927,7 @@ export default function App() {
       <div className="app">
         <HomeScreen
           onPlay={chooseDoor}
-          onTutorial={() => offerTutorial(null)}
+          onTutorial={openTutorial}
           onShowHowTo={() => setShowHowTo(true)}
           onShowStats={() => setStatsView(loadStats())}
           onShowSettings={() => setSettingsOpen(true)}
@@ -2877,8 +2937,9 @@ export default function App() {
             {battleNotice}
           </button>
         )}
-        {/* The lesson about to start, and the way past it. Skipping carries on
-            to whatever game was picked, exactly as leaving mid-lesson does. */}
+        {/* The lesson a first-timer's first game raises on the way in, and the
+            way past it. Skipping carries on to the game they picked, exactly as
+            leaving mid-lesson does. */}
         <ModeInfoDialog
           info={tutorialIntro ? TUTORIAL_INFO : null}
           confirmLabel="Continue"
@@ -2899,6 +2960,8 @@ export default function App() {
           open={settingsOpen}
           theme={themePref}
           onTheme={chooseTheme}
+          sound={soundOn}
+          onSound={chooseSound}
           onClose={() => setSettingsOpen(false)}
         />
       </div>
@@ -3329,6 +3392,8 @@ export default function App() {
         open={settingsOpen}
         theme={themePref}
         onTheme={chooseTheme}
+        sound={soundOn}
+        onSound={chooseSound}
         onClose={() => setSettingsOpen(false)}
       />
 

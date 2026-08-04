@@ -5,7 +5,8 @@ arrange **all** of them into a single connected crossword of valid words.
 
 The UI is a clean black-and-white theme with light, dark, and follow-the-system
 modes — pick yours on the Settings screen (from the home page, or the menu in
-the top-right corner of any game).
+the top-right corner of any game), which is also where **Game sound** is
+switched on and off.
 
 ## Playing
 
@@ -53,6 +54,7 @@ src/
     battle.ts           #   multiplayer brain: codes, shared deal, referees
     dictionary.ts       #   word list loading/parsing
     commonWords.ts      #   generation word pool (subset of the dictionary)
+    sounds.ts           #   the four game sounds, synthesized; the on/off pref
   net/battleSession.ts  # WebRTC plumbing, reconnection failsafes
   components/           # Grid, Rack (pile), lobby screens, overlays
   theme.ts              # light / dark / system preference
@@ -82,7 +84,7 @@ in `src/game/modes.ts`.
   end the game by itself; still being over when the round's clock runs out is
   what buries you.
 - **Puzzle** — no clock and no losing. Played on a fixed board with real edges,
-  chosen on the way in: 8×8, 16×16 or 24×24. You get 20 tiles; weave every one
+  chosen on the way in: 9×9, 13×13 or 19×19. You get 20 tiles; weave every one
   into a single connected crossword and 20 more arrive (plus the 25-point
   clear bonus), for as long as you like. The header keeps score and counts the
   time elapsed, and the **Finish** button in the top right ends the game
@@ -130,7 +132,10 @@ Two things front a first game, each shown once and never again (remembered in
   *Continue* starts it; *Skip* goes straight to the game. Being offered it is
   what counts as having seen it, so skipping means never being asked again.
   Finishing it, skipping every step, or shutting it with the X all lead the same
-  way: on to the game you picked.
+  way: on to the game you picked. Pressing **Tutorial** on the home screen
+  deliberately skips the card and starts the lesson — a card asking whether
+  you'd like the tutorial you just asked for would only be reading the button
+  back to you — and it counts as the offer, so your first game won't raise it.
 - A one-card **explainer** for each mode — what it is and its three headline
   rules — the first time you open that door. It's the last thing between the
   choice and the game, which is why there's no ⓘ on the mode buttons: the
@@ -138,6 +143,28 @@ Two things front a first game, each shown once and never again (remembered in
 
 The fuller "How to play" reference never interrupts; it waits on the home screen
 and in the in-game menu.
+
+### Sound
+
+Four short cues, in `src/game/sounds.ts`. Nothing is loaded from disk: each one
+is a handful of oscillators drawn on the fly through the Web Audio API, so the
+whole soundtrack costs no bytes and no requests.
+
+- A quiet **tick** for each of the last five seconds of an Endless round, so the
+  tiles about to land are heard coming without watching the clock. It follows
+  the clock rather than a timer of its own, so a paused round (a splash is up)
+  goes quiet.
+- A rising **three-note chime** whenever tiles land in your own pile, in any
+  mode — a timed batch, a board-clear reward, a tutorial step's letters.
+- A low, **falling growl** for tiles a Duel opponent sends you: incoming trouble
+  should never sound like the arrival of tiles you earned.
+- A two-note **click** as a word goes down on the board. Every road to a landing
+  runs through `commit`, so a dragged tile and a typed word sound alike.
+
+**Game sound** on the Settings screen silences the lot, remembered in
+`localStorage`. While it's off no audio context is ever built at all; switching
+it on plays a sound, both to demonstrate the switch and because that click is
+the user gesture browsers want before they will let audio start.
 
 ## Multiplayer (Survival & Duel)
 
@@ -181,11 +208,12 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
 
 - [x] Single-player: solvable deals, drag & drop, live validation
 - [x] Blitz — endless ("peel"-style) play at a regular and a fast pace
-- [x] Puzzle — untimed play on a fixed 8×8/16×16/24×24 board, +20 tiles per clear
+- [x] Puzzle — untimed play on a fixed 9×9/13×13/19×19 board, +20 tiles per clear
 - [x] Multiplayer: Survival (Endless Battle) — shared deal from one seed, lobbies with
       codes/invite links, live standings, host controls, final rankings
 - [x] Duel mode: permanent words, attack tiles, escalating rounds
 - [x] Light/dark/system theme and a settings screen
+- [x] Game sounds — synthesized cues for ticks, tiles, attacks and words
 - [x] Reconnection grace, auto-redial, and pause-on-disconnect
 - [ ] Hints powered by the generator's known solution
 - [ ] Live opponent boards (spectate other players' crosswords mid-battle)

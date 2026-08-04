@@ -86,7 +86,7 @@ export const PUZZLE_INFO: ModeInfo = {
   details: [
     '20 tiles to weave into one crossword',
     'Connect them all and 20 more arrive',
-    'Pick your board: 8×8, 16×16 or 24×24',
+    'Pick your board: 9×9, 13×13 or 19×19',
     'Press Finish whenever you’re done',
   ],
 };
@@ -225,7 +225,7 @@ export const ENDLESS_LOOSE_LIMIT = 20;
 /* --------------------------------- Puzzle ---------------------------------- */
 
 /** The boards Puzzle is played on — square, with real edges words can't cross. */
-export type PuzzleSize = 8 | 16 | 24;
+export type PuzzleSize = 9 | 13 | 19;
 
 /** The size popup's choices, in the order they're offered. */
 export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{
@@ -233,9 +233,9 @@ export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{
   name: string;
   detail: string;
 }> = [
-  { size: 8, name: '8 × 8', detail: 'A tight little board — every square counts' },
-  { size: 16, name: '16 × 16', detail: 'Room to build, close enough to plan' },
-  { size: 24, name: '24 × 24', detail: 'A wide open board for the long haul' },
+  { size: 9, name: '9 × 9', detail: 'A tight little board — every square counts' },
+  { size: 13, name: '13 × 13', detail: 'Room to build, close enough to plan' },
+  { size: 19, name: '19 × 19', detail: 'A wide open board for the long haul' },
 ];
 
 /** Tiles in the opening Puzzle deal — and in every batch that follows a
