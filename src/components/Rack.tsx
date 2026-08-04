@@ -28,31 +28,35 @@ export function Rack({
     // even over the shuffle button — still counts as returning to it.
     <div className="rack-wrap" data-rack>
       <div className="rack">
-        {letters.length === 0 ? (
-          <span className="rack-empty">Pile empty &mdash; every tile is on the board</span>
-        ) : (
-          letters.map((letter, index) => {
-            const position = picks.indexOf(index);
-            return (
-              <div
-                // eslint-disable-next-line react/no-array-index-key
-                key={index}
-                className={`tile rack-tile${index === hiddenIndex ? ' tile-hidden' : ''}${
-                  position === -1 ? '' : ' is-picked'
-                }${index >= firstNew ? ' rack-tile-new' : ''}`}
-                style={
-                  index >= firstNew
-                    ? { animationDelay: `${(index - firstNew) * 90}ms` }
-                    : undefined
-                }
-                onPointerDown={(e) => onTilePointerDown(index, letter, e)}
-              >
-                {letter}
-                {position !== -1 && <span className="pick-order">{position + 1}</span>}
-              </div>
-            );
-          })
-        )}
+        {/* The tiles ride in their own block so the field can cap its width and
+            centre itself in the pile while its rows still fill from the left. */}
+        <div className="rack-tiles">
+          {letters.length === 0 ? (
+            <span className="rack-empty">Pile empty &mdash; every tile is on the board</span>
+          ) : (
+            letters.map((letter, index) => {
+              const position = picks.indexOf(index);
+              return (
+                <div
+                  // eslint-disable-next-line react/no-array-index-key
+                  key={index}
+                  className={`tile rack-tile${index === hiddenIndex ? ' tile-hidden' : ''}${
+                    position === -1 ? '' : ' is-picked'
+                  }${index >= firstNew ? ' rack-tile-new' : ''}`}
+                  style={
+                    index >= firstNew
+                      ? { animationDelay: `${(index - firstNew) * 90}ms` }
+                      : undefined
+                  }
+                  onPointerDown={(e) => onTilePointerDown(index, letter, e)}
+                >
+                  {letter}
+                  {position !== -1 && <span className="pick-order">{position + 1}</span>}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {/* Pinned to the pile's corner rather than scrolling with its tiles. */}
