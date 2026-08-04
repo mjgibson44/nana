@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import { BATTLE_INFO, DUEL_INFO, ENDLESS_INFO, type ModeInfo } from '../game/modes';
-import { InfoIcon } from './icons';
+import {
+  DuelIcon,
+  HelpIcon,
+  InfoIcon,
+  PlayersIcon,
+  SettingsIcon,
+  SoloIcon,
+  StatsIcon,
+  TutorialIcon,
+} from './icons';
 
 interface HomeScreenProps {
   /** Start a solo Endless game. */
@@ -17,24 +26,26 @@ interface HomeScreenProps {
 }
 
 /**
- * One mode: a big button that starts it — just the name and its one-line
- * pitch — and a little ⓘ beside it for the full details, so the launch
- * buttons stay clean without hiding how each mode works.
+ * One mode: a full-width button carrying its icon and name, and a little ⓘ
+ * beside it for the details. The button says only what the mode is called —
+ * everything else is a tap away, so the choice reads at a glance.
  */
 function ModeCard({
   info,
+  icon,
   onClick,
   onInfo,
 }: {
   info: ModeInfo;
+  icon: React.ReactNode;
   onClick: () => void;
   onInfo: () => void;
 }) {
   return (
     <div className="mode-card-row">
       <button type="button" className="mode-card" onClick={onClick}>
+        <span className="mode-card-icon">{icon}</span>
         <span className="mode-card-name">{info.name}</span>
-        <span className="mode-card-tagline">{info.tagline}</span>
       </button>
       <button
         type="button"
@@ -49,11 +60,32 @@ function ModeCard({
   );
 }
 
+/** The utility row's buttons: an icon and a label, matching the mode buttons. */
+function HomeAction({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className="btn home-action" onClick={onClick}>
+      <span className="home-action-icon">{icon}</span>
+      {label}
+    </button>
+  );
+}
+
 /**
- * The splash screen the app opens on: the game's name up top and a button per
- * mode underneath. Picking one starts a fresh game in that mode — except the
- * multiplayer modes, which head to their lobby screens first. The tutorial
- * lives with the utility buttons at the bottom.
+ * The splash screen the app opens on: the game's name up top, then one column
+ * of buttons — the modes, then the things that aren't a game. Picking a mode
+ * starts it, except the multiplayer ones, which head to their lobby first.
+ *
+ * The column stays a single column at every width: it keeps the buttons under
+ * one another wherever the thumb already is, and a four-across row of huge
+ * targets on a desktop looked like a toolbar rather than a choice.
  */
 export function HomeScreen({
   onPlayEndless,
@@ -78,26 +110,29 @@ export function HomeScreen({
         <div className="home-modes">
           <ModeCard
             info={ENDLESS_INFO}
+            icon={<SoloIcon />}
             onClick={onPlayEndless}
             onInfo={() => setInfoOf(ENDLESS_INFO)}
           />
-          <ModeCard info={BATTLE_INFO} onClick={onBattle} onInfo={() => setInfoOf(BATTLE_INFO)} />
-          <ModeCard info={DUEL_INFO} onClick={onDuel} onInfo={() => setInfoOf(DUEL_INFO)} />
+          <ModeCard
+            info={BATTLE_INFO}
+            icon={<PlayersIcon />}
+            onClick={onBattle}
+            onInfo={() => setInfoOf(BATTLE_INFO)}
+          />
+          <ModeCard
+            info={DUEL_INFO}
+            icon={<DuelIcon />}
+            onClick={onDuel}
+            onInfo={() => setInfoOf(DUEL_INFO)}
+          />
         </div>
 
         <div className="home-actions">
-          <button type="button" className="btn" onClick={onTutorial}>
-            Tutorial
-          </button>
-          <button type="button" className="btn" onClick={onShowHowTo}>
-            How to play
-          </button>
-          <button type="button" className="btn" onClick={onShowStats}>
-            Stats
-          </button>
-          <button type="button" className="btn" onClick={onShowSettings}>
-            Settings
-          </button>
+          <HomeAction icon={<TutorialIcon />} label="Tutorial" onClick={onTutorial} />
+          <HomeAction icon={<HelpIcon />} label="How to play" onClick={onShowHowTo} />
+          <HomeAction icon={<StatsIcon />} label="Stats" onClick={onShowStats} />
+          <HomeAction icon={<SettingsIcon />} label="Settings" onClick={onShowSettings} />
         </div>
       </div>
 

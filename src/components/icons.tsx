@@ -148,6 +148,91 @@ export function InfoIcon(props: IconProps) {
   );
 }
 
+/* ---------- home screen ---------- */
+
+/** One player: Solo. */
+export function SoloIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
+    </Svg>
+  );
+}
+
+/** A crowd: Survival, the whole field racing at once. */
+export function PlayersIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="9" cy="8.5" r="3" />
+      <path d="M3 19a6 6 0 0 1 12 0" />
+      <path d="M16 6.2a3 3 0 0 1 0 4.6" />
+      <path d="M18.5 19a6 6 0 0 0-2.6-4.4" />
+    </Svg>
+  );
+}
+
+/**
+ * Crossed swords: a Duel, two players head to head. Two blades on the
+ * diagonals, each with a crossguard set square across it above the hilt.
+ */
+export function DuelIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M18.5 5.5L5 19" />
+      <path d="M6.5 13L11 17.5" />
+      <path d="M5.5 5.5L19 19" />
+      <path d="M13 17.5L17.5 13" />
+    </Svg>
+  );
+}
+
+/** A graduation cap: the guided walkthrough. */
+export function TutorialIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 4L2 9l10 5 10-5-10-5z" />
+      <path d="M6 11.5V17c0 1.4 2.7 2.6 6 2.6s6-1.2 6-2.6v-5.5" />
+    </Svg>
+  );
+}
+
+/** A question mark in a ring: how the game is played. */
+export function HelpIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.3 9.2a2.8 2.8 0 0 1 5.5.8c0 1.9-2.8 2.2-2.8 4" />
+      <path d="M12 17.6h.01" />
+    </Svg>
+  );
+}
+
+/** Bars on a baseline: the stats page. */
+export function StatsIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 20h16" />
+      <path d="M7.5 20v-5M12 20V6.5M16.5 20v-8.5" />
+    </Svg>
+  );
+}
+
+/**
+ * Two sliders with their knobs: the settings page. A cog's teeth turn to mush
+ * at this size — sliders stay legible, and this screen is preferences anyway.
+ */
+export function SettingsIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3.5 8.5h6.2M15.3 8.5h5.2" />
+      <circle cx="12.5" cy="8.5" r="2.4" />
+      <path d="M3.5 15.5h3.2M12.3 15.5h8.2" />
+      <circle cx="9.5" cy="15.5" r="2.4" />
+    </Svg>
+  );
+}
+
 /** A trash can: the word comes off the board and its letters go back to the
  * pile. */
 export function TrashIcon(props: IconProps) {

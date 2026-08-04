@@ -65,8 +65,13 @@ export interface BattleState {
 
 /* ------------------------------- join codes ------------------------------- */
 
-/** No 0/O, 1/I/L — codes get read out loud and typed on phones. */
-const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+/**
+ * Letters only — no digits at all, so a code is always read and typed as a
+ * word. I, L and O stay out too: they're the letters that get mistaken for
+ * 1 and 0 when a code is read off a screen or spelled out down the phone.
+ * Twenty-three letters over five places is still 6.4M codes.
+ */
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ';
 export const CODE_LENGTH = 5;
 
 export function newBattleCode(): string {
@@ -77,15 +82,14 @@ export function newBattleCode(): string {
   return code;
 }
 
-/** Forgive how a code was typed: trim, uppercase, and map the letters the
- * alphabet deliberately avoids onto what was meant. */
+/**
+ * Forgive how a code was typed: trim, uppercase, and drop anything that isn't
+ * a letter — spaces and dashes from a code written out in groups, and digits,
+ * which no code contains. Normalizing never invents a character the generator
+ * couldn't have dealt, so whatever comes out can be judged as typed.
+ */
 export function normalizeBattleCode(raw: string): string {
-  return raw
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
-    .replace(/0/g, 'O')
-    .replace(/1/g, 'I');
+  return raw.trim().toUpperCase().replace(/[^A-Z]/g, '');
 }
 
 export function isValidBattleCode(code: string): boolean {

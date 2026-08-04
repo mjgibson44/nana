@@ -95,16 +95,24 @@ describe('battle codes', () => {
     }
   });
 
-  it('forgives spacing, case, and lookalike characters', () => {
+  it('generates letters only — never a digit', () => {
+    for (let i = 0; i < 200; i++) {
+      expect(newBattleCode()).toMatch(/^[A-Z]{5}$/);
+    }
+  });
+
+  it('forgives spacing and case, and drops characters no code contains', () => {
     expect(normalizeBattleCode('  ab-cde ')).toBe('ABCDE');
-    expect(normalizeBattleCode('a0cd1')).toBe('AOCDI');
+    expect(normalizeBattleCode('ab cd e')).toBe('ABCDE');
+    expect(normalizeBattleCode('a0cd1')).toBe('ACD');
   });
 
   it('rejects the wrong shape', () => {
     expect(isValidBattleCode('')).toBe(false);
     expect(isValidBattleCode('ABC')).toBe(false);
     expect(isValidBattleCode('ABCDEF')).toBe(false);
-    expect(isValidBattleCode('AB1DE')).toBe(false); // 1 isn't in the alphabet
+    expect(isValidBattleCode('AB1DE')).toBe(false); // digits are out entirely
+    expect(isValidBattleCode('ABIDE')).toBe(false); // I is not in the alphabet
   });
 });
 

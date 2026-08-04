@@ -1362,11 +1362,13 @@ body {
   background: var(--bg);
 }
 
+/* Narrow enough that one column of buttons still reads as a column on a
+   desktop, rather than a row of banners. */
 .home-inner {
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  max-width: 860px;
+  gap: 26px;
+  max-width: 460px;
   margin: 0 auto;
   padding: 48px 22px calc(40px + env(safe-area-inset-bottom));
 }
@@ -1393,10 +1395,15 @@ body {
   opacity: 0.7;
 }
 
+/*
+ * One column, at every width. The buttons stay stacked under one another
+ * wherever the reading eye (and on a phone, the thumb) already is; spreading
+ * them across a wide screen turned the choice into a toolbar.
+ */
 .home-modes {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 /* A mode's launch button and its ⓘ, sharing one row at equal height. */
@@ -1410,10 +1417,10 @@ body {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 18px;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
   font: inherit;
   text-align: left;
   color: var(--ink);
@@ -1423,6 +1430,14 @@ body {
   box-shadow: 0 3px 0 var(--line);
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+/* Sized off the name beside it, so icon and label grow together. */
+.mode-card-icon {
+  display: flex;
+  flex-shrink: 0;
+  font-size: 27px;
+  opacity: 0.85;
 }
 
 .mode-card:hover {
@@ -1442,9 +1457,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
+  width: 60px;
   padding: 0;
-  font-size: 22px;
+  font-size: 23px;
   color: var(--ink);
   background: var(--surface);
   border: 3px solid var(--line);
@@ -1507,11 +1522,41 @@ body {
   margin-top: 12px;
 }
 
+/*
+ * The things that aren't a game, carrying on the same column: full-width
+ * rows, quieter than the mode buttons but lined up with them. The ⓘ column's
+ * width is left clear on the right so every label starts on the same edge.
+ */
 .home-actions {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-direction: column;
   gap: 10px;
+  margin-right: 70px;
+}
+
+.home-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: left;
+  border-radius: 12px;
+}
+
+.home-action-icon {
+  display: flex;
+  flex-shrink: 0;
+  font-size: 21px;
+  opacity: 0.8;
+}
+
+@media (max-width: 560px) {
+  /* No room to spare for the ⓘ column's alignment on a phone. */
+  .home-actions {
+    margin-right: 0;
+  }
 }
 
 /* ---------- tutorial ---------- */
