@@ -3,7 +3,7 @@ import { MIN_WORD_LENGTH, extractRuns, validateBoard } from './game/board';
 import { COMMON_WORDS } from './game/commonWords';
 import { loadDictionary } from './game/dictionary';
 import { extendPuzzle, generatePuzzle } from './game/generator';
-import { boardBounds, scoreBoard, wordScore } from './game/levels';
+import { BOARD_SIZE, boardBounds, scoreBoard, wordScore } from './game/levels';
 import {
   DOOR_INFO,
   DUEL_DRIP_SECONDS,
@@ -17,7 +17,11 @@ import {
   ENDLESS_CONNECT_BONUS,
   ENDLESS_LOOSE_LIMIT,
   ENDLESS_START_TILES,
-  SOLO_INFO,
+  PACE_NAMES,
+  PACE_OPTIONS,
+  PUZZLE_BATCH_TILES,
+  PUZZLE_SIZE_OPTIONS,
+  PUZZLE_START_TILES,
   duelAttackMultiplier,
   duelAttackTiles,
   duelDripTiles,
@@ -28,6 +32,7 @@ import {
   formatSeconds,
   type GameDoor,
   type GameMode,
+  type PuzzleSize,
   type SoloPace,
 } from './game/modes';
 import { doorSeen, markDoorSeen, markTutorialSeen, tutorialSeen } from './game/onboarding';
@@ -59,6 +64,7 @@ import { applyTheme, loadThemePref, saveThemePref, type ThemePref } from './them
 import { BattleLobby } from './components/BattleLobby';
 import { BattleMenu } from './components/BattleMenu';
 import { BattleResults } from './components/BattleResults';
+import { ChoiceDialog } from './components/ChoiceDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { GameSummary, type ScoredWord } from './components/GameSummary';
@@ -185,6 +191,13 @@ type Countdown = { kind: 'running'; endsAt: number } | { kind: 'paused'; remaini
 function runningCountdown(seconds: number): Countdown {
   return { kind: 'running', endsAt: Date.now() + seconds * 1000 };
 }
+
+/**
+ * The Countdown's counting-up twin, for Puzzle's elapsed clock: `base` is the
+ * time already banked, and a running watch adds everything since `since`. It
+ * pauses exactly when the countdowns do, so reading a dialog stays free.
+ */
+type Stopwatch = { kind: 'running'; base: number; since: number } | { kind: 'paused'; base: number };
 
 export type CellStatus = 'valid' | 'invalid' | 'isolated' | 'disconnected';
 
@@ -339,10 +352,19 @@ export default function App() {
   /** Endless: 'initial' is the opening phase; 'drip' is ever after, when
    * batches arrive on the clock and the loose count is live. */
   const [endlessPhase, setEndlessPhase] = useState<'initial' | 'drip'>('initial');
-  /** Endless: which pace the drip runs at — the home screen's Solo Relaxed or
-   * Solo Blitz. Survival always plays relaxed, so everyone's shared deal
-   * arrives on the same schedule. */
-  const [soloPace, setSoloPace] = useState<SoloPace>('relaxed');
+  /** Endless: which pace the drip runs at — Blitz's Regular or Fast.
+   * Survival always plays regular, so everyone's shared deal arrives on the
+   * same schedule. */
+  const [soloPace, setSoloPace] = useState<SoloPace>('regular');
+  /** Puzzle: the fixed board being played on, chosen on the way in. */
+  const [puzzleSize, setPuzzleSize] = useState<PuzzleSize>(16);
+  /** Puzzle: the elapsed clock, counting up. Null in every other mode. */
+  const [stopwatch, setStopwatch] = useState<Stopwatch | null>(null);
+  /** Puzzle: whether the Finish button is asking "really?". */
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  /** A door waiting on its options popup: Blitz's pace or Puzzle's board
+   * size. Null while no popup is up. */
+  const [doorChoice, setDoorChoice] = useState<'blitz' | 'puzzle' | null>(null);
   /** Endless: how many drip intervals have run out (the opening phase isn't
    * one), which sets how big the next batch is. */
   const [dripsElapsed, setDripsElapsed] = useState(0);
@@ -460,83 +482,109 @@ export default function App() {
   const expiryHandled = useRef<number | null>(null);
   const dripHandled = useRef<number | null>(null);
 
-  /** Start a fresh game. `pace` sets the Endless drip's schedule and is
-   * ignored by the other modes. Multiplayer games hand in the shared deal's
+  /** Start a fresh game. `pace` sets the Endless drip's schedule and `size`
+   * Puzzle's board; each is ignored by the other modes (`size` defaults to
+   * the last board played). Multiplayer games hand in the shared deal's
    * opening letters; solo games draw their own at random. */
-  const newGame = useCallback((nextMode: GameMode, pace: SoloPace, dealtLetters?: string[]) => {
-    setMode(nextMode);
-    setSoloPace(pace);
-    const opening =
-      dealtLetters ??
-      // The tutorial deals its first word spelled out in a row, rather than a
-      // shuffle to make sense of — step one is about getting a word down.
-      (nextMode === 'tutorial'
-        ? [...TUTORIAL_SCRIPT[0].tiles]
-        : generatePuzzle(COMMON_WORDS, ENDLESS_START_TILES).letters);
-    setRack(opening);
-    setBoard({});
-    setDrag(null);
-    setWordDrag(null);
-    setInteraction(IDLE);
-    setHighlightedWord(null);
-    setSelection(null);
-    setBankedBonus(0);
-    setComplete(false);
-    setFinalScore(0);
-    setFinalWords(null);
-    setShowSummary(false);
-    setHistory([]);
-    setFuture([]);
-    setSplash(
-      nextMode === 'endless'
-        ? {
-            kind: 'start',
-            // The same Endless game opens several doors; the card names the
-            // one this player walked through.
-            eyebrow: battleRef.current ? 'Survival' : SOLO_INFO[pace].name,
-            title: 'Game on!',
-            note: `${opening.length} tiles · ${formatSeconds(endlessInitialSeconds(pace))} to place them`,
-          }
-        : nextMode === 'duel'
+  const newGame = useCallback(
+    (nextMode: GameMode, pace: SoloPace, dealtLetters?: string[], size?: PuzzleSize) => {
+      const boardSize = size ?? puzzleSize;
+      setMode(nextMode);
+      setSoloPace(pace);
+      if (size !== undefined) setPuzzleSize(size);
+      const opening =
+        dealtLetters ??
+        // The tutorial deals its first word spelled out in a row, rather than a
+        // shuffle to make sense of — step one is about getting a word down.
+        (nextMode === 'tutorial'
+          ? [...TUTORIAL_SCRIPT[0].tiles]
+          : nextMode === 'puzzle'
+            ? // Bounded by the board's span, so the deal is known to fit it.
+              generatePuzzle(COMMON_WORDS, PUZZLE_START_TILES, Math.random, boardSize).letters
+            : generatePuzzle(COMMON_WORDS, ENDLESS_START_TILES).letters);
+      setRack(opening);
+      setBoard({});
+      setDrag(null);
+      setWordDrag(null);
+      // Every game opens with the board's middle square already chosen, so
+      // typing previews the first word right away — confirming it is still the
+      // player's move.
+      const mid =
+        nextMode === 'puzzle' ? Math.floor((boardSize - 1) / 2) : Math.floor(BOARD_SIZE / 2);
+      setInteraction({ kind: 'place', anchor: keyOf(mid, mid), dir: 'across', picks: [] });
+      setLastDir('across');
+      setHighlightedWord(null);
+      setSelection(null);
+      setBankedBonus(0);
+      setComplete(false);
+      setFinalScore(0);
+      setFinalWords(null);
+      setShowSummary(false);
+      setHistory([]);
+      setFuture([]);
+      setSplash(
+        nextMode === 'endless'
           ? {
-              kind: 'duelRound',
-              round: 1,
-              final: false,
-              multiplier: duelAttackMultiplier(1),
-              dripTiles: duelDripTiles(1),
+              kind: 'start',
+              // The same Endless game opens several doors; the card names the
+              // one this player walked through.
+              eyebrow: battleRef.current ? 'Survival' : PACE_NAMES[pace],
+              title: 'Game on!',
+              note: `${opening.length} tiles · ${formatSeconds(endlessInitialSeconds(pace))} to place them`,
             }
-          : null,
-    );
-    setEndReason(null);
-    setEndlessPhase('initial');
-    setDripsElapsed(0);
-    setDuelRound(1);
-    duelDripIndex.current = 0;
-    setDuelDrip(nextMode === 'duel' ? runningCountdown(DUEL_DRIP_SECONDS) : null);
-    setTutorialStep(1);
-    setTutorialSkips(0);
-    setToast(null);
-    setTileDrop(null);
-    setZoom(1);
-    finished.current = false;
-    expiryHandled.current = null;
-    dripHandled.current = null;
-    setCountdown(
-      nextMode === 'endless'
-        ? runningCountdown(endlessInitialSeconds(pace))
-        : nextMode === 'duel'
-          ? runningCountdown(DUEL_ROUND_SECONDS)
-          : null,
-    );
-    setGameId((id) => id + 1);
-  }, []);
+          : nextMode === 'puzzle'
+            ? {
+                kind: 'start',
+                eyebrow: `Puzzle · ${boardSize}×${boardSize}`,
+                title: 'Game on!',
+                note: `${opening.length} tiles · connect them all for ${PUZZLE_BATCH_TILES} more`,
+              }
+            : nextMode === 'duel'
+              ? {
+                  kind: 'duelRound',
+                  round: 1,
+                  final: false,
+                  multiplier: duelAttackMultiplier(1),
+                  dripTiles: duelDripTiles(1),
+                }
+              : null,
+      );
+      setEndReason(null);
+      setEndlessPhase('initial');
+      setDripsElapsed(0);
+      setDuelRound(1);
+      duelDripIndex.current = 0;
+      setDuelDrip(nextMode === 'duel' ? runningCountdown(DUEL_DRIP_SECONDS) : null);
+      setTutorialStep(1);
+      setTutorialSkips(0);
+      setToast(null);
+      setTileDrop(null);
+      setZoom(1);
+      setConfirmFinish(false);
+      finished.current = false;
+      expiryHandled.current = null;
+      dripHandled.current = null;
+      setCountdown(
+        nextMode === 'endless'
+          ? runningCountdown(endlessInitialSeconds(pace))
+          : nextMode === 'duel'
+            ? runningCountdown(DUEL_ROUND_SECONDS)
+            : null,
+      );
+      setStopwatch(
+        nextMode === 'puzzle' ? { kind: 'running', base: 0, since: Date.now() } : null,
+      );
+      setGameId((id) => id + 1);
+    },
+    [puzzleSize],
+  );
 
   /** Start a mode and put its board on screen. Reaching the tutorial at all
    * counts as having been offered it, however far it's played. */
   const startGame = useCallback(
-    (nextMode: GameMode, pace: SoloPace = 'relaxed') => {
+    (nextMode: GameMode, pace: SoloPace = 'regular', size?: PuzzleSize) => {
       if (nextMode === 'tutorial') markTutorialSeen();
-      newGame(nextMode, pace);
+      newGame(nextMode, pace, undefined, size);
       setScreen('game');
     },
     [newGame],
@@ -546,31 +594,57 @@ export default function App() {
     setScreen('home');
     setCountdown(null);
     setDuelDrip(null);
+    setStopwatch(null);
     setShowSummary(false);
+    setConfirmFinish(false);
     setSplash(null);
   }, []);
 
   /* ------------------------------ the front door ---------------------------- */
 
   /**
-   * Walk through a door for real: a solo pace straight into a game at that
-   * pace, the multiplayer pair into their lobby. Whatever had to be read first
-   * has been read by now.
+   * Walk through a door for real: the solo pair to their options popup —
+   * Blitz picks a pace, Puzzle a board size — and the multiplayer pair to
+   * their lobby. Whatever had to be read first has been read by now.
    */
-  const enterDoor = useCallback(
-    (door: GameDoor) => {
-      setPendingDoor(null);
-      if (door === 'relaxed' || door === 'blitz') {
-        startGame('endless', door);
-        return;
-      }
-      setBattleNotice(null);
-      setBattleError(null);
-      setBattleIntent(door === 'survival' ? 'endless' : 'duel');
-      setScreen('battle');
+  const enterDoor = useCallback((door: GameDoor) => {
+    setPendingDoor(null);
+    if (door === 'blitz' || door === 'puzzle') {
+      setDoorChoice(door);
+      return;
+    }
+    setBattleNotice(null);
+    setBattleError(null);
+    setBattleIntent(door === 'survival' ? 'endless' : 'duel');
+    setScreen('battle');
+  }, []);
+
+  /** The options popup answered: start the game it configures. */
+  const choosePace = useCallback(
+    (pace: SoloPace) => {
+      setDoorChoice(null);
+      startGame('endless', pace);
     },
     [startGame],
   );
+
+  const choosePuzzleSize = useCallback(
+    (size: PuzzleSize) => {
+      setDoorChoice(null);
+      startGame('puzzle', 'regular', size);
+    },
+    [startGame],
+  );
+
+  /**
+   * The options popup waved away without picking. Usually that lands back on
+   * the home screen it came from; after the tutorial's handoff it stands over
+   * the finished tutorial board, and walking away means going home.
+   */
+  const dismissDoorChoice = useCallback(() => {
+    setDoorChoice(null);
+    if (screen === 'game') returnHome();
+  }, [screen, returnHome]);
 
   /**
    * A door picked on the home screen. Two things can stand in front of it, each
@@ -660,10 +734,10 @@ export default function App() {
         duel && handle ? createTileStream(`${seed}/attacks/${handle.selfId}`) : null;
       setShowBattleResults(false);
       setConfirmBattle(null);
-      // Survival is always the relaxed pace — one shared deal, one schedule.
+      // Survival is always the regular pace — one shared deal, one schedule.
       newGame(
         duel ? 'duel' : 'endless',
-        'relaxed',
+        'regular',
         stream.next(duel ? DUEL_START_TILES : ENDLESS_START_TILES),
       );
       setScreen('game');
@@ -894,9 +968,16 @@ export default function App() {
     [board, dictionary],
   );
 
-  /** The cells in play. Grows whenever tiles come near an edge, so the board
+  /** The cells in play. Puzzle plays on a fixed square with real edges;
+   * everywhere else the board grows whenever tiles come near an edge, so it
    * can never actually be run out of. */
-  const bounds = useMemo(() => boardBounds(board), [board]);
+  const bounds = useMemo(
+    () =>
+      mode === 'puzzle'
+        ? { minRow: 0, minCol: 0, maxRow: puzzleSize - 1, maxCol: puzzleSize - 1 }
+        : boardBounds(board),
+    [mode, puzzleSize, board],
+  );
 
   // Growing at the top or left prepends rows and columns, which would shove
   // the tiles the player is looking at down and across the screen. Nudge the
@@ -1234,6 +1315,12 @@ export default function App() {
       setEndReason(reason);
       setCountdown(null);
       setDuelDrip(null);
+      // The elapsed clock stops where the game did.
+      setStopwatch((prev) =>
+        prev && prev.kind === 'running'
+          ? { kind: 'paused', base: prev.base + Math.max(0, Date.now() - prev.since) }
+          : prev,
+      );
       recordGame(runningScore, words.length);
       clearFocus();
     },
@@ -1260,7 +1347,7 @@ export default function App() {
   const battlePaused = inBattle && ((battleState?.paused ?? false) || selfReconnecting);
   const clockPaused = inBattle
     ? battlePaused
-    : showHowTo || splash !== null || settingsOpen || statsView !== null;
+    : showHowTo || splash !== null || settingsOpen || statsView !== null || confirmFinish;
 
   // Flip the clocks between running and paused as overlays come and go.
   // Written as normalization (rather than one effect per transition) so a
@@ -1279,17 +1366,31 @@ export default function App() {
     };
     setCountdown(normalize);
     setDuelDrip(normalize);
-  }, [clockPaused, countdown, duelDrip]);
+    // The elapsed clock holds for the same overlays, counting the other way.
+    setStopwatch((prev) => {
+      if (!prev) return prev;
+      if (clockPaused && prev.kind === 'running') {
+        return { kind: 'paused', base: prev.base + Math.max(0, Date.now() - prev.since) };
+      }
+      if (!clockPaused && prev.kind === 'paused') {
+        return { kind: 'running', base: prev.base, since: Date.now() };
+      }
+      return prev;
+    });
+  }, [clockPaused, countdown, duelDrip, stopwatch]);
 
-  // The clock's own heartbeat: only ticks while genuinely counting down.
+  // The clock's own heartbeat: only ticks while genuinely counting.
   const [clockNow, setClockNow] = useState(() => Date.now());
   useEffect(() => {
-    const running = countdown?.kind === 'running' || duelDrip?.kind === 'running';
+    const running =
+      countdown?.kind === 'running' ||
+      duelDrip?.kind === 'running' ||
+      stopwatch?.kind === 'running';
     if (!running || complete) return;
     setClockNow(Date.now());
     const timer = window.setInterval(() => setClockNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, [countdown, duelDrip, complete]);
+  }, [countdown, duelDrip, stopwatch, complete]);
 
   const remainingMs =
     countdown === null
@@ -1297,6 +1398,16 @@ export default function App() {
       : countdown.kind === 'paused'
         ? countdown.remainingMs
         : Math.max(0, countdown.endsAt - clockNow);
+
+  /** Puzzle's elapsed clock, in whole seconds. Null in every other mode. */
+  const elapsedSeconds =
+    stopwatch === null
+      ? null
+      : Math.floor(
+          (stopwatch.kind === 'paused'
+            ? stopwatch.base
+            : stopwatch.base + Math.max(0, clockNow - stopwatch.since)) / 1000,
+        );
 
   /**
    * Deal bonus tiles into the pile — from the shared stream in multiplayer so
@@ -1476,19 +1587,21 @@ export default function App() {
   /* -------------------------------- endless --------------------------------- */
 
   /**
-   * Clearing the pile in Endless: the connect bonus banks (the live bonus
-   * swaps for it, so the score holds steady) and a fresh batch arrives — the
-   * same size as a timed drop. The short wait lets the bonus land on the
-   * scoreboard before the pile refills.
+   * Clearing the pile in Endless and Puzzle: the connect bonus banks (the
+   * live bonus swaps for it, so the score holds steady) and a fresh batch
+   * arrives — a timed drop's worth in Endless, a whole new twenty in Puzzle.
+   * The short wait lets the bonus land on the scoreboard before the pile
+   * refills.
    */
   useEffect(() => {
-    if (mode !== 'endless' || complete || !boardScore.bonusEarned) return;
+    if ((mode !== 'endless' && mode !== 'puzzle') || complete || !boardScore.bonusEarned) return;
     if (drag !== null || wordDrag !== null) return;
+    const batch = mode === 'puzzle' ? PUZZLE_BATCH_TILES : ENDLESS_CLEAR_TILES;
     const timer = window.setTimeout(() => {
       setBankedBonus((banked) => banked + ENDLESS_CONNECT_BONUS);
       dealBonusTiles(
-        ENDLESS_CLEAR_TILES,
-        `Board clear! +${ENDLESS_CONNECT_BONUS} points · +${ENDLESS_CLEAR_TILES} tiles`,
+        batch,
+        `Board clear! +${ENDLESS_CONNECT_BONUS} points · +${batch} tiles`,
       );
     }, 900);
     return () => window.clearTimeout(timer);
@@ -2110,6 +2223,8 @@ export default function App() {
       // The explainer stands over the tutorial's board on the way to a game.
       if (explainer !== null) return;
       if (settingsOpen || statsView !== null) return;
+      // So do the Finish confirm and a door's options popup.
+      if (confirmFinish || doorChoice !== null) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
@@ -2188,6 +2303,8 @@ export default function App() {
     settingsOpen,
     statsView,
     explainer,
+    confirmFinish,
+    doorChoice,
     interaction,
     picks,
     typeLetter,
@@ -2698,6 +2815,30 @@ export default function App() {
 
   /* --------------------------------- screens -------------------------------- */
 
+  /**
+   * A just-opened door's options popup: Blitz asks for a pace, Puzzle for a
+   * board. Shared by the home screen and — after the tutorial's handoff —
+   * the game screen.
+   */
+  const doorChooser =
+    doorChoice === 'blitz' ? (
+      <ChoiceDialog
+        title="Blitz"
+        subtitle="Pick your pace"
+        options={PACE_OPTIONS.map(({ name, detail }) => ({ label: name, detail }))}
+        onPick={(i) => choosePace(PACE_OPTIONS[i].pace)}
+        onDismiss={dismissDoorChoice}
+      />
+    ) : doorChoice === 'puzzle' ? (
+      <ChoiceDialog
+        title="Puzzle"
+        subtitle="Pick your board"
+        options={PUZZLE_SIZE_OPTIONS.map(({ name, detail }) => ({ label: name, detail }))}
+        onPick={(i) => choosePuzzleSize(PUZZLE_SIZE_OPTIONS[i].size)}
+        onDismiss={dismissDoorChoice}
+      />
+    ) : null;
+
   if (screen === 'home') {
     return (
       <div className="app">
@@ -2715,6 +2856,7 @@ export default function App() {
         )}
         {/* What the door they just picked leads to, the first time through. */}
         <ModeInfoDialog info={explainer} onPlay={playPendingDoor} />
+        {doorChooser}
         {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
         <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
         <SettingsPage
@@ -2804,19 +2946,24 @@ export default function App() {
               ? duelDripSeconds !== null && !complete
                 ? { label: 'Next tiles', seconds: duelDripSeconds, urgent: false }
                 : null
-              : timerSeconds !== null && !complete
-                ? {
-                    label:
-                      mode === 'endless' && endlessPhase === 'drip' ? 'Next tiles' : 'Time',
-                    seconds: timerSeconds,
-                    // Over the loose limit, the round clock is the deadline to
-                    // dig back under — it pleads as hard as a dying timer.
-                    urgent:
-                      mode === 'endless' &&
-                      endlessPhase === 'drip' &&
-                      looseTiles > ENDLESS_LOOSE_LIMIT,
-                  }
-                : null
+              : mode === 'puzzle'
+                ? // Puzzle has no deadline — the clock counts the time spent.
+                  elapsedSeconds !== null && !complete
+                  ? { label: 'Time', seconds: elapsedSeconds, urgent: false }
+                  : null
+                : timerSeconds !== null && !complete
+                  ? {
+                      label:
+                        mode === 'endless' && endlessPhase === 'drip' ? 'Next tiles' : 'Time',
+                      seconds: timerSeconds,
+                      // Over the loose limit, the round clock is the deadline to
+                      // dig back under — it pleads as hard as a dying timer.
+                      urgent:
+                        mode === 'endless' &&
+                        endlessPhase === 'drip' &&
+                        looseTiles > ENDLESS_LOOSE_LIMIT,
+                    }
+                  : null
           }
           round={
             mode === 'duel' && !complete
@@ -2844,6 +2991,18 @@ export default function App() {
           onPopEnd={endScorePop}
         />
         <div className="header-actions">
+          {mode === 'puzzle' && !complete ? (
+            // Puzzle only ends when the player says so.
+            <button
+              className="btn btn-primary"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                setConfirmFinish(true);
+              }}
+            >
+              Finish
+            </button>
+          ) : null}
           {complete && !inBattle ? (
             // In a multiplayer game the next round is the host's call, made
             // from the standings screen — a lone "Play again" here would fork
@@ -3143,8 +3302,23 @@ export default function App() {
         onCancel={() => setTutorialStep(TUTORIAL_FREE_PLAY)}
       />
 
+      {/* Puzzle's Finish button gets a second thought — it ends the game. */}
+      <ConfirmDialog
+        message={
+          confirmFinish ? 'Finish this puzzle? The board is scored as it stands.' : null
+        }
+        confirmLabel="Finish"
+        cancelLabel="Keep building"
+        onConfirm={() => {
+          setConfirmFinish(false);
+          finishGame('won');
+        }}
+        onCancel={() => setConfirmFinish(false)}
+      />
+
       {/* Straight after the tutorial: what the game waiting behind this is. */}
       <ModeInfoDialog info={explainer} onPlay={playPendingDoor} />
+      {doorChooser}
 
       {/* Connection trouble: our own redial, or the host pausing for someone. */}
       <ConnectionOverlay
