@@ -424,12 +424,16 @@ body {
   flex: 1;
   overflow: auto;
   background: var(--board-bg);
+  /* Flex with auto margins on the board: a board smaller than the viewport
+     (Puzzle's fixed grids) centres both ways, while one bigger than it still
+     scrolls to every corner — auto margins collapse to zero on overflow. */
+  display: flex;
 }
 
 .board {
   display: grid;
   width: max-content;
-  margin: 24px auto;
+  margin: auto;
   border: 1px solid var(--cell-line);
   background: var(--cell-line);
   gap: 1px;
@@ -923,6 +927,13 @@ body {
   background: var(--ok-bg);
   border-color: var(--ok-edge);
   box-shadow: 0 2px 0 var(--ok-edge);
+}
+
+/* Cancel wears red the way confirm wears green: the pair reads as no / yes. */
+.icon-btn-cancel {
+  background: var(--bad-bg);
+  border-color: var(--bad-edge);
+  box-shadow: 0 2px 0 var(--bad-edge);
 }
 
 /* ---------- menu ---------- */
@@ -1511,6 +1522,54 @@ body {
 
 .mode-info .dialog-actions {
   margin-top: 12px;
+}
+
+/* The options popup a configurable mode raises on the way in: Blitz's pace,
+   Puzzle's board size. Each option is a small mode card of its own. */
+.choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.choice-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: 3px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 3px 0 var(--line);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.choice-option:hover {
+  background: var(--surface-alt);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 var(--line);
+}
+
+.choice-option:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 0 var(--line);
+}
+
+.choice-option-name {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.choice-option-detail {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.65;
 }
 
 /*

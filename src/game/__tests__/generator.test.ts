@@ -54,6 +54,32 @@ describe('generatePuzzle', () => {
       expect(generationDict.has(word)).toBe(true);
     }
   });
+
+  it('holds the solution inside maxSpan, for Puzzle mode boards', () => {
+    // 8 is Puzzle's tightest board; 20 tiles must still deal reliably.
+    for (let i = 0; i < 50; i++) {
+      const puzzle = generatePuzzle(COMMON_WORDS, 20, Math.random, 8);
+      expect(puzzle.letters).toHaveLength(20);
+      expect(puzzle.solution).not.toBeNull();
+
+      const validation = validateBoard(puzzle.solution!, generationDict);
+      expect(validation.ok).toBe(true);
+
+      let minRow = Infinity;
+      let maxRow = -Infinity;
+      let minCol = Infinity;
+      let maxCol = -Infinity;
+      for (const key of Object.keys(puzzle.solution!)) {
+        const { row, col } = parseKey(key);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+      }
+      expect(maxRow - minRow + 1).toBeLessThanOrEqual(8);
+      expect(maxCol - minCol + 1).toBeLessThanOrEqual(8);
+    }
+  });
 });
 
 describe('extendPuzzle', () => {

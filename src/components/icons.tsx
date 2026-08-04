@@ -160,11 +160,21 @@ export function SoloIcon(props: IconProps) {
   );
 }
 
-/** A lightning bolt: Solo Blitz, the same game on a much shorter fuse. */
+/** A lightning bolt: Blitz, the pile racing you on a clock. */
 export function BlitzIcon(props: IconProps) {
   return (
     <Svg {...props}>
       <path d="M13.5 3L6 13.5h5L9.5 21 18 10.5h-5L13.5 3z" />
+    </Svg>
+  );
+}
+
+/** A small bounded grid: Puzzle, a board with real edges to fill. */
+export function PuzzleIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16" />
     </Svg>
   );
 }

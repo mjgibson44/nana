@@ -1,4 +1,4 @@
-import { SOLO_INFO, formatSeconds, type SoloPace } from '../game/modes';
+import { PACE_NAMES, formatSeconds, type SoloPace } from '../game/modes';
 
 /** One line of the between-rounds battle scoreboard. */
 export interface RoundStanding {
@@ -79,7 +79,7 @@ export function SplashCard({ splash, onDismiss }: SplashCardProps) {
       ? { eyebrow: splash.eyebrow, name: splash.title, note: splash.note }
       : splash.kind === 'speedup'
         ? {
-            eyebrow: SOLO_INFO[splash.pace].name,
+            eyebrow: PACE_NAMES[splash.pace],
             name: 'Speeding up!',
             note: `+${splash.tiles} tiles every ${formatSeconds(splash.seconds)} from here`,
           }

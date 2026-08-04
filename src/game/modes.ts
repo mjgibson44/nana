@@ -1,35 +1,38 @@
 /**
  * Game modes.
  *
- * One board and one set of rules for building words, played three ways:
+ * One board and one set of rules for building words, played four ways:
  *
  *  - Endless: no levels. New tiles keep arriving on a clock; let too many
- *    pile up loose and the game ends. Played solo — at either of two paces,
- *    see SoloPace — or as Endless Battle, the same game raced by several
- *    players on one shared deal.
+ *    pile up loose and the game ends. Played solo as Blitz — at either of
+ *    two paces, see SoloPace — or as Endless Battle, the same game raced by
+ *    several players on one shared deal.
+ *  - Puzzle: no clock and no losing. A fixed board with real edges, twenty
+ *    tiles at a time — connect them all and twenty more arrive, until the
+ *    player presses Finish.
  *  - Duel: head-to-head for exactly two players. Placed words are permanent,
  *    and every word you place sends tiles to your opponent. First player to
  *    overflow their pile loses.
  *  - Tutorial: a guided walk through placing words, at your own pace.
  */
 
-export type GameMode = 'endless' | 'duel' | 'tutorial';
+export type GameMode = 'endless' | 'puzzle' | 'duel' | 'tutorial';
 
 /**
- * How hard Endless leans on a solo player. Both paces are the same game —
+ * How hard Blitz leans on a solo player. Both paces are the same game —
  * same board, same loose limit, same clear bonus — and differ only in how
  * long the opening phase runs, how long a round is, and how many tiles a
  * round deals:
  *
- *  - `relaxed`: two minutes to open, then five-tile rounds of 45 seconds
+ *  - `regular`: two minutes to open, then five-tile rounds of 45 seconds
  *    tightening to 30, and batches that grow to seven.
- *  - `blitz`: one minute to open, then a 15-second round forever, starting at
+ *  - `fast`: one minute to open, then a 15-second round forever, starting at
  *    three tiles and growing by one every eight rounds up to ten.
  *
- * Survival always runs at the relaxed pace: every player works one shared
+ * Survival always runs at the regular pace: every player works one shared
  * deal, so the pacing has to be the same for everybody.
  */
-export type SoloPace = 'relaxed' | 'blitz';
+export type SoloPace = 'regular' | 'fast';
 
 export interface ModeInfo {
   name: string;
@@ -40,41 +43,57 @@ export interface ModeInfo {
 
 /**
  * The doors out of the home screen — the four buttons that lead to a game.
- * Not the same list as GameMode: the solo paces are one mode played two ways,
- * Survival and Duel lead to a lobby before any game starts, and Survival is
- * Endless played against other people.
+ * Not the same list as GameMode: Blitz is Endless played solo at a pace
+ * chosen on the way in, Puzzle asks for a board size first, Survival and
+ * Duel lead to a lobby before any game starts, and Survival is Endless
+ * played against other people.
  */
-export type GameDoor = SoloPace | 'survival' | 'duel';
+export type GameDoor = 'blitz' | 'puzzle' | 'survival' | 'duel';
 
-export const SOLO_RELAXED_INFO: ModeInfo = {
-  name: 'Solo Relaxed',
+export const BLITZ_INFO: ModeInfo = {
+  name: 'Blitz',
   tagline: 'Survive the ever-growing pile.',
   details: [
-    '2:00 to place your first 20 tiles',
-    '+5 tiles a round — 45s rounds shrink to 30s, then batches grow to +7',
+    'Tiles keep arriving on a clock — weave them in as they land',
     'Over 20 loose tiles when a round ends and you’re out',
+    'Two speeds: Regular, or Fast for tiles arriving four times as quickly',
   ],
 };
 
-export const SOLO_BLITZ_INFO: ModeInfo = {
-  name: 'Solo Blitz',
-  tagline: 'The same pile, arriving four times as fast.',
+/** What the splash cards call each Blitz pace. */
+export const PACE_NAMES: Record<SoloPace, string> = {
+  regular: 'Blitz · Regular',
+  fast: 'Blitz · Fast',
+};
+
+/** The pace popup's choices, in the order they're offered. */
+export const PACE_OPTIONS: ReadonlyArray<{ pace: SoloPace; name: string; detail: string }> = [
+  {
+    pace: 'regular',
+    name: 'Regular',
+    detail: '2:00 to place your first 20 tiles, then +5 a round every 45–30s',
+  },
+  {
+    pace: 'fast',
+    name: 'Fast',
+    detail: '1:00 to place your first 20 tiles, then batches every 15s, growing to +10',
+  },
+];
+
+export const PUZZLE_INFO: ModeInfo = {
+  name: 'Puzzle',
+  tagline: 'One board, no clock. Build at your own pace.',
   details: [
-    '1:00 to place your first 20 tiles',
-    '+3 tiles every 15s — the batch grows every 8 rounds, up to +10',
-    'Over 20 loose tiles when a round ends and you’re out',
+    '20 tiles to weave into one crossword',
+    'Connect them all and 20 more arrive',
+    'Pick your board: 8×8, 16×16 or 24×24',
+    'Press Finish whenever you’re done',
   ],
-};
-
-/** Each solo pace's card, for looking one up by pace. */
-export const SOLO_INFO: Record<SoloPace, ModeInfo> = {
-  relaxed: SOLO_RELAXED_INFO,
-  blitz: SOLO_BLITZ_INFO,
 };
 
 /**
  * Survival's home-screen card — Endless raced by several players. Each
- * player's game runs as Endless at the relaxed pace, and the multiplayer
+ * player's game runs as Endless at the regular pace, and the multiplayer
  * wrapping (lobby, shared deal, standings) lives in src/game/battle.ts.
  */
 export const BATTLE_INFO: ModeInfo = {
@@ -109,8 +128,8 @@ export const TUTORIAL_INFO: ModeInfo = {
 
 /** Which explainer each door raises the first time it's opened. */
 export const DOOR_INFO: Record<GameDoor, ModeInfo> = {
-  relaxed: SOLO_RELAXED_INFO,
-  blitz: SOLO_BLITZ_INFO,
+  blitz: BLITZ_INFO,
+  puzzle: PUZZLE_INFO,
   survival: BATTLE_INFO,
   duel: DUEL_INFO,
 };
@@ -121,10 +140,10 @@ export const DOOR_INFO: Record<GameDoor, ModeInfo> = {
 export const ENDLESS_START_TILES = 20;
 
 /** The opening phase: this long to work the starting pile before tiles start
- * arriving — and before the loose-tile count switches on. Blitz gives you
- * half as long for the same twenty tiles. */
+ * arriving — and before the loose-tile count switches on. The fast pace gives
+ * you half as long for the same twenty tiles. */
 export const ENDLESS_INITIAL_SECONDS = 120;
-export const BLITZ_INITIAL_SECONDS = 60;
+export const FAST_INITIAL_SECONDS = 60;
 
 /**
  * The screw turns twice after the opening phase: five rounds of 45 seconds,
@@ -145,43 +164,43 @@ export const ENDLESS_SMALL_BATCH_ROUNDS = 10;
 /** The batch size every round deals once the small rounds are spent. */
 export const ENDLESS_BIG_BATCH = 7;
 
-/** Blitz never touches its clock: every round after the opening minute is
- * fifteen seconds, and the batch is what grows instead. */
-export const BLITZ_DRIP_SECONDS = 15;
+/** The fast pace never touches its clock: every round after the opening
+ * minute is fifteen seconds, and the batch is what grows instead. */
+export const FAST_DRIP_SECONDS = 15;
 
-/** The batch blitz opens on, and the one it tops out at. */
-export const BLITZ_SMALL_BATCH = 3;
-export const BLITZ_MAX_BATCH = 10;
+/** The batch the fast pace opens on, and the one it tops out at. */
+export const FAST_SMALL_BATCH = 3;
+export const FAST_MAX_BATCH = 10;
 
-/** How many blitz rounds a batch size lasts before growing by one — eight
+/** How many fast rounds a batch size lasts before growing by one — eight
  * fifteen-second rounds, so two minutes at each size. */
-export const BLITZ_BATCH_ROUNDS = 8;
+export const FAST_BATCH_ROUNDS = 8;
 
 /** How long the opening phase runs at `pace`. */
 export function endlessInitialSeconds(pace: SoloPace): number {
-  return pace === 'blitz' ? BLITZ_INITIAL_SECONDS : ENDLESS_INITIAL_SECONDS;
+  return pace === 'fast' ? FAST_INITIAL_SECONDS : ENDLESS_INITIAL_SECONDS;
 }
 
 /**
  * How long the wait for the next batch is, given how many drip intervals have
- * already run out. Relaxed: 45 seconds for the first five, 30 forever after.
- * Blitz: fifteen seconds, always.
+ * already run out. Regular: 45 seconds for the first five, 30 forever after.
+ * Fast: fifteen seconds, always.
  */
 export function endlessDripSeconds(intervalsElapsed: number, pace: SoloPace): number {
-  if (pace === 'blitz') return BLITZ_DRIP_SECONDS;
+  if (pace === 'fast') return FAST_DRIP_SECONDS;
   return intervalsElapsed < ENDLESS_SLOW_ROUNDS ? ENDLESS_SLOW_SECONDS : ENDLESS_FAST_SECONDS;
 }
 
 /**
  * How many tiles the batch landing after `intervalsElapsed` drip intervals
- * brings. Relaxed: five for each of the first ten rounds, then seven forever.
- * Blitz: three to begin with, one more every eight rounds, and no more than
+ * brings. Regular: five for each of the first ten rounds, then seven forever.
+ * Fast: three to begin with, one more every eight rounds, and no more than
  * ten however long you last.
  */
 export function endlessDripTiles(intervalsElapsed: number, pace: SoloPace): number {
-  if (pace === 'blitz') {
-    const grown = Math.floor(Math.max(0, intervalsElapsed) / BLITZ_BATCH_ROUNDS);
-    return Math.min(BLITZ_MAX_BATCH, BLITZ_SMALL_BATCH + grown);
+  if (pace === 'fast') {
+    const grown = Math.floor(Math.max(0, intervalsElapsed) / FAST_BATCH_ROUNDS);
+    return Math.min(FAST_MAX_BATCH, FAST_SMALL_BATCH + grown);
   }
   return intervalsElapsed < ENDLESS_SMALL_BATCH_ROUNDS ? ENDLESS_SMALL_BATCH : ENDLESS_BIG_BATCH;
 }
@@ -197,6 +216,27 @@ export const ENDLESS_CONNECT_BONUS = 25;
  * are the pressure gauge. Going over this limit is survivable; still being
  * over it when a drip round ends is what ends the game. */
 export const ENDLESS_LOOSE_LIMIT = 20;
+
+/* --------------------------------- Puzzle ---------------------------------- */
+
+/** The boards Puzzle is played on — square, with real edges words can't cross. */
+export type PuzzleSize = 8 | 16 | 24;
+
+/** The size popup's choices, in the order they're offered. */
+export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{
+  size: PuzzleSize;
+  name: string;
+  detail: string;
+}> = [
+  { size: 8, name: '8 × 8', detail: 'A tight little board — every square counts' },
+  { size: 16, name: '16 × 16', detail: 'Room to build, close enough to plan' },
+  { size: 24, name: '24 × 24', detail: 'A wide open board for the long haul' },
+];
+
+/** Tiles in the opening Puzzle deal — and in every batch that follows a
+ * fully connected board. */
+export const PUZZLE_START_TILES = 20;
+export const PUZZLE_BATCH_TILES = 20;
 
 /* ---------------------------------- Duel ----------------------------------- */
 

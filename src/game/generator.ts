@@ -108,16 +108,20 @@ function place(state: BuildState, word: string, row: number, col: number, dir: D
   state.words.push(word);
 }
 
-/** One attempt at growing a crossword to exactly tileCount tiles. */
+/** One attempt at growing a crossword to exactly tileCount tiles. `maxSpan`
+ * caps the finished grid's width and height, for boards with real edges. */
 function tryBuild(
   byLetter: Map<string, string[]>,
   byLength: Map<number, string[]>,
   tileCount: number,
   rng: () => number,
+  maxSpan = Infinity,
 ): BuildState | null {
   // Seed word: prefer a mid-length word, but never one that strands an
   // unfillable remainder.
-  const seedLengths = usableLengths(tileCount + 1).filter((len) => len <= tileCount);
+  const seedLengths = usableLengths(tileCount + 1).filter(
+    (len) => len <= tileCount && len <= maxSpan,
+  );
   if (seedLengths.length === 0) return null;
   const preferred = seedLengths.filter((len) => len >= 5);
   const seedLen = pick(preferred.length > 0 ? preferred : seedLengths, rng);
@@ -126,6 +130,12 @@ function tryBuild(
 
   const state: BuildState = { grid: {}, words: [] };
   place(state, pick(seedPool, rng), 0, 0, 'across');
+
+  // The grid's bounding box so far, for holding the build under maxSpan.
+  let minRow = 0;
+  let maxRow = 0;
+  let minCol = 0;
+  let maxCol = seedLen - 1;
 
   let tiles = Object.keys(state.grid).length;
   let failures = 0;
@@ -167,7 +177,24 @@ function tryBuild(
       continue;
     }
 
+    // A word that would stretch the grid past maxSpan can never fit the
+    // board this puzzle is bound for, however it's slid around.
+    const endRow = dir === 'down' ? start.row + word.length - 1 : start.row;
+    const endCol = dir === 'across' ? start.col + word.length - 1 : start.col;
+    const nextMinRow = Math.min(minRow, start.row);
+    const nextMaxRow = Math.max(maxRow, endRow);
+    const nextMinCol = Math.min(minCol, start.col);
+    const nextMaxCol = Math.max(maxCol, endCol);
+    if (nextMaxRow - nextMinRow + 1 > maxSpan || nextMaxCol - nextMinCol + 1 > maxSpan) {
+      failures++;
+      continue;
+    }
+
     place(state, word, start.row, start.col, dir);
+    minRow = nextMinRow;
+    maxRow = nextMaxRow;
+    minCol = nextMinCol;
+    maxCol = nextMaxCol;
     tiles = Object.keys(state.grid).length;
   }
 
@@ -355,10 +382,16 @@ function usableWords(wordPool: string[]): string[] {
   );
 }
 
+/**
+ * Deal a fresh puzzle of exactly `tileCount` letters. `maxSpan` (optional)
+ * caps the hidden solution's width and height, so the deal is known to fit a
+ * board of that size — Puzzle mode's constrained grids ask for it.
+ */
 export function generatePuzzle(
   wordPool: string[],
   tileCount = 20,
   rng: () => number = Math.random,
+  maxSpan?: number,
 ): Puzzle {
   const usable = usableWords(wordPool);
   if (usable.length === 0) throw new Error('word pool is empty');
@@ -377,8 +410,10 @@ export function generatePuzzle(
     bucket.push(word);
   }
 
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const built = tryBuild(byLetter, byLength, tileCount, rng);
+  // A span cap makes attempts fail more often, so a bounded deal gets more.
+  const attempts = maxSpan === undefined ? 100 : 400;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const built = tryBuild(byLetter, byLength, tileCount, rng, maxSpan);
     if (built) {
       const solution = normalize(built.grid);
       return {
