@@ -15,18 +15,20 @@ import {
   DUEL_START_TILES,
   ENDLESS_CLEAR_TILES,
   ENDLESS_CONNECT_BONUS,
-  ENDLESS_INITIAL_SECONDS,
   ENDLESS_LOOSE_LIMIT,
   ENDLESS_START_TILES,
+  SOLO_INFO,
   duelAttackMultiplier,
   duelAttackTiles,
   duelDripTiles,
   duelDripTilesAt,
   endlessDripSeconds,
   endlessDripTiles,
+  endlessInitialSeconds,
   formatSeconds,
   type GameDoor,
   type GameMode,
+  type SoloPace,
 } from './game/modes';
 import { doorSeen, markDoorSeen, markTutorialSeen, tutorialSeen } from './game/onboarding';
 import {
@@ -334,9 +336,13 @@ export default function App() {
   /** The clock, in modes that have one. Null in the tutorial, in a duel's
    * final round, and once a game ends. */
   const [countdown, setCountdown] = useState<Countdown | null>(null);
-  /** Endless: 'initial' is the opening two minutes; 'drip' is ever after,
-   * when batches arrive on the clock and the loose count is live. */
+  /** Endless: 'initial' is the opening phase; 'drip' is ever after, when
+   * batches arrive on the clock and the loose count is live. */
   const [endlessPhase, setEndlessPhase] = useState<'initial' | 'drip'>('initial');
+  /** Endless: which pace the drip runs at — the home screen's Solo Relaxed or
+   * Solo Blitz. Survival always plays relaxed, so everyone's shared deal
+   * arrives on the same schedule. */
+  const [soloPace, setSoloPace] = useState<SoloPace>('relaxed');
   /** Endless: how many drip intervals have run out (the opening phase isn't
    * one), which sets how big the next batch is. */
   const [dripsElapsed, setDripsElapsed] = useState(0);
@@ -454,10 +460,12 @@ export default function App() {
   const expiryHandled = useRef<number | null>(null);
   const dripHandled = useRef<number | null>(null);
 
-  /** Start a fresh game. Multiplayer games hand in the shared deal's opening
-   * letters; solo games draw their own at random. */
-  const newGame = useCallback((nextMode: GameMode, dealtLetters?: string[]) => {
+  /** Start a fresh game. `pace` sets the Endless drip's schedule and is
+   * ignored by the other modes. Multiplayer games hand in the shared deal's
+   * opening letters; solo games draw their own at random. */
+  const newGame = useCallback((nextMode: GameMode, pace: SoloPace, dealtLetters?: string[]) => {
     setMode(nextMode);
+    setSoloPace(pace);
     const opening =
       dealtLetters ??
       // The tutorial deals its first word spelled out in a row, rather than a
@@ -483,11 +491,11 @@ export default function App() {
       nextMode === 'endless'
         ? {
             kind: 'start',
-            // The same Endless game opens both doors; the card names the one
-            // this player walked through.
-            eyebrow: battleRef.current ? 'Survival' : 'Solo mode',
+            // The same Endless game opens several doors; the card names the
+            // one this player walked through.
+            eyebrow: battleRef.current ? 'Survival' : SOLO_INFO[pace].name,
             title: 'Game on!',
-            note: `${opening.length} tiles · ${formatSeconds(ENDLESS_INITIAL_SECONDS)} to place them`,
+            note: `${opening.length} tiles · ${formatSeconds(endlessInitialSeconds(pace))} to place them`,
           }
         : nextMode === 'duel'
           ? {
@@ -515,7 +523,7 @@ export default function App() {
     dripHandled.current = null;
     setCountdown(
       nextMode === 'endless'
-        ? runningCountdown(ENDLESS_INITIAL_SECONDS)
+        ? runningCountdown(endlessInitialSeconds(pace))
         : nextMode === 'duel'
           ? runningCountdown(DUEL_ROUND_SECONDS)
           : null,
@@ -526,9 +534,9 @@ export default function App() {
   /** Start a mode and put its board on screen. Reaching the tutorial at all
    * counts as having been offered it, however far it's played. */
   const startGame = useCallback(
-    (nextMode: GameMode) => {
+    (nextMode: GameMode, pace: SoloPace = 'relaxed') => {
       if (nextMode === 'tutorial') markTutorialSeen();
-      newGame(nextMode);
+      newGame(nextMode, pace);
       setScreen('game');
     },
     [newGame],
@@ -545,14 +553,15 @@ export default function App() {
   /* ------------------------------ the front door ---------------------------- */
 
   /**
-   * Walk through a door for real: Solo straight into a game, the multiplayer
-   * pair into their lobby. Whatever had to be read first has been read by now.
+   * Walk through a door for real: a solo pace straight into a game at that
+   * pace, the multiplayer pair into their lobby. Whatever had to be read first
+   * has been read by now.
    */
   const enterDoor = useCallback(
     (door: GameDoor) => {
       setPendingDoor(null);
-      if (door === 'solo') {
-        startGame('endless');
+      if (door === 'relaxed' || door === 'blitz') {
+        startGame('endless', door);
         return;
       }
       setBattleNotice(null);
@@ -651,7 +660,12 @@ export default function App() {
         duel && handle ? createTileStream(`${seed}/attacks/${handle.selfId}`) : null;
       setShowBattleResults(false);
       setConfirmBattle(null);
-      newGame(duel ? 'duel' : 'endless', stream.next(duel ? DUEL_START_TILES : ENDLESS_START_TILES));
+      // Survival is always the relaxed pace — one shared deal, one schedule.
+      newGame(
+        duel ? 'duel' : 'endless',
+        'relaxed',
+        stream.next(duel ? DUEL_START_TILES : ENDLESS_START_TILES),
+      );
       setScreen('game');
     },
     [newGame],
@@ -1365,8 +1379,8 @@ export default function App() {
       // after that is one drip interval gone. The batch dealt here opens the
       // round numbered `elapsed`, so that's the size it lands at.
       const elapsed = endlessPhase === 'drip' ? dripsElapsed + 1 : 0;
-      const seconds = endlessDripSeconds(elapsed);
-      const batch = endlessDripTiles(elapsed);
+      const seconds = endlessDripSeconds(elapsed, soloPace);
+      const batch = endlessDripTiles(elapsed, soloPace);
       dealBonusTiles(batch, `+${batch} tiles!`);
       if (inBattle && battle && battleState) {
         // Between rounds a battle shows the whole field's scores — this
@@ -1385,12 +1399,13 @@ export default function App() {
         setSplash({ kind: 'round', standings, seconds, tiles: batch });
       } else if (
         elapsed > 0 &&
-        (seconds < endlessDripSeconds(elapsed - 1) || batch > endlessDripTiles(elapsed - 1))
+        (seconds < endlessDripSeconds(elapsed - 1, soloPace) ||
+          batch > endlessDripTiles(elapsed - 1, soloPace))
       ) {
         // Solo keeps the pressure card: the wait got shorter or the batches
         // grew, and the splash says so — holding the new clock until it's
         // been read, the same way the opening splash does.
-        setSplash({ kind: 'speedup', seconds, tiles: batch });
+        setSplash({ kind: 'speedup', seconds, tiles: batch, pace: soloPace });
       }
       setEndlessPhase('drip');
       setDripsElapsed(elapsed);
@@ -1404,6 +1419,7 @@ export default function App() {
     duelRound,
     endlessPhase,
     dripsElapsed,
+    soloPace,
     looseTiles,
     inBattle,
     battle,
@@ -2836,7 +2852,7 @@ export default function App() {
               className="btn btn-primary"
               onClick={(e) => {
                 e.currentTarget.blur();
-                newGame(mode);
+                newGame(mode, soloPace);
               }}
             >
               Play again
@@ -2859,7 +2875,7 @@ export default function App() {
             </button>
           ) : (
             <Menu
-              onResetGame={inBattle ? null : () => newGame(mode)}
+              onResetGame={inBattle ? null : () => newGame(mode, soloPace)}
               onShowHowTo={() => setShowHowTo(true)}
               onShowSettings={() => setSettingsOpen(true)}
               onShowSummary={
@@ -3085,7 +3101,7 @@ export default function App() {
                 ? 'Buried in tiles!'
                 : 'Well played!'
           }
-          onPlayAgain={() => newGame(mode)}
+          onPlayAgain={() => newGame(mode, soloPace)}
           onClose={() => setShowSummary(false)}
           onReturnHome={returnHome}
         />

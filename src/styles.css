@@ -1309,11 +1309,11 @@ body {
   border-top: 3px solid var(--ink);
 }
 
+/* The scroll container spans the whole pile; the tile field inside it is what
+   gets capped and centred. */
 .rack {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-content: flex-start;
+  justify-content: center;
   /* Right padding keeps the last tile of a row out from under shuffle. */
   padding: 12px 56px calc(12px + env(safe-area-inset-bottom)) 18px;
   min-height: 76px;
@@ -1321,6 +1321,33 @@ body {
      squeezing the board off the screen. */
   max-height: 28vh;
   overflow-y: auto;
+}
+
+/*
+ * Ten tiles is about as wide as a row gets before scanning it becomes work, so
+ * the field stops there however much room the screen offers. The field centres
+ * itself in the pile, but its rows still fill from the left so every row starts
+ * where the eye already went looking.
+ */
+.rack-tiles {
+  --rack-cols: 10;
+  --rack-gap: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rack-gap);
+  align-content: flex-start;
+  width: 100%;
+  max-width: calc(
+    var(--rack-cols) * (var(--cell) - 4px) + (var(--rack-cols) - 1) * var(--rack-gap)
+  );
+}
+
+/* Past this width a capped field never reaches the shuffle button, so the row
+   can drop the clearance and sit truly centred instead of nudged left by it. */
+@media (min-width: 601px) {
+  .rack {
+    padding-right: 18px;
+  }
 }
 
 .rack-shuffle {

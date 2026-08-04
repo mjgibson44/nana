@@ -160,6 +160,15 @@ export function SoloIcon(props: IconProps) {
   );
 }
 
+/** A lightning bolt: Solo Blitz, the same game on a much shorter fuse. */
+export function BlitzIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M13.5 3L6 13.5h5L9.5 21 18 10.5h-5L13.5 3z" />
+    </Svg>
+  );
+}
+
 /** A crowd: Survival, the whole field racing at once. */
 export function PlayersIcon(props: IconProps) {
   return (

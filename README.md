@@ -49,7 +49,7 @@ src/
     types.ts            #   board = plain serializable Record<"row,col", letter>
     board.ts            #   word extraction, dictionary + connectivity validation
     generator.ts        #   crossword-construction letter dealing
-    modes.ts            #   the rules: Endless pacing, Duel rounds and attacks
+    modes.ts            #   the rules: Endless pacing (relaxed/blitz), Duel rounds
     battle.ts           #   multiplayer brain: codes, shared deal, referees
     dictionary.ts       #   word list loading/parsing
     commonWords.ts      #   generation word pool (subset of the dictionary)
@@ -69,16 +69,23 @@ plain serializable data — which is exactly what lets multiplayer run with
 Picked from the home screen (`src/components/HomeScreen.tsx`); the rules live
 in `src/game/modes.ts`.
 
-- **Solo** (Endless) — no levels. 2:00 to work the starting 20 tiles, then batches
-  land on a tightening clock: five rounds of 5 tiles every 45 seconds, five
-  rounds of 5 tiles every 30 seconds, then 7 tiles every 30 seconds forever
+- **Solo Relaxed** (Endless) — no levels. 2:00 to work the starting 20 tiles, then
+  batches land on a tightening clock: five rounds of 5 tiles every 45 seconds,
+  five rounds of 5 tiles every 30 seconds, then 7 tiles every 30 seconds forever
   after. Clearing the pile pays a 25-point bonus and 5 more
   tiles. Loose tiles — unplaced or not validly connected — are counted
   against the limit of 20 in the header: green while comfortable, orange
   near the limit, red once you're over. Going over doesn't end the game by
   itself; still being over when the round's clock runs out is what buries
   you.
-- **Survival** (Endless Battle) — Solo, against your friends. One player hosts a
+- **Solo Blitz** (Endless) — the same game on a much shorter fuse. 1:00 for the
+  starting 20 tiles, then a 15-second round forever: 3 tiles a round to begin
+  with, growing by one every 8 rounds — so two minutes at each size — until
+  batches top out at 10 tiles every 15 seconds. Everything else is Solo
+  Relaxed's: the clear bonus, and the loose limit of 20 checked as each round's
+  clock runs out.
+- **Survival** (Endless Battle) — Solo Relaxed, against your friends. Every
+  player shares one deal, so Survival always runs at the relaxed pace. One player hosts a
   lobby and shares a 5-letter code (or an invite link that carries it);
   everyone enters a name to join. Every player fights the identical game:
   the same starting tiles, and the same letters in every batch after —
@@ -164,7 +171,7 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
 ## Roadmap
 
 - [x] Single-player: solvable deals, drag & drop, live validation
-- [x] Endless ("peel"-style) mode
+- [x] Endless ("peel"-style) mode, at a relaxed and a blitz pace
 - [x] Multiplayer: Survival (Endless Battle) — shared deal from one seed, lobbies with
       codes/invite links, live standings, host controls, final rankings
 - [x] Duel mode: permanent words, attack tiles, escalating rounds

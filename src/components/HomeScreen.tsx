@@ -1,5 +1,6 @@
 import { DOOR_INFO, type GameDoor } from '../game/modes';
 import {
+  BlitzIcon,
   DuelIcon,
   HelpIcon,
   PlayersIcon,
@@ -11,8 +12,8 @@ import {
 
 interface HomeScreenProps {
   /** Head through one of the game doors. What happens next is the door's
-   * business: Solo starts a game, the multiplayer pair open a lobby, and a
-   * first-timer gets the tutorial before any of it. */
+   * business: a solo pace starts a game, the multiplayer pair open a lobby,
+   * and a first-timer gets the tutorial before any of it. */
   onPlay: (door: GameDoor) => void;
   /** Start the guided tutorial. */
   onTutorial: () => void;
@@ -21,9 +22,10 @@ interface HomeScreenProps {
   onShowSettings: () => void;
 }
 
-/** The three doors, in the order they're offered. */
+/** The doors, in the order they're offered. */
 const DOORS: Array<{ door: GameDoor; icon: React.ReactNode }> = [
-  { door: 'solo', icon: <SoloIcon /> },
+  { door: 'relaxed', icon: <SoloIcon /> },
+  { door: 'blitz', icon: <BlitzIcon /> },
   { door: 'survival', icon: <PlayersIcon /> },
   { door: 'duel', icon: <DuelIcon /> },
 ];
