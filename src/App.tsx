@@ -7,6 +7,8 @@ import { boardBounds, scoreBoard, wordScore } from './game/levels';
 import {
   DUEL_DRIP_SECONDS,
   DUEL_PILE_LIMIT,
+  DUEL_PILE_URGENT,
+  DUEL_PILE_WARN,
   DUEL_ROUNDS,
   DUEL_ROUND_SECONDS,
   DUEL_START_TILES,
@@ -2518,7 +2520,13 @@ export default function App() {
             mode === 'endless' && endlessPhase === 'drip' && !complete
               ? { label: 'Loose tiles', loose: looseTiles, limit: ENDLESS_LOOSE_LIMIT }
               : mode === 'duel' && !complete
-                ? { label: 'Pile', loose: rack.length, limit: DUEL_PILE_LIMIT }
+                ? {
+                    label: 'Pile',
+                    loose: rack.length,
+                    limit: DUEL_PILE_LIMIT,
+                    warnAt: DUEL_PILE_WARN,
+                    urgentAt: DUEL_PILE_URGENT,
+                  }
                 : null
           }
           opponent={duelOpponent}

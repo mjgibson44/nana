@@ -308,6 +308,18 @@ body {
   color: var(--warn-ink);
 }
 
+/* Duel's pile counter pleads in stages as it fills: a medium orange blink
+   first, then a faster red one as the limit closes in. */
+.tile-count-alert {
+  color: var(--warn-ink);
+  animation: timer-pulse 1.1s ease-in-out infinite;
+}
+
+.tile-count-urgent {
+  color: var(--bad-ink);
+  animation: timer-pulse 0.55s ease-in-out infinite;
+}
+
 .tile-count-over {
   color: var(--bad-ink);
   animation: timer-pulse 1s ease-in-out infinite;

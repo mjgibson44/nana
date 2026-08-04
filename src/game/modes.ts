@@ -126,6 +126,13 @@ export const DUEL_START_TILES = 15;
 /** A Duel pile may never exceed this many tiles — one over and you lose. */
 export const DUEL_PILE_LIMIT = 25;
 
+/** The pile counter starts pleading before the limit: flashing orange at a
+ * medium blink from this many tiles… */
+export const DUEL_PILE_WARN = 15;
+
+/** …and flashing red, faster, from this many. */
+export const DUEL_PILE_URGENT = 20;
+
 /** How many rounds a duel has. The last one runs until somebody loses. */
 export const DUEL_ROUNDS = 3;
 
