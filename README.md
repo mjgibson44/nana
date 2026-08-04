@@ -91,7 +91,9 @@ in `src/game/modes.ts`.
   host/join lobby flow. Both duellists draw the identical letters. A placed
   word is **permanent** — no moving, no taking back — and only real words
   are allowed down. Every word you place sends tiles to your opponent: one
-  per letter past three (4 letters → 1 tile, 5 → 2, …). Three rounds turn
+  per letter past three (4 letters → 1 tile, 5 → 2, …). Extending a word
+  already on the board sends only the difference — what the longer word is
+  worth minus what the old one already was. Three rounds turn
   the screw: rounds one and two last 3:00, with attacks at ×1 then ×1.5 and
   a drip of 1 then 2 tiles every 20 seconds; the final round has no clock,
   ×2 attacks, and 4 tiles every 20 seconds. Let your pile exceed 25 tiles —

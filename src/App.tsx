@@ -1719,11 +1719,24 @@ export default function App() {
       setLastDir(dir);
 
       // Duel: the word that just landed hits the opponent — one tile per
-      // letter past three, scaled by the round. The longest word the
-      // placement made counts, so extending a word is worth the whole word.
+      // letter past three, scaled by the round. Only the growth counts: a
+      // word extended (or bridged) from words already on the board is worth
+      // the difference, not the whole word again. The best-paying word the
+      // placement made is the one that counts.
       if (mode === 'duel' && battleRef.current) {
-        const wordLength = newRuns.reduce((top, run) => Math.max(top, run.word.length), 0);
-        const attack = duelAttackTiles(wordLength, duelRound);
+        const oldRuns = extractRuns(board);
+        const attack = newRuns.reduce((top, run) => {
+          const cells = new Set(run.cells);
+          // The runs this word swallowed: same direction, every cell now
+          // inside it. Anything merely crossed keeps its own cells outside.
+          const grewFrom = oldRuns
+            .filter(
+              (old) =>
+                old.direction === run.direction && old.cells.every((cell) => cells.has(cell)),
+            )
+            .map((old) => old.word.length);
+          return Math.max(top, duelAttackTiles(run.word.length, duelRound, grewFrom));
+        }, 0);
         if (attack > 0) {
           battleRef.current.sendAttack(attack);
           const serial = ++dropSerial.current;

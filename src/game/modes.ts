@@ -175,10 +175,22 @@ export function duelDripTilesAt(dripIndex: number): number {
  * How many tiles placing a word sends to the opponent: nothing under four
  * letters, then one per letter past three — 4→1, 5→2, 6→3 — scaled up by the
  * round's multiplier and rounded to the nearest whole tile.
+ *
+ * `grewFrom` lists the lengths of the words already on the board that this
+ * word absorbed — the word it extends, or the two it bridges. Only the growth
+ * is paid for: the new word's base value minus what the absorbed words were
+ * worth, so stretching HEART to HEARTS earns the S, not the whole word again.
+ * A word built from nothing (an empty list) earns its full value.
  */
-export function duelAttackTiles(wordLength: number, round: number): number {
-  const base = Math.max(0, Math.floor(wordLength) - 3);
-  return Math.round(base * duelAttackMultiplier(round));
+export function duelAttackTiles(
+  wordLength: number,
+  round: number,
+  grewFrom: number[] = [],
+): number {
+  const base = (length: number) => Math.max(0, Math.floor(length) - 3);
+  const absorbed = grewFrom.reduce((sum, length) => sum + base(length), 0);
+  const growth = Math.max(0, base(wordLength) - absorbed);
+  return Math.round(growth * duelAttackMultiplier(round));
 }
 
 /* --------------------------------- shared --------------------------------- */

@@ -135,6 +135,31 @@ describe('duelAttackTiles', () => {
     expect(duelAttackTiles(5, 3)).toBe(4);
     expect(duelAttackTiles(6, 3)).toBe(6);
   });
+
+  it('pays only the growth when a word is extended', () => {
+    // HEART (worth 2) stretched to HEARTS (worth 3) earns the difference.
+    expect(duelAttackTiles(6, 1, [5])).toBe(1);
+    // CAT was worth nothing, so CATS earns its full value.
+    expect(duelAttackTiles(4, 1, [3])).toBe(1);
+    // Adding nothing of value sends nothing.
+    expect(duelAttackTiles(4, 1, [4])).toBe(0);
+  });
+
+  it('subtracts every word a placement bridges together', () => {
+    // Two 4-letter words (worth 1 each) joined into a 9-letter word (worth 6).
+    expect(duelAttackTiles(9, 1, [4, 4])).toBe(4);
+  });
+
+  it('scales the growth by the round multiplier', () => {
+    // One letter of growth, ×1.5 rounds up to 2 — the multiplier applies to
+    // the difference, not to each word before subtracting.
+    expect(duelAttackTiles(6, 2, [5])).toBe(2);
+    expect(duelAttackTiles(6, 3, [5])).toBe(2);
+  });
+
+  it('treats an empty history as a brand-new word', () => {
+    expect(duelAttackTiles(6, 1, [])).toBe(duelAttackTiles(6, 1));
+  });
 });
 
 describe('duel constants', () => {
