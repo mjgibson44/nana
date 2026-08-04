@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   battleOver,
+  battleWinners,
   createTileStream,
   duelOver,
   duelWinner,
@@ -9,6 +10,8 @@ import {
   normalizeBattleCode,
   ordinal,
   rankPlayers,
+  type BattleMode,
+  type BattlePlayer,
   type Contestant,
 } from '../battle';
 import { seededRng } from '../rng';
@@ -219,6 +222,69 @@ describe('rankPlayers', () => {
       player({ score: 10 }),
     ]);
     expect(ranked.map((r) => r.rank)).toEqual([1, 2, 2, 4]);
+  });
+});
+
+describe('battleWinners', () => {
+  function seat(id: string, overrides: Partial<BattlePlayer> = {}): BattlePlayer {
+    return {
+      id,
+      name: id,
+      host: false,
+      score: 0,
+      buried: false,
+      connected: true,
+      left: false,
+      waiting: false,
+      tiles: 0,
+      ...overrides,
+    };
+  }
+
+  function state(mode: BattleMode, players: BattlePlayer[], winnerId: string | null = null) {
+    return { mode, phase: 'finished' as const, players, game: 1, paused: false, winnerId };
+  }
+
+  it('gives an Endless Battle to the top score', () => {
+    const winners = battleWinners(
+      state('endless', [seat('a', { score: 10 }), seat('b', { score: 30 })]),
+    );
+    expect(winners.map((p) => p.id)).toEqual(['b']);
+  });
+
+  it('gives a tied Endless Battle to everyone who shares the top score', () => {
+    const winners = battleWinners(
+      state('endless', [
+        seat('a', { score: 30 }),
+        seat('b', { score: 20 }),
+        seat('c', { score: 30 }),
+      ]),
+    );
+    expect(winners.map((p) => p.id).sort()).toEqual(['a', 'c']);
+  });
+
+  it('leaves out players who sat the game out, however well they scored', () => {
+    const winners = battleWinners(
+      state('endless', [
+        seat('a', { score: 10 }),
+        seat('latecomer', { score: 999, waiting: true }),
+      ]),
+    );
+    expect(winners.map((p) => p.id)).toEqual(['a']);
+  });
+
+  it('gives a Duel to the survivor the host named, whatever the scores say', () => {
+    const winners = battleWinners(
+      state('duel', [seat('a', { score: 99, buried: true }), seat('b', { score: 1 })], 'b'),
+    );
+    expect(winners.map((p) => p.id)).toEqual(['b']);
+  });
+
+  it('gives a drawn Duel to nobody', () => {
+    const winners = battleWinners(
+      state('duel', [seat('a', { buried: true }), seat('b', { buried: true })], null),
+    );
+    expect(winners).toEqual([]);
   });
 });
 

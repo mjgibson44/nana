@@ -1,5 +1,11 @@
 import { useMemo } from 'react';
-import { ordinal, rankPlayers, type BattlePlayer, type BattleState } from '../game/battle';
+import {
+  battleWinners,
+  ordinal,
+  rankPlayers,
+  type BattlePlayer,
+  type BattleState,
+} from '../game/battle';
 
 interface BattleResultsProps {
   state: BattleState;
@@ -57,9 +63,7 @@ export function BattleResults({
 
   const waiting = state.players.filter((p) => p.waiting);
 
-  const winners = duel
-    ? rows.filter(({ player }) => player.id === state.winnerId).map((r) => r.player)
-    : rows.filter((entry) => entry.rank === 1).map((r) => r.player);
+  const winners = useMemo(() => battleWinners(state), [state]);
   const selfWon = winners.some((player) => player.id === selfId);
   const title = duel
     ? state.winnerId === null

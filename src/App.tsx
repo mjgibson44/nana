@@ -52,6 +52,7 @@ import { playSound, primeSound, setSoundEnabled, soundEnabled } from './game/sou
 import { loadStats, recordGame, type Stats } from './game/stats';
 import { TUTORIAL_SCRIPT, TUTORIAL_STEPS, scriptedPlacement } from './game/tutorial';
 import {
+  battleWinners,
   codeFromHash,
   createTileStream,
   rankPlayers,
@@ -106,10 +107,10 @@ const HOLD_DRAG_MS = 300;
 const TUTORIAL_DONE = TUTORIAL_STEPS + 1;
 
 /**
- * How many seconds of an Endless round tick down to the tiles landing. Five
+ * How many seconds of an Endless round tick down to the tiles landing. Three
  * beats is long enough to be a warning and short enough not to be a metronome.
  */
-const ENDLESS_TICK_FROM = 5;
+const ENDLESS_TICK_FROM = 3;
 
 /** Pinch limits, as a multiple of the stylesheet's cell size. */
 const MIN_ZOOM = 0.55;
@@ -1358,6 +1359,10 @@ export default function App() {
       // and only once the whole game is decided, not when one player goes under.
       setShowSummary(!inBattle);
       setEndReason(reason);
+      // Anything but 'won' is a game that beat you — buried under loose tiles,
+      // or out of time. Winning is announced elsewhere: a solo game has nothing
+      // to win, and a battle's is played once the whole field is settled.
+      if (reason !== 'won') playSound('lose');
       setCountdown(null);
       setDuelDrip(null);
       // The elapsed clock stops where the game did.
@@ -1587,7 +1592,7 @@ export default function App() {
   ]);
 
   /**
-   * The last five seconds before an Endless round ends tick, once a second, so
+   * The last few seconds before an Endless round ends tick, once a second, so
    * the tiles about to land are heard coming without anyone having to watch the
    * clock. Keyed by the round's end and the second it's counting, so a tick
    * plays once each — the clock is read four times a second — and a paused
@@ -1604,6 +1609,25 @@ export default function App() {
     tickedAt.current = key;
     playSound('tick');
   }, [mode, complete, countdown, remainingMs]);
+
+  /**
+   * Going over the loose limit sounds an alarm — the same moment the header's
+   * gauge turns red and its clock starts pleading. It's a warning, not a
+   * verdict: the round's remaining seconds are the deadline to dig back under.
+   * Digging under re-arms it, so a player riding the limit is warned every time
+   * they cross it rather than only the first time.
+   */
+  const overflowing = useRef(false);
+  useEffect(() => {
+    if (mode !== 'endless' || endlessPhase !== 'drip' || complete) {
+      overflowing.current = false;
+      return;
+    }
+    const over = looseTiles > ENDLESS_LOOSE_LIMIT;
+    if (over === overflowing.current) return;
+    overflowing.current = over;
+    if (over) playSound('overflow');
+  }, [mode, endlessPhase, complete, looseTiles]);
 
   /* --------------------------------- duel ----------------------------------- */
 
@@ -1714,8 +1738,13 @@ export default function App() {
   /**
    * The multiplayer game is decided. Freeze this board where it stands —
    * survivors keep the score they're on, exactly what the host ranked them
-   * by — and raise the standings. The ref keeps later re-renders (the board
-   * can still be fiddled with behind the results) from re-raising them.
+   * by — and raise the standings, with a fanfare for the player who took it.
+   * The ref keeps later re-renders (the board can still be fiddled with behind
+   * the results) from re-raising them, or sounding the fanfare twice.
+   *
+   * Winning is the only outcome sounded here. A player who went under already
+   * heard it at the moment they did — which in a duel is the same moment this
+   * runs, and the reason `finishGame` bows out on its own guard below.
    */
   const battleFinishSeen = useRef(false);
   useEffect(() => {
@@ -1727,7 +1756,10 @@ export default function App() {
     battleFinishSeen.current = true;
     finishGame('won');
     setShowBattleResults(true);
-  }, [battle, battlePhase, screen, finishGame]);
+    if (battleState && battleWinners(battleState).some((p) => p.id === battle.selfId)) {
+      playSound('win');
+    }
+  }, [battle, battlePhase, battleState, screen, finishGame]);
 
   // Going under in an Endless Battle isn't the end of the show — say so,
   // once, while the survivors race on. (A duel ends the moment anyone does.)
