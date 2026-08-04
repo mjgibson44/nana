@@ -245,6 +245,27 @@ export function rankPlayers<T extends Contestant>(players: T[]): RankedPlayer<T>
   return ranked;
 }
 
+/**
+ * Who took a decided game. An Endless Battle is won on score, so a tie hands
+ * back every player who shares the top rank; a Duel is won on survival, so it
+ * hands back the one the host named — and nobody at all for the draw where both
+ * duellists went down together.
+ *
+ * Waiting players sat this game out and can't have won it. Callers who only
+ * want a yes or no for themselves ask whether their own id is in here.
+ */
+export function battleWinners(state: BattleState): BattlePlayer[] {
+  const contestants = state.players.filter((p) => !p.waiting);
+  if (state.mode === 'duel') {
+    return state.winnerId === null
+      ? []
+      : contestants.filter((p) => p.id === state.winnerId);
+  }
+  return rankPlayers(contestants)
+    .filter(({ rank }) => rank === 1)
+    .map(({ player }) => player);
+}
+
 /** "1st", "2nd", "3rd"… for the rank badge and the results screen. */
 export function ordinal(rank: number): string {
   const tens = rank % 100;

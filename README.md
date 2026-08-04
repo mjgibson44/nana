@@ -146,11 +146,14 @@ and in the in-game menu.
 
 ### Sound
 
-Four short cues, in `src/game/sounds.ts`. Nothing is loaded from disk: each one
-is a handful of oscillators drawn on the fly through the Web Audio API, so the
-whole soundtrack costs no bytes and no requests.
+Seven cues, in `src/game/sounds.ts`. Nothing is loaded from disk: each one is a
+handful of oscillators drawn on the fly through the Web Audio API, so the whole
+soundtrack costs no bytes and no requests.
 
-- A quiet **tick** for each of the last five seconds of an Endless round, so the
+Five play while a game runs, all of them short enough that a fast player never
+hears one land on top of the last:
+
+- A quiet **tick** for each of the last three seconds of an Endless round, so the
   tiles about to land are heard coming without watching the clock. It follows
   the clock rather than a timer of its own, so a paused round (a splash is up)
   goes quiet.
@@ -160,6 +163,23 @@ whole soundtrack costs no bytes and no requests.
   should never sound like the arrival of tiles you earned.
 - A two-note **click** as a word goes down on the board. Every road to a landing
   runs through `commit`, so a dragged tile and a typed word sound alike.
+- A two-tone **alarm** the moment the loose pile goes over the limit, along with
+  the header's gauge turning red. It's a warning rather than a verdict — the
+  round's remaining seconds are the deadline to dig back under — and digging
+  under re-arms it, so a player riding the limit is warned every time they cross
+  it. (A Duel pile over *its* limit isn't a warning at all: it's the loss, and it
+  sounds like one.)
+
+Two end a game, and may take their time since nothing follows them:
+
+- Four notes **falling away** whenever a game ends against you — buried, or out
+  of time. It lives in `finishGame`, the one way any game ends, so every road to
+  a loss sounds the same.
+- The same shape **climbing** for the player who takes a multiplayer game.
+  `battleWinners` in `src/game/battle.ts` decides who that is — top score in a
+  Survival (all of them, on a tie), the surviving duellist in a Duel — and the
+  results screen names the winner from the same function, so the fanfare and the
+  headline can never disagree.
 
 **Game sound** on the Settings screen silences the lot, remembered in
 `localStorage`. While it's off no audio context is ever built at all; switching
@@ -213,7 +233,7 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
       codes/invite links, live standings, host controls, final rankings
 - [x] Duel mode: permanent words, attack tiles, escalating rounds
 - [x] Light/dark/system theme and a settings screen
-- [x] Game sounds — synthesized cues for ticks, tiles, attacks and words
+- [x] Game sounds — synthesized cues for ticks, tiles, attacks, words and endings
 - [x] Reconnection grace, auto-redial, and pause-on-disconnect
 - [ ] Hints powered by the generator's known solution
 - [ ] Live opponent boards (spectate other players' crosswords mid-battle)
