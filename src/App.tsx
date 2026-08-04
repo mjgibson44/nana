@@ -65,7 +65,7 @@ import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
 import { HomeScreen } from './components/HomeScreen';
 import { HowToModal } from './components/HowToModal';
-import { CloseIcon } from './components/icons';
+import { CloseIcon, GapIcon } from './components/icons';
 import { Menu } from './components/Menu';
 import { ModeInfoDialog } from './components/ModeInfoDialog';
 import { PileTools } from './components/PileTools';
@@ -2859,20 +2859,36 @@ export default function App() {
             </button>
           ) : null}
           {mode === 'tutorial' ? (
-            // Nothing in the menu is worth reaching for mid-tutorial, and the
-            // one thing that is — the way out — is worth a button of its own.
-            <button
-              type="button"
-              className="icon-btn"
-              title="Leave the tutorial"
-              aria-label="Leave the tutorial"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                leaveTutorial();
-              }}
-            >
-              <CloseIcon />
-            </button>
+            // Nothing in the menu is worth reaching for mid-tutorial. The two
+            // things that are — past this step, and out altogether — take its
+            // corner instead, which is where a way out gets looked for.
+            <>
+              {tutorialStep <= TUTORIAL_STEPS && (
+                <button
+                  type="button"
+                  className="btn tutorial-skip"
+                  title="Place this step’s word and move on"
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    skipTutorialStep();
+                  }}
+                >
+                  Skip
+                </button>
+              )}
+              <button
+                type="button"
+                className="icon-btn"
+                title="Leave the tutorial"
+                aria-label="Leave the tutorial"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  leaveTutorial();
+                }}
+              >
+                <CloseIcon />
+              </button>
+            </>
           ) : (
             <Menu
               onResetGame={inBattle ? null : () => newGame(mode, soloPace)}
@@ -2908,39 +2924,26 @@ export default function App() {
         <div className="tutorial-banner" role="status">
           {tutorialStep === 1 ? (
             <p className="tutorial-text">
-              Your pile spells <strong>SOLAR</strong>. Type it out (or tap the tiles in order),
-              then click an empty square on the board and press <kbd>Enter</kbd> — or the ✓ — to
-              place it. On a phone you can press and hold the board to drag the word around, then
-              confirm.
+              Your pile spells <strong>SOLAR</strong>. Type it out, click an empty square, then
+              press <kbd>Enter</kbd> — or the ✓ — to place it.
             </p>
           ) : tutorialStep === 2 ? (
             <p className="tutorial-text">
-              Words cross on shared letters. Click the empty square{' '}
-              <strong>directly above the R</strong>, then type <strong>OBIT</strong> — your pile
-              is short an R because the one already on the board is the R of{' '}
-              <strong>ORBIT</strong>. The word runs downwards; the ⟳ button turns it if it comes
-              out sideways.
+              Words cross on shared letters. Click the square{' '}
+              <strong>directly above the R</strong> and type <strong>OBIT</strong> — that R is the
+              one <strong>ORBIT</strong> needs.
             </p>
           ) : (
             <p className="tutorial-text">
-              Three tiles, four letters: <strong>PLE</strong> spells <strong>POLE</strong> if you
-              borrow an O from the board. Type <kbd>P</kbd>, press <kbd>Space</kbd> — or the
-              dashed gap button — for a gap where the O goes, then <kbd>L</kbd> and <kbd>E</kbd>.
-              Tap an <strong>O</strong> on the board and the gap drops onto it. Only a gap will
-              do here.
+              <strong>PLE</strong> spells <strong>POLE</strong> if you borrow an O. Type{' '}
+              <kbd>P</kbd>, then <kbd>Space</kbd> — or{' '}
+              <kbd className="tutorial-gap">
+                <GapIcon size={15} />
+              </kbd>{' '}
+              — for the gap, then <kbd>L</kbd> and <kbd>E</kbd>. Now tap an <strong>O</strong> on
+              the board.
             </p>
           )}
-          <button
-            type="button"
-            className="btn tutorial-skip"
-            title="Place this step’s word and move on"
-            onClick={(e) => {
-              e.currentTarget.blur();
-              skipTutorialStep();
-            }}
-          >
-            Skip
-          </button>
         </div>
       )}
 

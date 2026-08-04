@@ -1546,12 +1546,9 @@ body {
 
 /* ---------- tutorial ---------- */
 
-/* Rides between the header and the board: the current step's instructions,
-   always visible while the player works the board underneath. */
+/* Rides between the header and the board: the current step's instructions and
+   nothing else, always visible while the player works the board underneath. */
 .tutorial-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
   padding: 12px 18px;
   font-size: 14px;
   line-height: 1.45;
@@ -1575,15 +1572,21 @@ body {
   white-space: nowrap;
 }
 
-/* The way past a step that isn't landing. Sits at the far end of the banner,
-   clear of the instructions it's opting out of. */
+/* A button the instructions name, drawn in the sentence that says to press it:
+   the same key cap as the keys around it, with the icon itself inside. Laid out
+   as a flex box so the icon sits centred rather than on the text baseline. */
+.tutorial-text .tutorial-gap {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 5px;
+  vertical-align: -4px;
+}
+
+/* The way past a step that isn't landing. Lives in the header beside the way
+   out of the tutorial altogether, quieter than the ✕ it sits next to. */
 .tutorial-skip {
-  flex-shrink: 0;
-  margin-left: auto;
-  padding: 7px 16px;
   font-size: 13px;
   font-weight: 700;
-  border-radius: 10px;
 }
 
 /* ---------- full-page overlays ---------- */
@@ -1841,15 +1844,7 @@ body {
   }
 
   .tutorial-banner {
-    flex-direction: column;
-    gap: 8px;
     padding: 10px 12px;
-  }
-
-  /* Stacked, the auto margin has no row left to push along. */
-  .tutorial-skip {
-    margin-left: 0;
-    align-self: flex-end;
   }
 }
 
