@@ -1,6 +1,14 @@
 import { useState } from 'react';
-import { BATTLE_INFO, DUEL_INFO, ENDLESS_INFO, type ModeInfo } from '../game/modes';
 import {
+  BATTLE_INFO,
+  DUEL_INFO,
+  SOLO_BLITZ_INFO,
+  SOLO_RELAXED_INFO,
+  type ModeInfo,
+  type SoloPace,
+} from '../game/modes';
+import {
+  BlitzIcon,
   DuelIcon,
   HelpIcon,
   InfoIcon,
@@ -12,8 +20,8 @@ import {
 } from './icons';
 
 interface HomeScreenProps {
-  /** Start a solo Endless game. */
-  onPlayEndless: () => void;
+  /** Start a solo Endless game at the chosen pace. */
+  onPlaySolo: (pace: SoloPace) => void;
   /** Head for the Survival door: host or join a multiplayer lobby. */
   onBattle: () => void;
   /** Head for the Duel door: the two-player lobby flow. */
@@ -88,7 +96,7 @@ function HomeAction({
  * targets on a desktop looked like a toolbar rather than a choice.
  */
 export function HomeScreen({
-  onPlayEndless,
+  onPlaySolo,
   onBattle,
   onDuel,
   onTutorial,
@@ -109,10 +117,16 @@ export function HomeScreen({
 
         <div className="home-modes">
           <ModeCard
-            info={ENDLESS_INFO}
+            info={SOLO_RELAXED_INFO}
             icon={<SoloIcon />}
-            onClick={onPlayEndless}
-            onInfo={() => setInfoOf(ENDLESS_INFO)}
+            onClick={() => onPlaySolo('relaxed')}
+            onInfo={() => setInfoOf(SOLO_RELAXED_INFO)}
+          />
+          <ModeCard
+            info={SOLO_BLITZ_INFO}
+            icon={<BlitzIcon />}
+            onClick={() => onPlaySolo('blitz')}
+            onInfo={() => setInfoOf(SOLO_BLITZ_INFO)}
           />
           <ModeCard
             info={BATTLE_INFO}

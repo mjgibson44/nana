@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BLITZ_BATCH_ROUNDS,
+  BLITZ_DRIP_SECONDS,
+  BLITZ_INITIAL_SECONDS,
+  BLITZ_MAX_BATCH,
+  BLITZ_SMALL_BATCH,
   DUEL_DRIP_SECONDS,
   DUEL_PILE_LIMIT,
   DUEL_ROUND_SECONDS,
   ENDLESS_BIG_BATCH,
+  ENDLESS_INITIAL_SECONDS,
   ENDLESS_SLOW_ROUNDS,
   ENDLESS_SMALL_BATCH,
   ENDLESS_SMALL_BATCH_ROUNDS,
@@ -14,52 +20,115 @@ import {
   duelRoundAt,
   endlessDripSeconds,
   endlessDripTiles,
+  endlessInitialSeconds,
   formatSeconds,
 } from '../modes';
 
-describe('endlessDripSeconds', () => {
+describe('endlessInitialSeconds', () => {
+  it('gives relaxed two minutes and blitz one', () => {
+    expect(endlessInitialSeconds('relaxed')).toBe(ENDLESS_INITIAL_SECONDS);
+    expect(endlessInitialSeconds('relaxed')).toBe(120);
+    expect(endlessInitialSeconds('blitz')).toBe(BLITZ_INITIAL_SECONDS);
+    expect(endlessInitialSeconds('blitz')).toBe(60);
+  });
+});
+
+describe('endlessDripSeconds, relaxed', () => {
   it('holds 45 seconds for the first five rounds', () => {
     for (let i = 0; i < ENDLESS_SLOW_ROUNDS; i++) {
-      expect(endlessDripSeconds(i)).toBe(45);
+      expect(endlessDripSeconds(i, 'relaxed')).toBe(45);
     }
   });
 
   it('tightens to 30 seconds forever after', () => {
-    expect(endlessDripSeconds(ENDLESS_SLOW_ROUNDS)).toBe(30);
-    expect(endlessDripSeconds(10)).toBe(30);
-    expect(endlessDripSeconds(100)).toBe(30);
+    expect(endlessDripSeconds(ENDLESS_SLOW_ROUNDS, 'relaxed')).toBe(30);
+    expect(endlessDripSeconds(10, 'relaxed')).toBe(30);
+    expect(endlessDripSeconds(100, 'relaxed')).toBe(30);
   });
 
   it('only ever gets shorter', () => {
     for (let i = 1; i <= 30; i++) {
-      expect(endlessDripSeconds(i)).toBeLessThanOrEqual(endlessDripSeconds(i - 1));
+      expect(endlessDripSeconds(i, 'relaxed')).toBeLessThanOrEqual(
+        endlessDripSeconds(i - 1, 'relaxed'),
+      );
     }
   });
 });
 
-describe('endlessDripTiles', () => {
+describe('endlessDripTiles, relaxed', () => {
   it('deals fives through the slow rounds and the first fast ones', () => {
     for (let i = 0; i < ENDLESS_SMALL_BATCH_ROUNDS; i++) {
-      expect(endlessDripTiles(i)).toBe(ENDLESS_SMALL_BATCH);
+      expect(endlessDripTiles(i, 'relaxed')).toBe(ENDLESS_SMALL_BATCH);
     }
   });
 
   it('keeps dealing fives when the clock first tightens', () => {
     // The 30-second rounds start at interval 5; the batch only grows five
     // rounds later.
-    expect(endlessDripTiles(ENDLESS_SLOW_ROUNDS)).toBe(ENDLESS_SMALL_BATCH);
-    expect(endlessDripTiles(ENDLESS_SMALL_BATCH_ROUNDS - 1)).toBe(ENDLESS_SMALL_BATCH);
+    expect(endlessDripTiles(ENDLESS_SLOW_ROUNDS, 'relaxed')).toBe(ENDLESS_SMALL_BATCH);
+    expect(endlessDripTiles(ENDLESS_SMALL_BATCH_ROUNDS - 1, 'relaxed')).toBe(ENDLESS_SMALL_BATCH);
   });
 
   it('deals sevens forever after', () => {
-    expect(endlessDripTiles(ENDLESS_SMALL_BATCH_ROUNDS)).toBe(ENDLESS_BIG_BATCH);
-    expect(endlessDripTiles(20)).toBe(ENDLESS_BIG_BATCH);
-    expect(endlessDripTiles(100)).toBe(ENDLESS_BIG_BATCH);
+    expect(endlessDripTiles(ENDLESS_SMALL_BATCH_ROUNDS, 'relaxed')).toBe(ENDLESS_BIG_BATCH);
+    expect(endlessDripTiles(20, 'relaxed')).toBe(ENDLESS_BIG_BATCH);
+    expect(endlessDripTiles(100, 'relaxed')).toBe(ENDLESS_BIG_BATCH);
   });
 
   it('only ever grows', () => {
     for (let i = 1; i <= 30; i++) {
-      expect(endlessDripTiles(i)).toBeGreaterThanOrEqual(endlessDripTiles(i - 1));
+      expect(endlessDripTiles(i, 'relaxed')).toBeGreaterThanOrEqual(
+        endlessDripTiles(i - 1, 'relaxed'),
+      );
+    }
+  });
+});
+
+describe('endlessDripSeconds, blitz', () => {
+  it('holds fifteen seconds forever — the batch is what grows', () => {
+    for (const i of [0, 1, 7, 8, 55, 56, 500]) {
+      expect(endlessDripSeconds(i, 'blitz')).toBe(BLITZ_DRIP_SECONDS);
+      expect(endlessDripSeconds(i, 'blitz')).toBe(15);
+    }
+  });
+});
+
+describe('endlessDripTiles, blitz', () => {
+  it('deals threes for the first eight rounds', () => {
+    for (let i = 0; i < BLITZ_BATCH_ROUNDS; i++) {
+      expect(endlessDripTiles(i, 'blitz')).toBe(BLITZ_SMALL_BATCH);
+      expect(endlessDripTiles(i, 'blitz')).toBe(3);
+    }
+  });
+
+  it('grows the batch by one every eight rounds', () => {
+    // Two minutes at each size: eight fifteen-second rounds.
+    expect(endlessDripTiles(BLITZ_BATCH_ROUNDS, 'blitz')).toBe(4);
+    expect(endlessDripTiles(BLITZ_BATCH_ROUNDS * 2 - 1, 'blitz')).toBe(4);
+    expect(endlessDripTiles(BLITZ_BATCH_ROUNDS * 2, 'blitz')).toBe(5);
+    expect(endlessDripTiles(BLITZ_BATCH_ROUNDS * 3, 'blitz')).toBe(6);
+  });
+
+  it('tops out at ten and stays there', () => {
+    // Three grown seven times: round 56 is the first to deal ten.
+    const firstMaxRound = BLITZ_BATCH_ROUNDS * (BLITZ_MAX_BATCH - BLITZ_SMALL_BATCH);
+    expect(firstMaxRound).toBe(56);
+    expect(endlessDripTiles(firstMaxRound - 1, 'blitz')).toBe(BLITZ_MAX_BATCH - 1);
+    expect(endlessDripTiles(firstMaxRound, 'blitz')).toBe(BLITZ_MAX_BATCH);
+    expect(endlessDripTiles(1000, 'blitz')).toBe(BLITZ_MAX_BATCH);
+  });
+
+  it('only ever grows', () => {
+    for (let i = 1; i <= 120; i++) {
+      expect(endlessDripTiles(i, 'blitz')).toBeGreaterThanOrEqual(
+        endlessDripTiles(i - 1, 'blitz'),
+      );
+    }
+  });
+
+  it('is never gentler than relaxed on either dial', () => {
+    for (let i = 0; i <= 60; i++) {
+      expect(endlessDripSeconds(i, 'blitz')).toBeLessThan(endlessDripSeconds(i, 'relaxed'));
     }
   });
 });
