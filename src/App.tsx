@@ -2335,6 +2335,20 @@ export default function App() {
    */
   const pinch = useRef<{ startGap: number; startZoom: number } | null>(null);
 
+  /**
+   * A pinch's scroll compensation, waiting for its zoom to reach the DOM.
+   * Holds where the point between the fingers sat — as a fraction of the
+   * board, and as a spot in the viewport — so the board can be scrolled to
+   * put that same point straight back under the fingers.
+   */
+  const pendingPinch = useRef<{
+    zoom: number;
+    fx: number;
+    fy: number;
+    viewX: number;
+    viewY: number;
+  } | null>(null);
+
   useEffect(() => {
     const wrap = boardWrapRef.current;
     if (!wrap) return;
@@ -2353,8 +2367,26 @@ export default function App() {
       if (e.touches.length !== 2 || !pinch.current) return;
       e.preventDefault(); // don't let it turn into a page scroll
       const ratio = gap(e.touches) / pinch.current.startGap;
-      const next = pinch.current.startZoom * ratio;
-      setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next)));
+      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.current.startZoom * ratio));
+      if (next === zoom) return;
+      // The zoom must grow the board out from between the fingers, not from
+      // its top-left corner: note where the midpoint sits before resizing so
+      // the scroll can cancel the drift once the new size renders.
+      const boardEl = wrap.querySelector('.board') as HTMLElement | null;
+      if (boardEl) {
+        const wrapRect = wrap.getBoundingClientRect();
+        const rect = boardEl.getBoundingClientRect();
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        pendingPinch.current = {
+          zoom: next,
+          fx: (midX - rect.left) / rect.width,
+          fy: (midY - rect.top) / rect.height,
+          viewX: midX - wrapRect.left,
+          viewY: midY - wrapRect.top,
+        };
+      }
+      setZoom(next);
     };
     const onTouchEnd = (e: TouchEvent) => {
       if (e.touches.length < 2) pinch.current = null;
@@ -2370,6 +2402,24 @@ export default function App() {
       wrap.removeEventListener('touchend', onTouchEnd);
       wrap.removeEventListener('touchcancel', onTouchEnd);
     };
+    // `screen` re-runs this once the game (and its board) is actually up —
+    // on the home screen there is no board to listen on yet.
+  }, [zoom, screen]);
+
+  // The second half of the pinch: the tiles have rendered at their new size,
+  // so scroll the board point that was between the fingers straight back
+  // under them. Grid cells scale uniformly, so the fraction carries over.
+  useLayoutEffect(() => {
+    const wrap = boardWrapRef.current;
+    const pending = pendingPinch.current;
+    if (!wrap || !pending || pending.zoom !== zoom) return;
+    pendingPinch.current = null;
+    const boardEl = wrap.querySelector('.board') as HTMLElement | null;
+    if (!boardEl) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const rect = boardEl.getBoundingClientRect();
+    wrap.scrollLeft += rect.left - wrapRect.left + pending.fx * rect.width - pending.viewX;
+    wrap.scrollTop += rect.top - wrapRect.top + pending.fy * rect.height - pending.viewY;
   }, [zoom]);
 
   const timerSeconds = remainingMs === null ? null : Math.ceil(remainingMs / 1000);
