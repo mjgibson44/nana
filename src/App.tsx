@@ -2680,6 +2680,7 @@ export default function App() {
           previewGaps={previewGaps}
           cursorKey={cursorKey}
           cursorDir={interaction.kind === 'place' ? interaction.dir : null}
+          rotateKey={interaction.kind === 'place' ? interaction.anchor : null}
           showRotate={showRotate}
           wordsByCell={wordsByCell}
           // The controls belong to the selected letter, and get out of the way
