@@ -19,6 +19,9 @@ interface GridProps {
   cursorKey: CellKey | null;
   /** The direction that word is being laid in. */
   cursorDir: Direction | null;
+  /** The chosen cell the word reads from — its first letter, where the
+   * rotate button sits. */
+  rotateKey: CellKey | null;
   /** Offer the rotate button — only when the cell could go either way. */
   showRotate: boolean;
   /** Words on the board, keyed by every cell they occupy. */
@@ -55,6 +58,7 @@ export const Grid = memo(function Grid({
   previewGaps,
   cursorKey,
   cursorDir,
+  rotateKey,
   showRotate,
   wordsByCell,
   openWordCell,
@@ -80,9 +84,9 @@ export const Grid = memo(function Grid({
       const ghost = preview.get(key);
       const isCursor = key === cursorKey;
       const inWords = wordsByCell.get(key);
-      // The turn button travels with the focus square, and only shows up when
-      // that square has a real choice of direction.
-      const rotateDir = isCursor && showRotate ? cursorDir : null;
+      // The turn button sits on the word's first letter — the chosen cell —
+      // and only shows up when that cell has a real choice of direction.
+      const rotateDir = key === rotateKey && showRotate ? cursorDir : null;
 
       cells.push(
         <div

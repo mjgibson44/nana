@@ -29,8 +29,10 @@ interface ScoreboardProps {
   round: string | null;
   /** Tiles against the limit that ends the game. Null while not in play.
    * `label` says which count it is — loose tiles in Endless, the whole
-   * pile in a Duel. */
-  tiles: { label: string; loose: number; limit: number } | null;
+   * pile in a Duel. `warnAt`/`urgentAt` are explicit alarm thresholds: from
+   * `warnAt` the count flashes orange, from `urgentAt` red and faster.
+   * Without them the count falls back to a steady orange near the limit. */
+  tiles: { label: string; loose: number; limit: number; warnAt?: number; urgentAt?: number } | null;
   /** Duel: the other player's pile, to watch them drown (or not). */
   opponent: { name: string; tiles: number; limit: number; out: boolean } | null;
   /** This player's place in a battle, or null outside one. */
@@ -54,11 +56,22 @@ export function Scoreboard({
   pops,
   onPopEnd,
 }: ScoreboardProps) {
-  // Over the limit is red — the count flips to how far over. At or near the
-  // limit is orange; comfortably under is green.
+  // Over the limit is red — the count flips to how far over. Below it, the
+  // explicit thresholds take over when given: flashing red from `urgentAt`,
+  // flashing orange from `warnAt`. Without them (Endless), near the limit is
+  // a steady orange. Comfortably under is green either way.
   const over = tiles ? tiles.loose - tiles.limit : 0;
-  const tilesTone =
-    over > 0 ? 'over' : tiles && tiles.limit - tiles.loose <= TILES_WARN_MARGIN ? 'warn' : 'ok';
+  const tilesTone = !tiles
+    ? 'ok'
+    : over > 0
+      ? 'over'
+      : tiles.urgentAt !== undefined && tiles.loose >= tiles.urgentAt
+        ? 'urgent'
+        : tiles.warnAt !== undefined && tiles.loose >= tiles.warnAt
+          ? 'alert'
+          : tiles.warnAt === undefined && tiles.limit - tiles.loose <= TILES_WARN_MARGIN
+            ? 'warn'
+            : 'ok';
 
   return (
     <div className="scoreboard">
