@@ -1589,6 +1589,25 @@ body {
   font-weight: 700;
 }
 
+/* Takes over the word bar and the pile once the script is done: there is
+   nothing left to type and no tiles left to type it with, so the whole band
+   under the board becomes the way onward — and the finished crossword above it
+   is left clear to be looked at. */
+.tutorial-finish {
+  display: flex;
+  justify-content: center;
+  padding: 16px 18px calc(16px + env(safe-area-inset-bottom));
+  background: var(--surface-alt);
+  border-top: 3px solid var(--ink);
+}
+
+.tutorial-finish-btn {
+  min-width: min(280px, 100%);
+  padding: 14px 24px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
 /* ---------- full-page overlays ---------- */
 
 /* The way out of a full-page overlay — how-to, stats, settings. The X rides the

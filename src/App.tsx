@@ -92,11 +92,10 @@ const ROUND_SPLASH_MS = 5000;
 const HOLD_DRAG_MS = 300;
 
 /**
- * The tutorial's step counter runs past its script: one step for the
- * graduation dialog, and one for the free practice after it's been read.
+ * One past the script: every word is on the board, and the pile's tools give
+ * their room over to the way out.
  */
-const TUTORIAL_GRADUATION = TUTORIAL_STEPS + 1;
-const TUTORIAL_FREE_PLAY = TUTORIAL_STEPS + 2;
+const TUTORIAL_DONE = TUTORIAL_STEPS + 1;
 
 /** Pinch limits, as a multiple of the stylesheet's cell size. */
 const MIN_ZOOM = 0.55;
@@ -352,13 +351,16 @@ export default function App() {
   const [duelDrip, setDuelDrip] = useState<Countdown | null>(null);
   /** Duel: how many drips have landed, which sizes the next one. */
   const duelDripIndex = useRef(0);
-  /** Tutorial: which step of TUTORIAL_SCRIPT is being worked, counting from 1
-   * — then TUTORIAL_GRADUATION for the closing dialog, and TUTORIAL_FREE_PLAY
-   * for the free practice after it. */
+  /** Tutorial: which step of TUTORIAL_SCRIPT is being worked, counting from 1,
+   * and then TUTORIAL_DONE once they're all played. */
   const [tutorialStep, setTutorialStep] = useState(1);
-  /** Tutorial: how many steps were skipped rather than played. Skip the lot and
-   * the closing summary is spared you — see the effect that watches this. */
-  const [tutorialSkips, setTutorialSkips] = useState(0);
+  /**
+   * Tutorial: how many steps were skipped rather than played. A ref because the
+   * step that finishes the script reads it in the same breath as the skip that
+   * finished it — see advanceTutorial, which hands a player who skipped the lot
+   * straight on rather than parking them on a finish button.
+   */
+  const tutorialSkips = useRef(0);
   /** How the finished game ended, for the summary's headline. */
   const [endReason, setEndReason] = useState<EndReason | null>(null);
   /** The banner riding over the board ("+5 tiles!"), keyed so repeats replay. */
@@ -514,7 +516,7 @@ export default function App() {
     duelDripIndex.current = 0;
     setDuelDrip(nextMode === 'duel' ? runningCountdown(DUEL_DRIP_SECONDS) : null);
     setTutorialStep(1);
-    setTutorialSkips(0);
+    tutorialSkips.current = 0;
     setToast(null);
     setTileDrop(null);
     setZoom(1);
@@ -601,15 +603,12 @@ export default function App() {
   }, [pendingDoor, enterDoor]);
 
   /**
-   * Done with the tutorial, by any road — graduated, skipped through, or shut
+   * Done with the tutorial, by any road — finished, skipped through, or shut
    * with the X. A first-timer came here on their way to a game, so hand them
    * on to it (by way of its explainer); anyone who picked the tutorial for its
    * own sake goes back to the menu.
    */
   const leaveTutorial = useCallback(() => {
-    // Whatever the tutorial had on screen — its banner, its closing summary —
-    // is finished with, and mustn't be left showing behind what comes next.
-    setTutorialStep(TUTORIAL_FREE_PLAY);
     if (pendingDoor?.at !== 'tutorial') {
       returnHome();
       return;
@@ -620,17 +619,6 @@ export default function App() {
 
   /** The mode being introduced right now, or null while nothing is up. */
   const explainer = pendingDoor?.at === 'explainer' ? DOOR_INFO[pendingDoor.door] : null;
-
-  // Skipped from end to end, the tutorial has nothing to sum up: hand the
-  // player on rather than make them dismiss a lesson they opted out of.
-  // `leaveTutorial` steps past the summary, which is what holds this to a
-  // single handoff — what it hands off to is itself a state change, and would
-  // otherwise bring this straight back round.
-  useEffect(() => {
-    if (mode !== 'tutorial' || tutorialStep !== TUTORIAL_GRADUATION) return;
-    if (tutorialSkips < TUTORIAL_STEPS) return;
-    leaveTutorial();
-  }, [mode, tutorialStep, tutorialSkips, leaveTutorial]);
 
   /* --------------------------- battle lifecycle ----------------------------- */
 
@@ -1799,25 +1787,39 @@ export default function App() {
   }, []);
 
   /**
-   * Move the tutorial on from `from`: deal the next step's tiles, or — with the
-   * script finished — put the graduation dialog up. `placedDir` is the way the
-   * word that finished the step ran; every step crosses the one before it, so
-   * guessing the other way round next aims the following word right without a
-   * rotate.
+   * Move the tutorial on from `from`: call out the word that just landed and
+   * deal the next step's tiles, or — with the script finished — leave the board
+   * to be admired behind the way out. `placedDir` is the way the finishing word
+   * ran; every step crosses the one before it, so guessing the other way round
+   * next aims the following word right without a rotate.
    */
-  const advanceTutorial = useCallback((from: number, placedDir: Direction) => {
-    setTutorialStep(from + 1);
-    setLastDir(placedDir === 'across' ? 'down' : 'across');
-    const next = TUTORIAL_SCRIPT[from];
-    if (!next) return;
-    const tiles = [...next.tiles];
-    setRack((prev) => [...prev, ...tiles]);
-    // The dealt tiles join every remembered pile too: undoing a move must take
-    // back the move alone, never disappear tiles the tutorial has dealt.
-    setHistory((past) => past.map((snap) => ({ ...snap, rack: [...snap.rack, ...tiles] })));
-    setFuture((ahead) => ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...tiles] })));
-    setTileDrop({ count: tiles.length, serial: ++dropSerial.current });
-  }, []);
+  const advanceTutorial = useCallback(
+    (from: number, placedDir: Direction) => {
+      setTutorialStep(from + 1);
+      setLastDir(placedDir === 'across' ? 'down' : 'across');
+      const next = TUTORIAL_SCRIPT[from];
+
+      // Skipped from end to end: hand the player on rather than park them on a
+      // finish button for a tutorial they plainly opted out of.
+      if (!next && tutorialSkips.current >= TUTORIAL_STEPS) {
+        leaveTutorial();
+        return;
+      }
+
+      const done = TUTORIAL_SCRIPT[from - 1]?.done;
+      if (done) setToast({ text: done, serial: ++dropSerial.current });
+      if (!next) return;
+
+      const tiles = [...next.tiles];
+      setRack((prev) => [...prev, ...tiles]);
+      // The dealt tiles join every remembered pile too: undoing a move must take
+      // back the move alone, never disappear tiles the tutorial has dealt.
+      setHistory((past) => past.map((snap) => ({ ...snap, rack: [...snap.rack, ...tiles] })));
+      setFuture((ahead) => ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...tiles] })));
+      setTileDrop({ count: tiles.length, serial: ++dropSerial.current });
+    },
+    [leaveTutorial],
+  );
 
   /**
    * Drop the planned tiles onto the board and spend the pile letters they
@@ -1949,7 +1951,7 @@ export default function App() {
   const skipTutorialStep = useCallback(() => {
     const step = TUTORIAL_SCRIPT[tutorialStep - 1];
     if (!step) return;
-    setTutorialSkips((skipped) => skipped + 1);
+    tutorialSkips.current += 1;
     const played = scriptedPlacement(board, bounds, step, rack);
     if (played) commit(keyOf(played.anchor.row, played.anchor.col), played.dir, played.picks);
     else advanceTutorial(tutorialStep, lastDir);
@@ -2935,13 +2937,13 @@ export default function App() {
             </p>
           ) : (
             <p className="tutorial-text">
-              <strong>PLE</strong> spells <strong>POLE</strong> if you borrow an O. Type{' '}
-              <kbd>P</kbd>, then <kbd>Space</kbd> — or{' '}
+              <strong>PLE</strong> spells <strong>POLE</strong> by overlapping{' '}
+              <strong>SOLAR</strong>. Type <kbd>P</kbd>, then <kbd>Space</kbd> — or{' '}
               <kbd className="tutorial-gap">
                 <GapIcon size={15} />
               </kbd>{' '}
-              — for the gap, then <kbd>L</kbd> and <kbd>E</kbd>. Now tap an <strong>O</strong> on
-              the board.
+              — for the gap, then <kbd>L</kbd> and <kbd>E</kbd>. Now click{' '}
+              <strong>SOLAR&rsquo;s O</strong> and the gap drops onto it.
             </p>
           )}
         </div>
@@ -3010,50 +3012,66 @@ export default function App() {
         </div>
       )}
 
-      <WordBar
-        letters={pickList.map((p) => p.letter)}
-        mode={interaction.kind}
-        overflowed={plan !== null && !plan.complete}
-        verdict={verdict}
-        canConfirm={
-          interaction.kind === 'place' &&
-          plan !== null &&
-          plan.complete &&
-          plan.steps.length > 0 &&
-          (mode !== 'duel' || (verdict?.ok ?? false))
-        }
-        canCancel={interaction.kind !== 'idle' || selectedKey !== null}
-        onRemove={(position) => setPicks(picks.filter((_, i) => i !== position))}
-        onConfirm={() => {
-          if (target) commit(target.key, target.dir);
-        }}
-        onCancel={clearFocus}
-        tools={
-          <PileTools
-            onUndo={undo}
-            canUndo={history.length > 0}
-            onRedo={redo}
-            canRedo={future.length > 0}
-            onBackspace={backspace}
-            canBackspace={selectedKey !== null || picks.length > 0}
-            onRotate={rotateDirection}
-            canRotate={canRotateAnchor}
-            rotateTo={
-              interaction.kind === 'place' && interaction.dir === 'across' ? 'down' : 'across'
+      {/* The finished tutorial has an empty pile and nothing left to type, so
+          the whole working area below the board goes to the way onward. */}
+      {mode === 'tutorial' && tutorialStep === TUTORIAL_DONE ? (
+        <div className="tutorial-finish">
+          <button
+            type="button"
+            className="btn btn-primary tutorial-finish-btn"
+            onClick={leaveTutorial}
+          >
+            Finish Tutorial
+          </button>
+        </div>
+      ) : (
+        <>
+          <WordBar
+            letters={pickList.map((p) => p.letter)}
+            mode={interaction.kind}
+            overflowed={plan !== null && !plan.complete}
+            verdict={verdict}
+            canConfirm={
+              interaction.kind === 'place' &&
+              plan !== null &&
+              plan.complete &&
+              plan.steps.length > 0 &&
+              (mode !== 'duel' || (verdict?.ok ?? false))
             }
-            onAddGap={addGap}
+            canCancel={interaction.kind !== 'idle' || selectedKey !== null}
+            onRemove={(position) => setPicks(picks.filter((_, i) => i !== position))}
+            onConfirm={() => {
+              if (target) commit(target.key, target.dir);
+            }}
+            onCancel={clearFocus}
+            tools={
+              <PileTools
+                onUndo={undo}
+                canUndo={history.length > 0}
+                onRedo={redo}
+                canRedo={future.length > 0}
+                onBackspace={backspace}
+                canBackspace={selectedKey !== null || picks.length > 0}
+                onRotate={rotateDirection}
+                canRotate={canRotateAnchor}
+                rotateTo={
+                  interaction.kind === 'place' && interaction.dir === 'across' ? 'down' : 'across'
+                }
+                onAddGap={addGap}
+              />
+            }
           />
-        }
-      />
 
-      <Rack
-        letters={rack}
-        hiddenIndex={drag?.source.type === 'rack' ? drag.source.index : null}
-        picks={picks}
-        justAdded={tileDrop?.count ?? 0}
-        onShuffle={shufflePile}
-        onTilePointerDown={(index, letter, e) => startDrag(letter, { type: 'rack', index }, e)}
-      />
+          <Rack
+            letters={rack}
+            hiddenIndex={drag?.source.type === 'rack' ? drag.source.index : null}
+            picks={picks}
+            justAdded={tileDrop?.count ?? 0}
+            onShuffle={shufflePile}
+            onTilePointerDown={(index, letter, e) => startDrag(letter, { type: 'rack', index }, e)}
+          />
+        </>
+      )}
 
       {drag && (
         <div
@@ -3119,28 +3137,6 @@ export default function App() {
         theme={themePref}
         onTheme={chooseTheme}
         onClose={() => setSettingsOpen(false)}
-      />
-
-      {/* The tutorial's graduation: every step done. */}
-      <ConfirmDialog
-        message={
-          mode === 'tutorial' && tutorialStep === TUTORIAL_GRADUATION
-            ? 'That’s the whole game: weave every tile into one connected crossword of real ' +
-              'words. Green means good, red means not a word, orange means not connected yet. ' +
-              'You’re ready.'
-            : null
-        }
-        // A first-timer is here on the way to a game, and that's where
-        // confirming takes them; anyone who came for the tutorial itself
-        // goes back to the menu.
-        confirmLabel={
-          pendingDoor?.at === 'tutorial'
-            ? `Play ${DOOR_INFO[pendingDoor.door].name}`
-            : 'Back to the menu'
-        }
-        cancelLabel="Keep practicing"
-        onConfirm={leaveTutorial}
-        onCancel={() => setTutorialStep(TUTORIAL_FREE_PLAY)}
       />
 
       {/* Straight after the tutorial: what the game waiting behind this is. */}

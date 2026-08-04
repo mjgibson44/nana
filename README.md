@@ -110,8 +110,11 @@ in `src/game/modes.ts`.
   dealt an R short so it has to cross the one already down, then POLE dealt two
   short so it has to borrow the board's O with a gap tile — that last step won't
   accept the word played any other way. Each step deals only its own tiles and
-  waits for its own word, "Skip" plays the word for you, and there is no clock
-  and no score.
+  waits for its own word, calling it out over the board as it lands; "Skip" (in
+  the header, beside the way out) plays a step's word for you. There is no clock
+  and no score. With all three words down, the pile and its tools give their
+  room over to a single "Finish Tutorial" button, leaving the finished crossword
+  on screen to be looked at.
 
 ### Meeting the game for the first time
 
