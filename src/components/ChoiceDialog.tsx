@@ -6,7 +6,7 @@ export interface ChoiceOption {
 }
 
 interface ChoiceDialogProps {
-  /** The mode being configured ("Blitz", "Puzzle"). */
+  /** The mode being configured ("Blitz", "Puzzle", "Puzzle Flow"). */
   title: string;
   /** What's being chosen ("Pick your pace"). */
   subtitle: string;
@@ -18,9 +18,10 @@ interface ChoiceDialogProps {
 }
 
 /**
- * The popup a configurable mode raises on the way in: Blitz asking which
- * pace, Puzzle asking which board. One tap on an option starts the game;
- * the X, or a click outside, backs out of the mode altogether.
+ * The popup a configurable mode raises on the way in: Blitz asking which pace,
+ * Puzzle asking which puzzle and then which board. One tap on an option moves
+ * on — starting the game, once there's nothing left to ask; the X, or a click
+ * outside, backs out of the mode altogether.
  */
 export function ChoiceDialog({ title, subtitle, options, onPick, onDismiss }: ChoiceDialogProps) {
   return (

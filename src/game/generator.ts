@@ -254,6 +254,21 @@ function fallbackSample(
   return null;
 }
 
+/**
+ * Letters for a count too small to spell anything — one or two tiles, which
+ * Puzzle Flow asks for whenever a short word is played. They're drawn a letter
+ * at a time from real words, so the mix still reads like English, but no word
+ * and no arrangement is promised.
+ */
+function sampleLetters(usable: string[], count: number, rng: () => number): string[] {
+  const letters: string[] = [];
+  while (letters.length < count) {
+    const word = pick(usable, rng);
+    letters.push(word[Math.floor(rng() * word.length)]);
+  }
+  return letters;
+}
+
 /** Would a word laid from here stay on the board? */
 function fitsBoard(
   start: { row: number; col: number },
@@ -286,12 +301,16 @@ function tryExtend(
   const before = Object.keys(initial).length;
   let added = 0;
   let failures = 0;
+  // The cells a new word can cross, listed once and extended as words land —
+  // a full congested board is hundreds of cells, and re-listing them for each
+  // of hundreds of tries is most of what a failing extension would cost.
+  let anchors = Object.keys(state.grid);
 
   while (added < tileCount && failures < 800) {
     const lengths = usableLengths(tileCount - added);
     if (lengths.length === 0) return null;
 
-    const anchorKey = pick(Object.keys(state.grid), rng);
+    const anchorKey = pick(anchors, rng);
     const comma = anchorKey.indexOf(',');
     const anchorRow = Number(anchorKey.slice(0, comma));
     const anchorCol = Number(anchorKey.slice(comma + 1));
@@ -323,7 +342,8 @@ function tryExtend(
     }
 
     place(state, word, start.row, start.col, dir);
-    added = Object.keys(state.grid).length - before;
+    anchors = Object.keys(state.grid);
+    added = anchors.length - before;
   }
 
   return added === tileCount ? state : null;
@@ -346,10 +366,11 @@ export function extendPuzzle(
   rng: () => number = Math.random,
 ): { letters: string[]; words: string[]; solution: TileMap | null } {
   // Nothing to grow from: this is just a fresh little puzzle of its own.
-  if (Object.keys(board).length === 0) {
-    const puzzle = generatePuzzle(wordPool, tileCount, rng);
-    return { letters: puzzle.letters, words: puzzle.sourceWords, solution: null };
-  }
+  if (Object.keys(board).length === 0) return standalone(wordPool, tileCount, rng);
+
+  // A single tile is fewer than any word could bring — the shortest word
+  // crossing a letter already down adds two — so there's nothing to try for it.
+  if (tileCount < MIN_WORD_LEN - 1) return standalone(wordPool, tileCount, rng);
 
   const byLetter = new Map<string, string[]>();
   for (const word of usableWords(wordPool)) {
@@ -370,8 +391,26 @@ export function extendPuzzle(
     return { letters: shuffle(letters, rng), words: built.words, solution: built.grid };
   }
 
-  // A board too congested to grow off of. The letters still spell real words;
-  // the player just isn't handed a guaranteed home for them.
+  // A board too congested to grow off of. The player just isn't handed a
+  // guaranteed home for these letters.
+  return standalone(wordPool, tileCount, rng);
+}
+
+/**
+ * Letters owing nothing to the board they're joining: a whole little puzzle of
+ * their own where that's possible, and a plain draw from the pool where the
+ * count is too small for even one word.
+ */
+function standalone(
+  wordPool: string[],
+  tileCount: number,
+  rng: () => number,
+): { letters: string[]; words: string[]; solution: TileMap | null } {
+  if (tileCount < MIN_WORD_LEN) {
+    const usable = usableWords(wordPool);
+    if (usable.length === 0) throw new Error('word pool is empty');
+    return { letters: sampleLetters(usable, tileCount, rng), words: [], solution: null };
+  }
   const puzzle = generatePuzzle(wordPool, tileCount, rng);
   return { letters: puzzle.letters, words: puzzle.sourceWords, solution: null };
 }

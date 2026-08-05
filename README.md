@@ -50,7 +50,7 @@ src/
     types.ts            #   board = plain serializable Record<"row,col", letter>
     board.ts            #   word extraction, dictionary + connectivity validation
     generator.ts        #   crossword-construction letter dealing
-    modes.ts            #   the rules: Blitz pacing (regular/fast), Puzzle boards, Duel rounds
+    modes.ts            #   the rules: Blitz pacing (regular/fast), Puzzle boards and variants, Duel rounds
     battle.ts           #   multiplayer brain: codes, shared deal, referees
     dictionary.ts       #   word list loading/parsing
     commonWords.ts      #   generation word pool (subset of the dictionary)
@@ -84,11 +84,23 @@ in `src/game/modes.ts`.
   end the game by itself; still being over when the round's clock runs out is
   what buries you.
 - **Puzzle** — no clock and no losing. Played on a fixed board with real edges,
-  chosen on the way in: 9×9, 13×13 or 19×19. You get 20 tiles; weave every one
-  into a single connected crossword and 20 more arrive (plus the 25-point
-  clear bonus), for as long as you like. The header keeps score and counts the
-  time elapsed, and the **Finish** button in the top right ends the game
-  whenever you decide you're done.
+  chosen on the way in: 9×9, 13×13 or 19×19. You get 20 tiles, the header keeps
+  score and counts the time elapsed, and the **Finish** button in the top right
+  ends the game whenever you decide you're done. Two puzzles, picked before the
+  board is:
+  - **Puzzle Solve** — nothing is settled. Tiles move, words come apart, and
+    weaving every last tile into one connected crossword pays the 25-point
+    clear bonus and deals 20 more, for as long as you like.
+  - **Puzzle Flow** — every word you place is **locked** where it lands, so —
+    exactly as in a Duel — only real words are allowed down, there's no undo,
+    and nothing can be dragged, turned or taken back. In exchange the tiles the
+    word spent come straight back, so the pile stands at 20 for as long as the
+    board has room. The new letters are grown off the board as it now stands
+    (`extendPuzzle`), so each one is known to have a home somewhere on a board
+    that can't be rearranged; once the board is too congested to grow off, they
+    fall back to a plain draw. A pile that always refills is never cleared, so
+    the clear bonus simply isn't one of Flow's rewards — the score is the words
+    on the board when you press Finish.
 - **Survival** (Endless Battle) — Blitz Regular, against your friends. Every
   player shares one deal, so Survival always runs at the regular pace. One player hosts a
   lobby and shares a 5-letter code (or an invite link that carries it);
@@ -228,7 +240,8 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
 
 - [x] Single-player: solvable deals, drag & drop, live validation
 - [x] Blitz — endless ("peel"-style) play at a regular and a fast pace
-- [x] Puzzle — untimed play on a fixed 9×9/13×13/19×19 board, +20 tiles per clear
+- [x] Puzzle — untimed play on a fixed 9×9/13×13/19×19 board, two ways: Solve
+      (+20 tiles per clear) and Flow (locked words, pile refilled to 20)
 - [x] Multiplayer: Survival (Endless Battle) — shared deal from one seed, lobbies with
       codes/invite links, live standings, host controls, final rankings
 - [x] Duel mode: permanent words, attack tiles, escalating rounds

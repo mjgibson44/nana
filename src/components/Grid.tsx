@@ -32,7 +32,8 @@ interface GridProps {
   highlighted: Set<CellKey>;
   /** The placed tile picked out for deletion, if any. */
   selectedKey: CellKey | null;
-  /** Duel: placed tiles are permanent — no grab affordance, no controls. */
+  /** Duel and Puzzle Flow: placed tiles are permanent — no grab affordance,
+   * no controls. */
   boardLocked: boolean;
   canRotate: (word: BoardWord) => boolean;
   onTilePointerDown: (key: CellKey, letter: string, e: React.PointerEvent) => void;
