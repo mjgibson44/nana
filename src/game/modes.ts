@@ -8,8 +8,10 @@
  *    two paces, see SoloPace — or as Endless Battle, the same game raced by
  *    several players on one shared deal.
  *  - Puzzle: no clock and no losing. A fixed board with real edges, twenty
- *    tiles at a time — connect them all and twenty more arrive, until the
- *    player presses Finish.
+ *    tiles at a time, until the player presses Finish. Played two ways, see
+ *    PuzzleVariant: Solve, where the board stays yours to rearrange and a
+ *    cleared pile brings twenty more, or Flow, where every word you place is
+ *    locked down and the tiles it spent come straight back.
  *  - Duel: head-to-head for exactly two players. Placed words are permanent,
  *    and every word you place sends tiles to your opponent. First player to
  *    overflow their pile loses.
@@ -85,7 +87,8 @@ export const PUZZLE_INFO: ModeInfo = {
   tagline: 'One board, no clock. Build at your own pace.',
   details: [
     '20 tiles to weave into one crossword',
-    'Connect them all and 20 more arrive',
+    'Solve: rearrange freely, and clearing the pile brings 20 more',
+    'Flow: each word locks where it lands, and your pile refills to 20',
     'Pick your board: 9×9, 13×13 or 19×19',
     'Press Finish whenever you’re done',
   ],
@@ -227,6 +230,45 @@ export const ENDLESS_LOOSE_LIMIT = 20;
 /** The boards Puzzle is played on — square, with real edges words can't cross. */
 export type PuzzleSize = 9 | 13 | 19;
 
+/**
+ * The two ways Puzzle is played. Both are the same untimed, unlosable board —
+ * same sizes, same twenty tiles, same Finish button — and differ only in what
+ * happens to a word once it's down:
+ *
+ *  - `solve`: nothing is settled. Tiles move, words come apart, and the pile
+ *    only refills once every last tile is woven in — which pays the clear
+ *    bonus and deals PUZZLE_BATCH_TILES more.
+ *  - `flow`: every word locks where it lands, so only real words are allowed
+ *    down — and the tiles it spent come straight back, holding the pile at
+ *    twenty for as long as the board has room. There's no clearing a pile that
+ *    always refills, so the clear bonus never comes up.
+ */
+export type PuzzleVariant = 'solve' | 'flow';
+
+/** What the splash cards call each Puzzle variant. */
+export const PUZZLE_VARIANT_NAMES: Record<PuzzleVariant, string> = {
+  solve: 'Puzzle Solve',
+  flow: 'Puzzle Flow',
+};
+
+/** The variant popup's choices, in the order they're offered. */
+export const PUZZLE_VARIANT_OPTIONS: ReadonlyArray<{
+  variant: PuzzleVariant;
+  name: string;
+  detail: string;
+}> = [
+  {
+    variant: 'solve',
+    name: 'Solve',
+    detail: 'Rearrange all you like — weave in every tile for 20 more',
+  },
+  {
+    variant: 'flow',
+    name: 'Flow',
+    detail: 'Every word locks where it lands, and your pile refills to 20',
+  },
+];
+
 /** The size popup's choices, in the order they're offered. */
 export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{
   size: PuzzleSize;
@@ -238,8 +280,9 @@ export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{
   { size: 19, name: '19 × 19', detail: 'A wide open board for the long haul' },
 ];
 
-/** Tiles in the opening Puzzle deal — and in every batch that follows a
- * fully connected board. */
+/** Tiles in the opening Puzzle deal, either way it's played — and, in Solve,
+ * in every batch that follows a fully connected board. Flow keeps the pile at
+ * the opening count instead, handing back exactly what each word spent. */
 export const PUZZLE_START_TILES = 20;
 export const PUZZLE_BATCH_TILES = 20;
 

@@ -22,6 +22,8 @@ import {
   PUZZLE_BATCH_TILES,
   PUZZLE_SIZE_OPTIONS,
   PUZZLE_START_TILES,
+  PUZZLE_VARIANT_NAMES,
+  PUZZLE_VARIANT_OPTIONS,
   TUTORIAL_INFO,
   duelAttackMultiplier,
   duelAttackTiles,
@@ -34,6 +36,7 @@ import {
   type GameDoor,
   type GameMode,
   type PuzzleSize,
+  type PuzzleVariant,
   type SoloPace,
 } from './game/modes';
 import { doorSeen, markDoorSeen, markTutorialSeen, tutorialSeen } from './game/onboarding';
@@ -271,6 +274,16 @@ function withPicks(interaction: Interaction, picks: number[]): Interaction {
   return { kind: 'spell', picks };
 }
 
+/**
+ * The options popup a solo door is waiting on. Blitz asks one question and
+ * Puzzle two — which puzzle, and then which board — so the second question
+ * carries the answer to the first.
+ */
+type DoorChoice =
+  | { kind: 'pace' }
+  | { kind: 'puzzle' }
+  | { kind: 'board'; variant: PuzzleVariant };
+
 function shuffleArray<T>(items: T[]): T[] {
   const arr = items.slice();
   for (let i = arr.length - 1; i > 0; i--) {
@@ -384,13 +397,15 @@ export default function App() {
   const [soloPace, setSoloPace] = useState<SoloPace>('regular');
   /** Puzzle: the fixed board being played on, chosen on the way in. */
   const [puzzleSize, setPuzzleSize] = useState<PuzzleSize>(13);
+  /** Puzzle: which of the two puzzles is being played, chosen on the way in —
+   * Solve, where the board stays loose, or Flow, where every word locks. */
+  const [puzzleVariant, setPuzzleVariant] = useState<PuzzleVariant>('solve');
   /** Puzzle: the elapsed clock, counting up. Null in every other mode. */
   const [stopwatch, setStopwatch] = useState<Stopwatch | null>(null);
   /** Puzzle: whether the Finish button is asking "really?". */
   const [confirmFinish, setConfirmFinish] = useState(false);
-  /** A door waiting on its options popup: Blitz's pace or Puzzle's board
-   * size. Null while no popup is up. */
-  const [doorChoice, setDoorChoice] = useState<'blitz' | 'puzzle' | null>(null);
+  /** A door waiting on its options popup, or null while no popup is up. */
+  const [doorChoice, setDoorChoice] = useState<DoorChoice | null>(null);
   /** Endless: how many drip intervals have run out (the opening phase isn't
    * one), which sets how big the next batch is. */
   const [dripsElapsed, setDripsElapsed] = useState(0);
@@ -511,16 +526,25 @@ export default function App() {
   const expiryHandled = useRef<number | null>(null);
   const dripHandled = useRef<number | null>(null);
 
-  /** Start a fresh game. `pace` sets the Endless drip's schedule and `size`
-   * Puzzle's board; each is ignored by the other modes (`size` defaults to
-   * the last board played). Multiplayer games hand in the shared deal's
-   * opening letters; solo games draw their own at random. */
+  /** Start a fresh game. `pace` sets the Endless drip's schedule and `puzzle`
+   * which Puzzle is played on which board; each is ignored by the other modes
+   * (`puzzle` defaults to the last one played). Multiplayer games hand in the
+   * shared deal's opening letters; solo games draw their own at random. */
   const newGame = useCallback(
-    (nextMode: GameMode, pace: SoloPace, dealtLetters?: string[], size?: PuzzleSize) => {
-      const boardSize = size ?? puzzleSize;
+    (
+      nextMode: GameMode,
+      pace: SoloPace,
+      dealtLetters?: string[],
+      puzzle?: { size: PuzzleSize; variant: PuzzleVariant },
+    ) => {
+      const boardSize = puzzle?.size ?? puzzleSize;
+      const variant = puzzle?.variant ?? puzzleVariant;
       setMode(nextMode);
       setSoloPace(pace);
-      if (size !== undefined) setPuzzleSize(size);
+      if (puzzle !== undefined) {
+        setPuzzleSize(puzzle.size);
+        setPuzzleVariant(puzzle.variant);
+      }
       const opening =
         dealtLetters ??
         // The tutorial deals its first word spelled out in a row, rather than a
@@ -564,9 +588,12 @@ export default function App() {
           : nextMode === 'puzzle'
             ? {
                 kind: 'start',
-                eyebrow: `Puzzle · ${boardSize}×${boardSize}`,
+                eyebrow: `${PUZZLE_VARIANT_NAMES[variant]} · ${boardSize}×${boardSize}`,
                 title: 'Game on!',
-                note: `${opening.length} tiles · connect them all for ${PUZZLE_BATCH_TILES} more`,
+                note:
+                  variant === 'flow'
+                    ? `${opening.length} tiles · every word locks, and your pile refills`
+                    : `${opening.length} tiles · connect them all for ${PUZZLE_BATCH_TILES} more`,
               }
             : nextMode === 'duel'
               ? {
@@ -605,13 +632,17 @@ export default function App() {
       );
       setGameId((id) => id + 1);
     },
-    [puzzleSize],
+    [puzzleSize, puzzleVariant],
   );
 
   /** Start a mode and put its board on screen. */
   const startGame = useCallback(
-    (nextMode: GameMode, pace: SoloPace = 'regular', size?: PuzzleSize) => {
-      newGame(nextMode, pace, undefined, size);
+    (
+      nextMode: GameMode,
+      pace: SoloPace = 'regular',
+      puzzle?: { size: PuzzleSize; variant: PuzzleVariant },
+    ) => {
+      newGame(nextMode, pace, undefined, puzzle);
       setScreen('game');
     },
     [newGame],
@@ -631,13 +662,14 @@ export default function App() {
 
   /**
    * Walk through a door for real: the solo pair to their options popup —
-   * Blitz picks a pace, Puzzle a board size — and the multiplayer pair to
-   * their lobby. Whatever had to be read first has been read by now.
+   * Blitz picks a pace, Puzzle which puzzle and then which board — and the
+   * multiplayer pair to their lobby. Whatever had to be read first has been
+   * read by now.
    */
   const enterDoor = useCallback((door: GameDoor) => {
     setPendingDoor(null);
     if (door === 'blitz' || door === 'puzzle') {
-      setDoorChoice(door);
+      setDoorChoice(door === 'blitz' ? { kind: 'pace' } : { kind: 'puzzle' });
       return;
     }
     setBattleNotice(null);
@@ -655,10 +687,15 @@ export default function App() {
     [startGame],
   );
 
+  /** Which puzzle: the answer picks up the board question behind it. */
+  const choosePuzzleVariant = useCallback((variant: PuzzleVariant) => {
+    setDoorChoice({ kind: 'board', variant });
+  }, []);
+
   const choosePuzzleSize = useCallback(
-    (size: PuzzleSize) => {
+    (variant: PuzzleVariant, size: PuzzleSize) => {
       setDoorChoice(null);
-      startGame('puzzle', 'regular', size);
+      startGame('puzzle', 'regular', { size, variant });
     },
     [startGame],
   );
@@ -945,18 +982,28 @@ export default function App() {
     else leaveBattle();
   }, [battleState, battlePhase, leaveBattle]);
 
+  /* ------------------------------ locked boards ----------------------------- */
+
+  /**
+   * Whether a word, once placed, is there for good — true in a Duel and in
+   * Puzzle Flow. A locked board takes no edits at all: nothing is dragged,
+   * deleted or taken back, and because a mistake can't be unpicked, only real
+   * words are let down in the first place.
+   */
+  const boardLocked = mode === 'duel' || (mode === 'puzzle' && puzzleVariant === 'flow');
+
   /**
    * Remember the board and pile as they are, so the change about to be made can
-   * be taken back. Called before a move, never after. Duels don't record:
-   * placed words are permanent there.
+   * be taken back. Called before a move, never after. Locked boards don't
+   * record: placed words are permanent there.
    */
   const remember = useCallback(() => {
-    if (mode === 'duel') return;
+    if (boardLocked) return;
     setHistory((past) => [...past.slice(-UNDO_DEPTH + 1), { board, rack }]);
     // A new move forks the timeline; the moves undone before it can't come
     // back any more.
     setFuture([]);
-  }, [mode, board, rack]);
+  }, [boardLocked, board, rack]);
 
   const undo = useCallback(() => {
     const last = history[history.length - 1];
@@ -1462,15 +1509,19 @@ export default function App() {
   /**
    * Deal bonus tiles into the pile — from the shared stream in multiplayer so
    * every player draws the same letters, grown off this player's own board
-   * otherwise — with their landing animation and a banner saying what just
-   * happened.
+   * otherwise — with their landing animation and, unless `message` is null, a
+   * banner saying what just happened.
+   *
+   * `grownFrom` is the board the letters are grown off, for a caller that has
+   * just changed it and holds a newer one than the render this was made in —
+   * Puzzle Flow's refill, which follows a placement in the same breath.
    */
   const dealBonusTiles = useCallback(
-    (count: number, message: string) => {
+    (count: number, message: string | null, grownFrom: TileMap = board) => {
       const letters =
         battleRef.current !== null && battleStream.current !== null
           ? battleStream.current.next(count)
-          : extendPuzzle(board, bounds, COMMON_WORDS, count).letters;
+          : extendPuzzle(grownFrom, bounds, COMMON_WORDS, count).letters;
       setRack((prev) => [...prev, ...letters]);
       // The dealt tiles join every remembered pile too: undoing a move must
       // take back the move alone, never disappear tiles the clock has dealt.
@@ -1483,7 +1534,7 @@ export default function App() {
       playSound('deal');
       const serial = ++dropSerial.current;
       setTileDrop({ count: letters.length, serial });
-      setToast({ text: message, serial });
+      if (message !== null) setToast({ text: message, serial });
     },
     [board, bounds],
   );
@@ -1681,6 +1732,9 @@ export default function App() {
    * arrives — a timed drop's worth in Endless, a whole new twenty in Puzzle.
    * The short wait lets the bonus land on the scoreboard before the pile
    * refills.
+   *
+   * Puzzle Flow hands tiles back word by word, so its pile is never empty and
+   * this never fires there — the clear bonus simply isn't one of its rewards.
    */
   useEffect(() => {
     if ((mode !== 'endless' && mode !== 'puzzle') || complete || !boardScore.bonusEarned) return;
@@ -2058,15 +2112,15 @@ export default function App() {
       const next = { ...board };
       for (const step of result.steps) next[step.key] = step.letter;
       const placed = new Set(result.steps.map((step) => step.key));
-      // The words this placement makes or grows — what a duel judges and
-      // what its attacks are sized by.
+      // The words this placement makes or grows — what a locked board judges
+      // and what a duel's attacks are sized by.
       const newRuns = extractRuns(next).filter((run) =>
         run.cells.some((cell) => placed.has(cell)),
       );
 
-      // A Duel placement is forever, so only real words are allowed down —
-      // and a lone letter spelling nothing isn't a word at all.
-      if (mode === 'duel') {
+      // On a locked board a placement is forever, so only real words are
+      // allowed down — and a lone letter spelling nothing isn't a word at all.
+      if (boardLocked) {
         if (!dictionary) {
           rejectToast('Hold on — the dictionary is still loading.');
           return;
@@ -2146,6 +2200,16 @@ export default function App() {
         }
       }
 
+      // Puzzle Flow: the tiles the word spent come straight back, so the pile
+      // stands at the opening twenty however long the game runs. They're grown
+      // off the board as it now stands — the placement included — so each one
+      // is known to have a home somewhere on a board that can't be rearranged.
+      if (mode === 'puzzle' && puzzleVariant === 'flow') {
+        // No banner: the pile refilling in front of the player, tile by tile,
+        // is the whole explanation.
+        dealBonusTiles(result.steps.length, null, next);
+      }
+
       // The step's word is on the board — deal the next one's tiles.
       if (madeStepWord) advanceTutorial(tutorialStep, dir);
 
@@ -2158,10 +2222,13 @@ export default function App() {
       bounds,
       pickList,
       mode,
+      puzzleVariant,
+      boardLocked,
       duelRound,
       dictionary,
       tutorialStep,
       advanceTutorial,
+      dealBonusTiles,
       remember,
       clearFocus,
       rejectToast,
@@ -2247,8 +2314,8 @@ export default function App() {
    * staged with a gap lands here instead, the clicked letter filling its first
    * gap — and a word without one stays put, so a stray tap can't throw it away.
    *
-   * In a Duel placed tiles are permanent, so the tap can aim a gap or anchor
-   * the next word from the letter, but never selects for deletion.
+   * On a locked board placed tiles are permanent, so the tap can aim a gap or
+   * anchor the next word from the letter, but never selects for deletion.
    */
   const selectTile = useCallback(
     (key: CellKey) => {
@@ -2256,7 +2323,7 @@ export default function App() {
         commitThroughLetter(key);
         return;
       }
-      if (mode !== 'duel') {
+      if (!boardLocked) {
         const runs = wordsByCell.get(key);
         // Delete walks along the word this tile reads in. A crossing tile
         // belongs to two, and across wins: it matches reading order, and
@@ -2274,7 +2341,7 @@ export default function App() {
         startDir === null ? IDLE : { kind: 'place', anchor: key, dir: startDir, picks: [] },
       );
     },
-    [interaction, mode, commitThroughLetter, wordsByCell, assumeDir],
+    [interaction, boardLocked, commitThroughLetter, wordsByCell, assumeDir],
   );
 
   /** Flip the chosen cell between across and down, and remember the new way. */
@@ -2473,13 +2540,14 @@ export default function App() {
         return;
       }
 
-      // A Duel drop goes through the same commit flow as a typed word, so the
-      // dictionary judging and attack rules still apply to a dragged tile.
-      if (mode === 'duel') {
-        const duelTarget = document.elementFromPoint(x, y);
-        const duelCell = duelTarget?.closest('[data-cell]') as HTMLElement | null;
-        if (duelCell && source.type === 'rack') {
-          const key = keyOf(Number(duelCell.dataset.row), Number(duelCell.dataset.col));
+      // A drop onto a locked board goes through the same commit flow as a typed
+      // word, so the dictionary judging — and a duel's attacks, or a Flow
+      // refill — still apply to a dragged tile.
+      if (boardLocked) {
+        const lockedTarget = document.elementFromPoint(x, y);
+        const lockedCell = lockedTarget?.closest('[data-cell]') as HTMLElement | null;
+        if (lockedCell && source.type === 'rack') {
+          const key = keyOf(Number(lockedCell.dataset.row), Number(lockedCell.dataset.col));
           if (!(key in board)) {
             commit(key, 'across', [{ letter, rackIndex: source.index }]);
           }
@@ -2523,7 +2591,7 @@ export default function App() {
         }
       }
     },
-    [drag, mode, board, togglePick, selectTile, remember, swallowNextClick, commit],
+    [drag, boardLocked, board, togglePick, selectTile, remember, swallowNextClick, commit],
   );
 
   useEffect(() => {
@@ -2575,9 +2643,10 @@ export default function App() {
 
   const onBoardTilePointerDown = useCallback(
     (key: CellKey, letter: string, e: React.PointerEvent) => {
-      // Duel tiles are permanent: no dragging, no double-tap return. A tap
-      // still aims a staged gap or anchors the next word from the letter.
-      if (mode === 'duel') {
+      // A locked board's tiles are permanent: no dragging, no double-tap
+      // return. A tap still aims a staged gap or anchors the next word from
+      // the letter.
+      if (boardLocked) {
         e.preventDefault();
         selectTile(key);
         swallowNextClick();
@@ -2606,7 +2675,7 @@ export default function App() {
       startDrag(letter, { type: 'board', key }, e);
     },
     [
-      mode,
+      boardLocked,
       selectTile,
       swallowNextClick,
       returnToRack,
@@ -2931,12 +3000,12 @@ export default function App() {
   /* --------------------------------- screens -------------------------------- */
 
   /**
-   * A just-opened door's options popup: Blitz asks for a pace, Puzzle for a
-   * board. Shared by the home screen and — after the tutorial's handoff —
-   * the game screen.
+   * A just-opened door's options popup: Blitz asks for a pace, and Puzzle asks
+   * which puzzle and then which board. Shared by the home screen and — after
+   * the tutorial's handoff — the game screen.
    */
   const doorChooser =
-    doorChoice === 'blitz' ? (
+    doorChoice === null ? null : doorChoice.kind === 'pace' ? (
       <ChoiceDialog
         title="Blitz"
         subtitle="Pick your pace"
@@ -2944,15 +3013,23 @@ export default function App() {
         onPick={(i) => choosePace(PACE_OPTIONS[i].pace)}
         onDismiss={dismissDoorChoice}
       />
-    ) : doorChoice === 'puzzle' ? (
+    ) : doorChoice.kind === 'puzzle' ? (
       <ChoiceDialog
         title="Puzzle"
-        subtitle="Pick your board"
-        options={PUZZLE_SIZE_OPTIONS.map(({ name, detail }) => ({ label: name, detail }))}
-        onPick={(i) => choosePuzzleSize(PUZZLE_SIZE_OPTIONS[i].size)}
+        subtitle="Pick your puzzle"
+        options={PUZZLE_VARIANT_OPTIONS.map(({ name, detail }) => ({ label: name, detail }))}
+        onPick={(i) => choosePuzzleVariant(PUZZLE_VARIANT_OPTIONS[i].variant)}
         onDismiss={dismissDoorChoice}
       />
-    ) : null;
+    ) : (
+      <ChoiceDialog
+        title={PUZZLE_VARIANT_NAMES[doorChoice.variant]}
+        subtitle="Pick your board"
+        options={PUZZLE_SIZE_OPTIONS.map(({ name, detail }) => ({ label: name, detail }))}
+        onPick={(i) => choosePuzzleSize(doorChoice.variant, PUZZLE_SIZE_OPTIONS[i].size)}
+        onDismiss={dismissDoorChoice}
+      />
+    );
 
   if (screen === 'home') {
     return (
@@ -3278,7 +3355,7 @@ export default function App() {
           openWordCell={drag || wordDrag ? null : selectedKey}
           highlighted={highlighted}
           selectedKey={selectedKey}
-          boardLocked={mode === 'duel'}
+          boardLocked={boardLocked}
           canRotate={canRotate}
           onTilePointerDown={onBoardTilePointerDown}
           onCellClick={onCellClick}
@@ -3324,7 +3401,7 @@ export default function App() {
               plan !== null &&
               plan.complete &&
               plan.steps.length > 0 &&
-              (mode !== 'duel' || (verdict?.ok ?? false))
+              (!boardLocked || (verdict?.ok ?? false))
             }
             canCancel={interaction.kind !== 'idle' || selectedKey !== null}
             onRemove={(position) => setPicks(picks.filter((_, i) => i !== position))}

@@ -165,4 +165,19 @@ describe('extendPuzzle', () => {
     expect(dealt.letters).toHaveLength(10);
     for (const word of dealt.words) expect(generationDict.has(word)).toBe(true);
   });
+
+  /**
+   * Puzzle Flow hands back exactly what each word spent, so it asks for tiny
+   * batches — a one-letter play asks for one, which no word could ever bring.
+   */
+  it('deals any batch down to a single tile', () => {
+    for (const count of [1, 2, 3, 4, 5]) {
+      for (let i = 0; i < 10; i++) {
+        const board = openingBoard();
+        const dealt = extendPuzzle(board, BOARD_SIZE, COMMON_WORDS, count);
+        expect(dealt.letters).toHaveLength(count);
+        expect(dealt.letters.join('')).toMatch(new RegExp(`^[a-z]{${count}}$`));
+      }
+    }
+  });
 });
