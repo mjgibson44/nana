@@ -1600,52 +1600,65 @@ body {
   padding-right: 34px;
 }
 
-/* The options popup a configurable mode raises on the way in: Blitz's pace,
-   Puzzle's board size. Each option is a small mode card of its own. */
-.choice-options {
+/* The setup sheet a configurable mode raises on the way in — Blitz's speed,
+   Puzzle's style and board. One row per setting, laid out like the settings
+   page rather than like a menu, since that's what it is. */
+.setup-settings {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 14px;
+  margin: 14px 0 2px;
 }
 
-.choice-option {
+.setup-setting {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 12px 14px;
-  font: inherit;
-  text-align: left;
-  color: var(--ink);
-  background: var(--surface);
-  border: 3px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 3px 0 var(--line);
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  gap: 6px;
 }
 
-.choice-option:hover {
+/* The same quiet uppercase heading the settings page gives a section. */
+.setup-setting-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+/* The tabs share one frame, so a setting reads as one control rather than as
+   several buttons that happen to sit in a row. */
+.setup-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
   background: var(--surface-alt);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 0 var(--line);
+  border: 2px solid var(--line);
+  border-radius: 12px;
 }
 
-.choice-option:active {
-  transform: translateY(1px);
-  box-shadow: 0 2px 0 var(--line);
+.setup-tab {
+  flex: 1;
+  padding: 9px 6px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
 
-.choice-option-name {
-  font-size: 17px;
-  font-weight: 800;
+.setup-tab:hover {
+  background: var(--surface);
 }
 
-.choice-option-detail {
-  font-size: 13px;
-  font-weight: 600;
-  opacity: 0.65;
+/* The chosen tab is filled rather than outlined: at a glance, from across the
+   room, one of them is obviously on. */
+.setup-tab.is-active {
+  color: var(--surface);
+  background: var(--ink);
 }
 
 /*

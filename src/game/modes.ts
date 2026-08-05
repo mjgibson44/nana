@@ -45,8 +45,8 @@ export interface ModeInfo {
 
 /**
  * The doors out of the home screen — the four buttons that lead to a game.
- * Not the same list as GameMode: Blitz is Endless played solo at a pace
- * chosen on the way in, Puzzle asks for a board size first, Survival and
+ * Not the same list as GameMode: the solo pair each raise a setup sheet on the
+ * way in — Blitz for its pace, Puzzle for its style and board — Survival and
  * Duel lead to a lobby before any game starts, and Survival is Endless
  * played against other people.
  */
@@ -68,18 +68,12 @@ export const PACE_NAMES: Record<SoloPace, string> = {
   fast: 'Blitz · Fast',
 };
 
-/** The pace popup's choices, in the order they're offered. */
-export const PACE_OPTIONS: ReadonlyArray<{ pace: SoloPace; name: string; detail: string }> = [
-  {
-    pace: 'regular',
-    name: 'Regular',
-    detail: '2:00 to place your first 20 tiles, then +5 a round every 45–30s',
-  },
-  {
-    pace: 'fast',
-    name: 'Fast',
-    detail: '1:00 to place your first 20 tiles, then batches every 15s, growing to +10',
-  },
+/** The Speed setting's tabs, in the order they're offered. What each pace
+ * actually costs you is BLITZ_INFO's business, on the card that fronts the
+ * mode; here it's a two-way switch. */
+export const PACE_OPTIONS: ReadonlyArray<{ pace: SoloPace; name: string }> = [
+  { pace: 'regular', name: 'Regular' },
+  { pace: 'fast', name: 'Fast' },
 ];
 
 export const PUZZLE_INFO: ModeInfo = {
@@ -251,33 +245,19 @@ export const PUZZLE_VARIANT_NAMES: Record<PuzzleVariant, string> = {
   flow: 'Puzzle Flow',
 };
 
-/** The variant popup's choices, in the order they're offered. */
-export const PUZZLE_VARIANT_OPTIONS: ReadonlyArray<{
-  variant: PuzzleVariant;
-  name: string;
-  detail: string;
-}> = [
-  {
-    variant: 'solve',
-    name: 'Solve',
-    detail: 'Rearrange all you like — weave in every tile for 20 more',
-  },
-  {
-    variant: 'flow',
-    name: 'Flow',
-    detail: 'Every word locks where it lands, and your pile refills to 20',
-  },
+/** The Game style setting's tabs, in the order they're offered. What the two
+ * styles are is PUZZLE_INFO's business, on the card that fronts the mode, and
+ * the start splash names the one being played. */
+export const PUZZLE_VARIANT_OPTIONS: ReadonlyArray<{ variant: PuzzleVariant; name: string }> = [
+  { variant: 'solve', name: 'Solve' },
+  { variant: 'flow', name: 'Flow' },
 ];
 
-/** The size popup's choices, in the order they're offered. */
-export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{
-  size: PuzzleSize;
-  name: string;
-  detail: string;
-}> = [
-  { size: 9, name: '9 × 9', detail: 'A tight little board — every square counts' },
-  { size: 13, name: '13 × 13', detail: 'Room to build, close enough to plan' },
-  { size: 19, name: '19 × 19', detail: 'A wide open board for the long haul' },
+/** The Grid size setting's tabs, in the order they're offered. */
+export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{ size: PuzzleSize; name: string }> = [
+  { size: 9, name: '9 × 9' },
+  { size: 13, name: '13 × 13' },
+  { size: 19, name: '19 × 19' },
 ];
 
 /** Tiles in the opening Puzzle deal, either way it's played — and, in Solve,
