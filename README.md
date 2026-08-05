@@ -71,6 +71,13 @@ plain serializable data — which is exactly what lets multiplayer run with
 Picked from the home screen (`src/components/HomeScreen.tsx`); the rules live
 in `src/game/modes.ts`.
 
+The two solo doors raise a setup sheet on the way in
+(`src/components/SetupDialog.tsx`): one labelled row of tabs per setting the
+mode has — Blitz's **Speed**, Puzzle's **Game style** and **Grid size** — and a
+Play button under the lot. It opens on the last game's setup, so playing the
+same thing again is one tap, and nothing is decided until Play, so backing out
+of the sheet changes nothing.
+
 - **Blitz** (Endless) — no levels, at a pace picked on the way in. **Regular**:
   2:00 to work the starting 20 tiles, then batches land on a tightening clock —
   five rounds of 5 tiles every 45 seconds, five rounds of 5 tiles every 30
@@ -86,8 +93,8 @@ in `src/game/modes.ts`.
 - **Puzzle** — no clock and no losing. Played on a fixed board with real edges,
   chosen on the way in: 9×9, 13×13 or 19×19. You get 20 tiles, the header keeps
   score and counts the time elapsed, and the **Finish** button in the top right
-  ends the game whenever you decide you're done. Two puzzles, picked before the
-  board is:
+  ends the game whenever you decide you're done. Two game styles, set on the
+  way in beside the board:
   - **Puzzle Solve** — nothing is settled. Tiles move, words come apart, and
     weaving every last tile into one connected crossword pays the 25-point
     clear bonus and deals 20 more, for as long as you like.

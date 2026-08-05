@@ -70,7 +70,7 @@ import { applyTheme, loadThemePref, saveThemePref, type ThemePref } from './them
 import { BattleLobby } from './components/BattleLobby';
 import { BattleMenu } from './components/BattleMenu';
 import { BattleResults } from './components/BattleResults';
-import { ChoiceDialog } from './components/ChoiceDialog';
+import { SetupDialog } from './components/SetupDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { GameSummary, type ScoredWord } from './components/GameSummary';
@@ -275,14 +275,14 @@ function withPicks(interaction: Interaction, picks: number[]): Interaction {
 }
 
 /**
- * The options popup a solo door is waiting on. Blitz asks one question and
- * Puzzle two — which puzzle, and then which board — so the second question
- * carries the answer to the first.
+ * The setup sheet a solo door is waiting on, holding its settings as they
+ * currently stand on screen. They're a draft: the sheet opens on the last
+ * game's setup and nothing reaches a game until Play is pressed, so backing
+ * out changes nothing and a setting can always be changed back.
  */
-type DoorChoice =
-  | { kind: 'pace' }
-  | { kind: 'puzzle' }
-  | { kind: 'board'; variant: PuzzleVariant };
+type DoorSetup =
+  | { door: 'blitz'; pace: SoloPace }
+  | { door: 'puzzle'; variant: PuzzleVariant; size: PuzzleSize };
 
 function shuffleArray<T>(items: T[]): T[] {
   const arr = items.slice();
@@ -404,8 +404,8 @@ export default function App() {
   const [stopwatch, setStopwatch] = useState<Stopwatch | null>(null);
   /** Puzzle: whether the Finish button is asking "really?". */
   const [confirmFinish, setConfirmFinish] = useState(false);
-  /** A door waiting on its options popup, or null while no popup is up. */
-  const [doorChoice, setDoorChoice] = useState<DoorChoice | null>(null);
+  /** A door waiting on its setup sheet, or null while no sheet is up. */
+  const [doorSetup, setDoorSetup] = useState<DoorSetup | null>(null);
   /** Endless: how many drip intervals have run out (the opening phase isn't
    * one), which sets how big the next batch is. */
   const [dripsElapsed, setDripsElapsed] = useState(0);
@@ -661,52 +661,47 @@ export default function App() {
   /* ------------------------------ the front door ---------------------------- */
 
   /**
-   * Walk through a door for real: the solo pair to their options popup —
-   * Blitz picks a pace, Puzzle which puzzle and then which board — and the
-   * multiplayer pair to their lobby. Whatever had to be read first has been
-   * read by now.
+   * Walk through a door for real: the solo pair to their setup sheet — Blitz's
+   * speed, Puzzle's style and board — and the multiplayer pair to their lobby.
+   * Whatever had to be read first has been read by now.
+   *
+   * The sheet opens on the last game's setup, which is nearly always the one
+   * wanted again, so playing the same thing twice is one tap on Play.
    */
-  const enterDoor = useCallback((door: GameDoor) => {
-    setPendingDoor(null);
-    if (door === 'blitz' || door === 'puzzle') {
-      setDoorChoice(door === 'blitz' ? { kind: 'pace' } : { kind: 'puzzle' });
-      return;
-    }
-    setBattleNotice(null);
-    setBattleError(null);
-    setBattleIntent(door === 'survival' ? 'endless' : 'duel');
-    setScreen('battle');
-  }, []);
-
-  /** The options popup answered: start the game it configures. */
-  const choosePace = useCallback(
-    (pace: SoloPace) => {
-      setDoorChoice(null);
-      startGame('endless', pace);
+  const enterDoor = useCallback(
+    (door: GameDoor) => {
+      setPendingDoor(null);
+      if (door === 'blitz') {
+        setDoorSetup({ door: 'blitz', pace: soloPace });
+        return;
+      }
+      if (door === 'puzzle') {
+        setDoorSetup({ door: 'puzzle', variant: puzzleVariant, size: puzzleSize });
+        return;
+      }
+      setBattleNotice(null);
+      setBattleError(null);
+      setBattleIntent(door === 'survival' ? 'endless' : 'duel');
+      setScreen('battle');
     },
-    [startGame],
+    [soloPace, puzzleVariant, puzzleSize],
   );
 
-  /** Which puzzle: the answer picks up the board question behind it. */
-  const choosePuzzleVariant = useCallback((variant: PuzzleVariant) => {
-    setDoorChoice({ kind: 'board', variant });
-  }, []);
-
-  const choosePuzzleSize = useCallback(
-    (variant: PuzzleVariant, size: PuzzleSize) => {
-      setDoorChoice(null);
-      startGame('puzzle', 'regular', { size, variant });
-    },
-    [startGame],
-  );
+  /** The sheet's Play button: start the game its settings describe. */
+  const playSetup = useCallback(() => {
+    if (doorSetup === null) return;
+    setDoorSetup(null);
+    if (doorSetup.door === 'blitz') startGame('endless', doorSetup.pace);
+    else startGame('puzzle', 'regular', { size: doorSetup.size, variant: doorSetup.variant });
+  }, [doorSetup, startGame]);
 
   /**
-   * The options popup waved away without picking. Usually that lands back on
-   * the home screen it came from; after the tutorial's handoff it stands over
-   * the finished tutorial board, and walking away means going home.
+   * The setup sheet waved away without playing. Usually that lands back on the
+   * home screen it came from; after the tutorial's handoff it stands over the
+   * finished tutorial board, and walking away means going home.
    */
-  const dismissDoorChoice = useCallback(() => {
-    setDoorChoice(null);
+  const dismissSetup = useCallback(() => {
+    setDoorSetup(null);
     if (screen === 'game') returnHome();
   }, [screen, returnHome]);
 
@@ -2405,8 +2400,8 @@ export default function App() {
       // The explainer stands over the tutorial's board on the way to a game.
       if (explainer !== null) return;
       if (settingsOpen || statsView !== null) return;
-      // So do the Finish confirm and a door's options popup.
-      if (confirmFinish || doorChoice !== null) return;
+      // So do the Finish confirm and a door's setup sheet.
+      if (confirmFinish || doorSetup !== null) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
@@ -2486,7 +2481,7 @@ export default function App() {
     statsView,
     explainer,
     confirmFinish,
-    doorChoice,
+    doorSetup,
     interaction,
     picks,
     typeLetter,
@@ -3000,34 +2995,48 @@ export default function App() {
   /* --------------------------------- screens -------------------------------- */
 
   /**
-   * A just-opened door's options popup: Blitz asks for a pace, and Puzzle asks
-   * which puzzle and then which board. Shared by the home screen and — after
-   * the tutorial's handoff — the game screen.
+   * A just-opened door's setup sheet: every setting the mode has, asked
+   * together. Blitz has only its speed so far; Puzzle has the style it's
+   * played in and the board it's played on. Shared by the home screen and —
+   * after the tutorial's handoff — the game screen.
    */
-  const doorChooser =
-    doorChoice === null ? null : doorChoice.kind === 'pace' ? (
-      <ChoiceDialog
+  const doorSetupSheet =
+    doorSetup === null ? null : doorSetup.door === 'blitz' ? (
+      <SetupDialog
         title="Blitz"
-        subtitle="Pick your pace"
-        options={PACE_OPTIONS.map(({ name, detail }) => ({ label: name, detail }))}
-        onPick={(i) => choosePace(PACE_OPTIONS[i].pace)}
-        onDismiss={dismissDoorChoice}
-      />
-    ) : doorChoice.kind === 'puzzle' ? (
-      <ChoiceDialog
-        title="Puzzle"
-        subtitle="Pick your puzzle"
-        options={PUZZLE_VARIANT_OPTIONS.map(({ name, detail }) => ({ label: name, detail }))}
-        onPick={(i) => choosePuzzleVariant(PUZZLE_VARIANT_OPTIONS[i].variant)}
-        onDismiss={dismissDoorChoice}
+        settings={[
+          {
+            label: 'Speed',
+            options: PACE_OPTIONS.map(({ name }) => name),
+            chosen: PACE_OPTIONS.findIndex((option) => option.pace === doorSetup.pace),
+            onChoose: (i) => setDoorSetup({ door: 'blitz', pace: PACE_OPTIONS[i].pace }),
+          },
+        ]}
+        onPlay={playSetup}
+        onDismiss={dismissSetup}
       />
     ) : (
-      <ChoiceDialog
-        title={PUZZLE_VARIANT_NAMES[doorChoice.variant]}
-        subtitle="Pick your board"
-        options={PUZZLE_SIZE_OPTIONS.map(({ name, detail }) => ({ label: name, detail }))}
-        onPick={(i) => choosePuzzleSize(doorChoice.variant, PUZZLE_SIZE_OPTIONS[i].size)}
-        onDismiss={dismissDoorChoice}
+      <SetupDialog
+        title="Puzzle"
+        settings={[
+          {
+            label: 'Game style',
+            options: PUZZLE_VARIANT_OPTIONS.map(({ name }) => name),
+            chosen: PUZZLE_VARIANT_OPTIONS.findIndex(
+              (option) => option.variant === doorSetup.variant,
+            ),
+            onChoose: (i) =>
+              setDoorSetup({ ...doorSetup, variant: PUZZLE_VARIANT_OPTIONS[i].variant }),
+          },
+          {
+            label: 'Grid size',
+            options: PUZZLE_SIZE_OPTIONS.map(({ name }) => name),
+            chosen: PUZZLE_SIZE_OPTIONS.findIndex((option) => option.size === doorSetup.size),
+            onChoose: (i) => setDoorSetup({ ...doorSetup, size: PUZZLE_SIZE_OPTIONS[i].size }),
+          },
+        ]}
+        onPlay={playSetup}
+        onDismiss={dismissSetup}
       />
     );
 
@@ -3062,7 +3071,7 @@ export default function App() {
           confirmLabel="Let’s play"
           onConfirm={playPendingDoor}
         />
-        {doorChooser}
+        {doorSetupSheet}
         {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
         <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
         <SettingsPage
@@ -3522,7 +3531,7 @@ export default function App() {
 
       {/* Straight after the tutorial: what the game waiting behind this is. */}
       <ModeInfoDialog info={explainer} confirmLabel="Let’s play" onConfirm={playPendingDoor} />
-      {doorChooser}
+      {doorSetupSheet}
 
       {/* Connection trouble: our own redial, or the host pausing for someone. */}
       <ConnectionOverlay
