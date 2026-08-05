@@ -20,6 +20,7 @@ import {
   PACE_NAMES,
   PACE_OPTIONS,
   PUZZLE_BATCH_TILES,
+  PUZZLE_LOCK_OPTIONS,
   PUZZLE_SIZE_OPTIONS,
   PUZZLE_START_TILES,
   PUZZLE_VARIANT_NAMES,
@@ -33,13 +34,22 @@ import {
   endlessDripTiles,
   endlessInitialSeconds,
   formatSeconds,
+  puzzleRefillTiles,
   type GameDoor,
   type GameMode,
+  type PuzzleLock,
   type PuzzleSize,
   type PuzzleVariant,
   type SoloPace,
 } from './game/modes';
 import { doorSeen, markDoorSeen, markTutorialSeen, tutorialSeen } from './game/onboarding';
+import {
+  loadBlitzSetup,
+  loadPuzzleSetup,
+  saveBlitzSetup,
+  savePuzzleSetup,
+  type PuzzleSetup,
+} from './game/setups';
 import {
   GAP,
   anchorForGapTarget,
@@ -282,7 +292,7 @@ function withPicks(interaction: Interaction, picks: number[]): Interaction {
  */
 type DoorSetup =
   | { door: 'blitz'; pace: SoloPace }
-  | { door: 'puzzle'; variant: PuzzleVariant; size: PuzzleSize };
+  | { door: 'puzzle'; variant: PuzzleVariant; lock: PuzzleLock; size: PuzzleSize };
 
 function shuffleArray<T>(items: T[]): T[] {
   const arr = items.slice();
@@ -391,15 +401,26 @@ export default function App() {
   /** Endless: 'initial' is the opening phase; 'drip' is ever after, when
    * batches arrive on the clock and the loose count is live. */
   const [endlessPhase, setEndlessPhase] = useState<'initial' | 'drip'>('initial');
+  /**
+   * The solo doors open on the setup last played through them, from this visit
+   * or the last one — see src/game/setups.ts. Each setting lives in its own
+   * piece of state from there on, because the game being played reads them one
+   * at a time; the stored setup is only ever the sheet's opening position.
+   */
+  const [storedPuzzle] = useState(loadPuzzleSetup);
+
   /** Endless: which pace the drip runs at — Blitz's Regular or Fast.
    * Survival always plays regular, so everyone's shared deal arrives on the
    * same schedule. */
-  const [soloPace, setSoloPace] = useState<SoloPace>('regular');
+  const [soloPace, setSoloPace] = useState<SoloPace>(() => loadBlitzSetup().pace);
   /** Puzzle: the fixed board being played on, chosen on the way in. */
-  const [puzzleSize, setPuzzleSize] = useState<PuzzleSize>(13);
-  /** Puzzle: which of the two puzzles is being played, chosen on the way in —
-   * Solve, where the board stays loose, or Flow, where every word locks. */
-  const [puzzleVariant, setPuzzleVariant] = useState<PuzzleVariant>('solve');
+  const [puzzleSize, setPuzzleSize] = useState<PuzzleSize>(storedPuzzle.size);
+  /** Puzzle: where the tiles come from, chosen on the way in — Solve, which
+   * refills a cleared pile, or Flow, which refills as you place. */
+  const [puzzleVariant, setPuzzleVariant] = useState<PuzzleVariant>(storedPuzzle.variant);
+  /** Puzzle: whether a confirmed word is still yours to move, chosen on the
+   * way in. Independent of the variant — either style plays either way. */
+  const [puzzleLock, setPuzzleLock] = useState<PuzzleLock>(storedPuzzle.lock);
   /** Puzzle: the elapsed clock, counting up. Null in every other mode. */
   const [stopwatch, setStopwatch] = useState<Stopwatch | null>(null);
   /** Puzzle: whether the Finish button is asking "really?". */
@@ -535,15 +556,17 @@ export default function App() {
       nextMode: GameMode,
       pace: SoloPace,
       dealtLetters?: string[],
-      puzzle?: { size: PuzzleSize; variant: PuzzleVariant },
+      puzzle?: PuzzleSetup,
     ) => {
       const boardSize = puzzle?.size ?? puzzleSize;
       const variant = puzzle?.variant ?? puzzleVariant;
+      const lock = puzzle?.lock ?? puzzleLock;
       setMode(nextMode);
       setSoloPace(pace);
       if (puzzle !== undefined) {
         setPuzzleSize(puzzle.size);
         setPuzzleVariant(puzzle.variant);
+        setPuzzleLock(puzzle.lock);
       }
       const opening =
         dealtLetters ??
@@ -590,10 +613,17 @@ export default function App() {
                 kind: 'start',
                 eyebrow: `${PUZZLE_VARIANT_NAMES[variant]} · ${boardSize}×${boardSize}`,
                 title: 'Game on!',
-                note:
+                // Both dials get a clause, so the card says what this game's
+                // rules actually are rather than which preset they came from.
+                note: [
+                  `${opening.length} tiles`,
+                  lock === 'locked' ? 'every word locks' : null,
                   variant === 'flow'
-                    ? `${opening.length} tiles · every word locks, and your pile refills`
-                    : `${opening.length} tiles · connect them all for ${PUZZLE_BATCH_TILES} more`,
+                    ? `your pile refills to ${PUZZLE_START_TILES}`
+                    : `connect them all for ${PUZZLE_BATCH_TILES} more`,
+                ]
+                  .filter((clause) => clause !== null)
+                  .join(' · '),
               }
             : nextMode === 'duel'
               ? {
@@ -632,16 +662,12 @@ export default function App() {
       );
       setGameId((id) => id + 1);
     },
-    [puzzleSize, puzzleVariant],
+    [puzzleSize, puzzleVariant, puzzleLock],
   );
 
   /** Start a mode and put its board on screen. */
   const startGame = useCallback(
-    (
-      nextMode: GameMode,
-      pace: SoloPace = 'regular',
-      puzzle?: { size: PuzzleSize; variant: PuzzleVariant },
-    ) => {
+    (nextMode: GameMode, pace: SoloPace = 'regular', puzzle?: PuzzleSetup) => {
       newGame(nextMode, pace, undefined, puzzle);
       setScreen('game');
     },
@@ -676,7 +702,12 @@ export default function App() {
         return;
       }
       if (door === 'puzzle') {
-        setDoorSetup({ door: 'puzzle', variant: puzzleVariant, size: puzzleSize });
+        setDoorSetup({
+          door: 'puzzle',
+          variant: puzzleVariant,
+          lock: puzzleLock,
+          size: puzzleSize,
+        });
         return;
       }
       setBattleNotice(null);
@@ -684,15 +715,29 @@ export default function App() {
       setBattleIntent(door === 'survival' ? 'endless' : 'duel');
       setScreen('battle');
     },
-    [soloPace, puzzleVariant, puzzleSize],
+    [soloPace, puzzleVariant, puzzleLock, puzzleSize],
   );
 
-  /** The sheet's Play button: start the game its settings describe. */
+  /**
+   * The sheet's Play button: start the game its settings describe, and keep
+   * those settings for next time — this is the one moment a player says what
+   * they want out of a door, so it's the only one worth remembering.
+   */
   const playSetup = useCallback(() => {
     if (doorSetup === null) return;
     setDoorSetup(null);
-    if (doorSetup.door === 'blitz') startGame('endless', doorSetup.pace);
-    else startGame('puzzle', 'regular', { size: doorSetup.size, variant: doorSetup.variant });
+    if (doorSetup.door === 'blitz') {
+      saveBlitzSetup({ pace: doorSetup.pace });
+      startGame('endless', doorSetup.pace);
+    } else {
+      const puzzle: PuzzleSetup = {
+        variant: doorSetup.variant,
+        lock: doorSetup.lock,
+        size: doorSetup.size,
+      };
+      savePuzzleSetup(puzzle);
+      startGame('puzzle', 'regular', puzzle);
+    }
   }, [doorSetup, startGame]);
 
   /**
@@ -980,12 +1025,12 @@ export default function App() {
   /* ------------------------------ locked boards ----------------------------- */
 
   /**
-   * Whether a word, once placed, is there for good — true in a Duel and in
-   * Puzzle Flow. A locked board takes no edits at all: nothing is dragged,
-   * deleted or taken back, and because a mistake can't be unpicked, only real
-   * words are let down in the first place.
+   * Whether a word, once placed, is there for good — always so in a Duel, and
+   * in a Puzzle set up that way. A locked board takes no edits at all: nothing
+   * is dragged, deleted or taken back, and because a mistake can't be
+   * unpicked, only real words are let down in the first place.
    */
-  const boardLocked = mode === 'duel' || (mode === 'puzzle' && puzzleVariant === 'flow');
+  const boardLocked = mode === 'duel' || (mode === 'puzzle' && puzzleLock === 'locked');
 
   /**
    * Remember the board and pile as they are, so the change about to be made can
@@ -1510,9 +1555,19 @@ export default function App() {
    * `grownFrom` is the board the letters are grown off, for a caller that has
    * just changed it and holds a newer one than the render this was made in —
    * Puzzle Flow's refill, which follows a placement in the same breath.
+   *
+   * `partOfMove` says these tiles arrived because the player placed a word,
+   * not because a clock or a cleared pile brought them, so undoing that move
+   * takes the refill back with it. Everything else is the game's own doing and
+   * survives an undo — see below.
    */
   const dealBonusTiles = useCallback(
-    (count: number, message: string | null, grownFrom: TileMap = board) => {
+    (
+      count: number,
+      message: string | null,
+      { grownFrom = board, partOfMove = false }: { grownFrom?: TileMap; partOfMove?: boolean } = {},
+    ) => {
+      if (count <= 0) return;
       const letters =
         battleRef.current !== null && battleStream.current !== null
           ? battleStream.current.next(count)
@@ -1520,12 +1575,14 @@ export default function App() {
       setRack((prev) => [...prev, ...letters]);
       // The dealt tiles join every remembered pile too: undoing a move must
       // take back the move alone, never disappear tiles the clock has dealt.
-      setHistory((past) =>
-        past.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
-      );
-      setFuture((ahead) =>
-        ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
-      );
+      if (!partOfMove) {
+        setHistory((past) =>
+          past.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
+        );
+        setFuture((ahead) =>
+          ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
+        );
+      }
       playSound('deal');
       const serial = ++dropSerial.current;
       setTileDrop({ count: letters.length, serial });
@@ -1728,7 +1785,7 @@ export default function App() {
    * The short wait lets the bonus land on the scoreboard before the pile
    * refills.
    *
-   * Puzzle Flow hands tiles back word by word, so its pile is never empty and
+   * Puzzle Flow tops the pile back up word by word, so it's never empty and
    * this never fires there — the clear bonus simply isn't one of its rewards.
    */
   useEffect(() => {
@@ -2195,14 +2252,17 @@ export default function App() {
         }
       }
 
-      // Puzzle Flow: the tiles the word spent come straight back, so the pile
-      // stands at the opening twenty however long the game runs. They're grown
-      // off the board as it now stands — the placement included — so each one
-      // is known to have a home somewhere on a board that can't be rearranged.
+      // Puzzle Flow: the pile tops straight back up to twenty, so it stands
+      // there however long the game runs. The letters are grown off the board
+      // as it now stands — the placement included — so each one is known to
+      // have a home on the board it was dealt for.
       if (mode === 'puzzle' && puzzleVariant === 'flow') {
         // No banner: the pile refilling in front of the player, tile by tile,
         // is the whole explanation.
-        dealBonusTiles(result.steps.length, null, next);
+        dealBonusTiles(puzzleRefillTiles(rack.length - result.steps.length), null, {
+          grownFrom: next,
+          partOfMove: true,
+        });
       }
 
       // The step's word is on the board — deal the next one's tiles.
@@ -2215,6 +2275,8 @@ export default function App() {
     [
       board,
       bounds,
+      // Only the count, which is what Flow's top-up is measured against.
+      rack.length,
       pickList,
       mode,
       puzzleVariant,
@@ -2997,8 +3059,9 @@ export default function App() {
   /**
    * A just-opened door's setup sheet: every setting the mode has, asked
    * together. Blitz has only its speed so far; Puzzle has the style it's
-   * played in and the board it's played on. Shared by the home screen and —
-   * after the tutorial's handoff — the game screen.
+   * played in, whether its tiles stay movable, and the board it's played on.
+   * Shared by the home screen and — after the tutorial's handoff — the game
+   * screen.
    */
   const doorSetupSheet =
     doorSetup === null ? null : doorSetup.door === 'blitz' ? (
@@ -3027,6 +3090,12 @@ export default function App() {
             ),
             onChoose: (i) =>
               setDoorSetup({ ...doorSetup, variant: PUZZLE_VARIANT_OPTIONS[i].variant }),
+          },
+          {
+            label: 'Tile placement',
+            options: PUZZLE_LOCK_OPTIONS.map(({ name }) => name),
+            chosen: PUZZLE_LOCK_OPTIONS.findIndex((option) => option.lock === doorSetup.lock),
+            onChoose: (i) => setDoorSetup({ ...doorSetup, lock: PUZZLE_LOCK_OPTIONS[i].lock }),
           },
           {
             label: 'Grid size',

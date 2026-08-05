@@ -8,10 +8,10 @@
  *    two paces, see SoloPace — or as Endless Battle, the same game raced by
  *    several players on one shared deal.
  *  - Puzzle: no clock and no losing. A fixed board with real edges, twenty
- *    tiles at a time, until the player presses Finish. Played two ways, see
- *    PuzzleVariant: Solve, where the board stays yours to rearrange and a
- *    cleared pile brings twenty more, or Flow, where every word you place is
- *    locked down and the tiles it spent come straight back.
+ *    tiles at a time, until the player presses Finish. Set up on two dials that
+ *    don't touch each other: where the tiles come from (see PuzzleVariant —
+ *    Solve refills a cleared pile, Flow refills as you place) and whether a
+ *    placed word can still be moved (see PuzzleLock).
  *  - Duel: head-to-head for exactly two players. Placed words are permanent,
  *    and every word you place sends tiles to your opponent. First player to
  *    overflow their pile loses.
@@ -81,8 +81,9 @@ export const PUZZLE_INFO: ModeInfo = {
   tagline: 'One board, no clock. Build at your own pace.',
   details: [
     '20 tiles to weave into one crossword',
-    'Solve: rearrange freely, and clearing the pile brings 20 more',
-    'Flow: each word locks where it lands, and your pile refills to 20',
+    'Solve: weave in every last tile and 20 more arrive',
+    'Flow: your pile refills to 20 as you place',
+    'Tiles flexible to move and turn, or locked once you confirm',
     'Pick your board: 9×9, 13×13 or 19×19',
     'Press Finish whenever you’re done',
   ],
@@ -225,19 +226,30 @@ export const ENDLESS_LOOSE_LIMIT = 20;
 export type PuzzleSize = 9 | 13 | 19;
 
 /**
- * The two ways Puzzle is played. Both are the same untimed, unlosable board —
- * same sizes, same twenty tiles, same Finish button — and differ only in what
- * happens to a word once it's down:
+ * Where a Puzzle's tiles come from. Both variants are the same untimed,
+ * unlosable board — same sizes, same twenty tiles, same Finish button — and
+ * differ only in what refills the pile:
  *
- *  - `solve`: nothing is settled. Tiles move, words come apart, and the pile
- *    only refills once every last tile is woven in — which pays the clear
- *    bonus and deals PUZZLE_BATCH_TILES more.
- *  - `flow`: every word locks where it lands, so only real words are allowed
- *    down — and the tiles it spent come straight back, holding the pile at
- *    twenty for as long as the board has room. There's no clearing a pile that
- *    always refills, so the clear bonus never comes up.
+ *  - `solve`: the pile only refills once every last tile is woven in, which
+ *    pays the clear bonus and deals PUZZLE_BATCH_TILES more.
+ *  - `flow`: the pile tops back up to PUZZLE_START_TILES after every word, so
+ *    it stands at twenty for as long as the board has room. There's no
+ *    clearing a pile that always refills, so the clear bonus never comes up.
+ *
+ * Whether a placed word can still be moved is the other dial — see PuzzleLock.
  */
 export type PuzzleVariant = 'solve' | 'flow';
+
+/**
+ * Whether a Puzzle's tiles stay yours after they land:
+ *
+ *  - `flexible`: nothing is settled. Tiles drag, words turn and come apart,
+ *    and undo reaches back through the lot.
+ *  - `locked`: confirming a word is final — it can't be moved, turned or taken
+ *    back, and because a mistake can't be unpicked, only real words are let
+ *    down in the first place. The same deal a Duel plays under.
+ */
+export type PuzzleLock = 'flexible' | 'locked';
 
 /** What the splash cards call each Puzzle variant. */
 export const PUZZLE_VARIANT_NAMES: Record<PuzzleVariant, string> = {
@@ -253,6 +265,13 @@ export const PUZZLE_VARIANT_OPTIONS: ReadonlyArray<{ variant: PuzzleVariant; nam
   { variant: 'flow', name: 'Flow' },
 ];
 
+/** The Tile placement setting's tabs, in the order they're offered. Flexible
+ * leads: it's the gentler of the two, and the one a new player wants. */
+export const PUZZLE_LOCK_OPTIONS: ReadonlyArray<{ lock: PuzzleLock; name: string }> = [
+  { lock: 'flexible', name: 'Flexible' },
+  { lock: 'locked', name: 'Locked' },
+];
+
 /** The Grid size setting's tabs, in the order they're offered. */
 export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{ size: PuzzleSize; name: string }> = [
   { size: 9, name: '9 × 9' },
@@ -260,11 +279,23 @@ export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{ size: PuzzleSize; name: string
   { size: 19, name: '19 × 19' },
 ];
 
-/** Tiles in the opening Puzzle deal, either way it's played — and, in Solve,
- * in every batch that follows a fully connected board. Flow keeps the pile at
- * the opening count instead, handing back exactly what each word spent. */
+/** Tiles in the opening Puzzle deal, however it's set up — and, in Solve, in
+ * every batch that follows a fully connected board. Flow holds the pile here
+ * instead, topping it back up after every word. */
 export const PUZZLE_START_TILES = 20;
 export const PUZZLE_BATCH_TILES = 20;
+
+/**
+ * Flow's refill: how many tiles to deal to bring a pile of `pileSize` back to
+ * the opening twenty. A top-up rather than a hand-back of exactly what the
+ * word spent, because with flexible tiles the two aren't the same thing — a
+ * word taken off the board puts its letters back in the pile, and paying that
+ * pile out again would grow it without end. Never negative: a pile already at
+ * twenty or over is dealt nothing.
+ */
+export function puzzleRefillTiles(pileSize: number): number {
+  return Math.max(0, PUZZLE_START_TILES - pileSize);
+}
 
 /* ---------------------------------- Duel ----------------------------------- */
 
