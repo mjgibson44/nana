@@ -13,6 +13,8 @@ import {
   ENDLESS_SLOW_ROUNDS,
   ENDLESS_SMALL_BATCH,
   ENDLESS_SMALL_BATCH_ROUNDS,
+  PUZZLE_LOCK_OPTIONS,
+  PUZZLE_START_TILES,
   duelAttackMultiplier,
   duelAttackTiles,
   duelDripTiles,
@@ -22,6 +24,7 @@ import {
   endlessDripTiles,
   endlessInitialSeconds,
   formatSeconds,
+  puzzleRefillTiles,
 } from '../modes';
 
 describe('endlessInitialSeconds', () => {
@@ -234,6 +237,34 @@ describe('duelAttackTiles', () => {
 describe('duel constants', () => {
   it('caps the pile at twenty-five', () => {
     expect(DUEL_PILE_LIMIT).toBe(25);
+  });
+});
+
+describe('puzzleRefillTiles', () => {
+  it('tops a spent pile back up to the opening twenty', () => {
+    expect(puzzleRefillTiles(15)).toBe(5);
+    expect(puzzleRefillTiles(0)).toBe(PUZZLE_START_TILES);
+  });
+
+  it('deals nothing to a pile already at twenty', () => {
+    expect(puzzleRefillTiles(PUZZLE_START_TILES)).toBe(0);
+  });
+
+  // A word taken back off a flexible board puts its letters in the pile,
+  // which can carry it past twenty. Paying that pile out again would grow it
+  // without end.
+  it('deals nothing to a pile already over twenty', () => {
+    expect(puzzleRefillTiles(PUZZLE_START_TILES + 7)).toBe(0);
+  });
+});
+
+describe('puzzle setup options', () => {
+  it('offers both tile placements, flexible first', () => {
+    expect(PUZZLE_LOCK_OPTIONS.map((option) => option.lock)).toEqual(['flexible', 'locked']);
+  });
+
+  it('names them for the setup sheet', () => {
+    expect(PUZZLE_LOCK_OPTIONS.map((option) => option.name)).toEqual(['Flexible', 'Locked']);
   });
 });
 

@@ -50,7 +50,8 @@ src/
     types.ts            #   board = plain serializable Record<"row,col", letter>
     board.ts            #   word extraction, dictionary + connectivity validation
     generator.ts        #   crossword-construction letter dealing
-    modes.ts            #   the rules: Blitz pacing (regular/fast), Puzzle boards and variants, Duel rounds
+    modes.ts            #   the rules: Blitz pacing (regular/fast), Puzzle boards and dials, Duel rounds
+    setups.ts           #   the solo doors' last-played settings, kept between visits
     battle.ts           #   multiplayer brain: codes, shared deal, referees
     dictionary.ts       #   word list loading/parsing
     commonWords.ts      #   generation word pool (subset of the dictionary)
@@ -73,10 +74,13 @@ in `src/game/modes.ts`.
 
 The two solo doors raise a setup sheet on the way in
 (`src/components/SetupDialog.tsx`): one labelled row of tabs per setting the
-mode has — Blitz's **Speed**, Puzzle's **Game style** and **Grid size** — and a
-Play button under the lot. It opens on the last game's setup, so playing the
-same thing again is one tap, and nothing is decided until Play, so backing out
-of the sheet changes nothing.
+mode has — Blitz's **Speed**, Puzzle's **Game style**, **Tile placement** and
+**Grid size** — and a Play button under the lot. It opens on the last game's
+setup, kept between visits in `src/game/setups.ts`, so playing the same thing
+again is one tap; nothing is decided until Play, so backing out of the sheet
+changes nothing, and only Play writes the setup down. (A Survival game runs at
+the regular pace whatever you prefer for Blitz, and mustn't quietly rewrite
+that preference.)
 
 - **Blitz** (Endless) — no levels, at a pace picked on the way in. **Regular**:
   2:00 to work the starting 20 tiles, then batches land on a tightening clock —
@@ -93,21 +97,35 @@ of the sheet changes nothing.
 - **Puzzle** — no clock and no losing. Played on a fixed board with real edges,
   chosen on the way in: 9×9, 13×13 or 19×19. You get 20 tiles, the header keeps
   score and counts the time elapsed, and the **Finish** button in the top right
-  ends the game whenever you decide you're done. Two game styles, set on the
-  way in beside the board:
-  - **Puzzle Solve** — nothing is settled. Tiles move, words come apart, and
-    weaving every last tile into one connected crossword pays the 25-point
-    clear bonus and deals 20 more, for as long as you like.
-  - **Puzzle Flow** — every word you place is **locked** where it lands, so —
-    exactly as in a Duel — only real words are allowed down, there's no undo,
-    and nothing can be dragged, turned or taken back. In exchange the tiles the
-    word spent come straight back, so the pile stands at 20 for as long as the
-    board has room. The new letters are grown off the board as it now stands
-    (`extendPuzzle`), so each one is known to have a home somewhere on a board
-    that can't be rearranged; once the board is too congested to grow off, they
-    fall back to a plain draw. A pile that always refills is never cleared, so
-    the clear bonus simply isn't one of Flow's rewards — the score is the words
-    on the board when you press Finish.
+  ends the game whenever you decide you're done. Two dials on the setup sheet,
+  and they don't touch each other — any of the four combinations plays.
+
+  **Game style** — where the tiles come from:
+  - **Puzzle Solve** — the pile only refills once it's empty. Weaving every
+    last tile into one connected crossword pays the 25-point clear bonus and
+    deals 20 more, for as long as you like.
+  - **Puzzle Flow** — the pile tops straight back up to 20 after every word,
+    for as long as the board has room. The new letters are grown off the board
+    as it now stands (`extendPuzzle`), so each one is known to have a home on
+    the board it was dealt for; once the board is too congested to grow off,
+    they fall back to a plain draw. It's a top-up rather than a hand-back of
+    exactly what the word spent, because with flexible tiles those aren't the
+    same thing — a word taken back off the board puts its letters in the pile,
+    and paying that pile out again would grow it without end. A pile that
+    always refills is never cleared, so the clear bonus simply isn't one of
+    Flow's rewards — the score is the words on the board when you press Finish.
+
+  **Tile placement** — what happens to a word once it's down:
+  - **Flexible** — nothing is settled. Tiles drag, words turn and come apart,
+    and undo reaches back through the lot. A Flow refill is part of the move
+    that earned it, so undo takes it back too.
+  - **Locked** — confirming a word is final. Exactly as in a Duel, only real
+    words are allowed down, there's no undo, and nothing can be dragged,
+    turned or taken back.
+
+  A new player gets **Flow, Flexible, 13×13** — the most forgiving corner of
+  the mode. Whatever you press Play on is kept for next time, this visit or the
+  next (`src/game/setups.ts`), as is Blitz's speed.
 - **Survival** (Endless Battle) — Blitz Regular, against your friends. Every
   player shares one deal, so Survival always runs at the regular pace. One player hosts a
   lobby and shares a 5-letter code (or an invite link that carries it);
@@ -247,8 +265,9 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
 
 - [x] Single-player: solvable deals, drag & drop, live validation
 - [x] Blitz — endless ("peel"-style) play at a regular and a fast pace
-- [x] Puzzle — untimed play on a fixed 9×9/13×13/19×19 board, two ways: Solve
-      (+20 tiles per clear) and Flow (locked words, pile refilled to 20)
+- [x] Puzzle — untimed play on a fixed 9×9/13×13/19×19 board, on two
+      independent dials: Solve (+20 tiles per clear) or Flow (pile topped back
+      up to 20), with tiles flexible or locked once confirmed
 - [x] Multiplayer: Survival (Endless Battle) — shared deal from one seed, lobbies with
       codes/invite links, live standings, host controls, final rankings
 - [x] Duel mode: permanent words, attack tiles, escalating rounds
