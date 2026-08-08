@@ -206,6 +206,16 @@ export function DuelIcon(props: IconProps) {
   );
 }
 
+/** A crown: Battle, the free-for-all the last player standing takes. */
+export function CrownIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4.5 18.5L3 7.5l5 4L12 5l4 6.5 5-4-1.5 11h-15z" />
+      <path d="M8.5 15h7" />
+    </Svg>
+  );
+}
+
 /** A graduation cap: the guided walkthrough. */
 export function TutorialIcon(props: IconProps) {
   return (

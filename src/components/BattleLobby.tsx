@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { battleLink, type BattleState } from '../game/battle';
+import { BATTLE_MAX_PLAYERS, BATTLE_MIN_PLAYERS } from '../game/modes';
 
 interface BattleLobbyProps {
   state: BattleState;
@@ -58,21 +59,26 @@ function CopyButton({ label, text }: { label: string; text: string }) {
  * The room where a multiplayer game gathers. The host shares the code (or
  * the link that carries it) and starts the game once everyone's in; everyone
  * else watches the roster fill. A player who joins while a game is running
- * waits here for the next one. A Duel seats exactly two, so its start button
- * waits for an opponent.
+ * waits here for the next one. A Duel seats exactly two and a Battle two to
+ * eight, so their start buttons wait for enough of a field.
  */
 export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: BattleLobbyProps) {
   const host = state.players.find((p) => p.host);
   const gameRunning = state.phase !== 'lobby';
   const alone = state.players.length === 1;
   const duel = state.mode === 'duel';
-  const duelReady = state.players.filter((p) => !p.left).length >= 2;
+  const battle = state.mode === 'battle';
+  const seated = state.players.filter((p) => !p.left).length;
+  const duelReady = seated >= 2;
+  const battleReady = seated >= BATTLE_MIN_PLAYERS;
 
   return (
     <div className="home">
       <div className="home-inner battle-inner">
         <header className="home-header">
-          <span className="splash-eyebrow">{duel ? 'Duel' : 'Survival'}</span>
+          <span className="splash-eyebrow">
+            {duel ? 'Duel' : battle ? 'Battle' : 'Survival'}
+          </span>
           <h1 className="home-title battle-lobby-title">Lobby</h1>
         </header>
 
@@ -118,7 +124,18 @@ export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: B
                   A duel needs two — share the code and wait for your opponent.
                 </p>
               )}
-              {!duel && alone && (
+              {battle &&
+                (battleReady ? (
+                  <p className="battle-status">
+                    {seated} of {BATTLE_MAX_PLAYERS} seats filled — start now, or wait for more.
+                  </p>
+                ) : (
+                  <p className="battle-status">
+                    A battle needs at least two — share the code and gather up to{' '}
+                    {BATTLE_MAX_PLAYERS} players.
+                  </p>
+                ))}
+              {!duel && !battle && alone && (
                 <p className="battle-status">
                   Share the code so friends can join — or start solo to warm up.
                 </p>
@@ -126,10 +143,16 @@ export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: B
               <button
                 type="button"
                 className="btn btn-primary battle-wide-btn"
-                disabled={duel && !duelReady}
+                disabled={(duel && !duelReady) || (battle && !battleReady)}
                 onClick={onStart}
               >
-                {state.game === 0 ? (duel ? 'Start the duel' : 'Start game') : 'Start another game'}
+                {state.game === 0
+                  ? duel
+                    ? 'Start the duel'
+                    : battle
+                      ? 'Start the battle'
+                      : 'Start game'
+                  : 'Start another game'}
               </button>
             </>
           ) : (

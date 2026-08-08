@@ -41,6 +41,9 @@ interface ScoreboardProps {
   tiles: { label: string; loose: number; limit: number; warnAt?: number; urgentAt?: number } | null;
   /** Duel: the other player's pile, to watch them drown (or not). */
   opponent: { name: string; tiles: number; limit: number; out: boolean } | null;
+  /** Battle: how much of the field is still standing. A room of piles won't
+   * fit the header, so the count stands in for them. Null elsewhere. */
+  standing: { alive: number; of: number } | null;
   /** This player's place in a battle, or null outside one. */
   rank: { place: number; of: number; buried: boolean } | null;
   /** Score changes still floating up beside the total. */
@@ -59,6 +62,7 @@ export function Scoreboard({
   round,
   tiles,
   opponent,
+  standing,
   rank,
   pops,
   onPopEnd,
@@ -155,6 +159,18 @@ export function Scoreboard({
                 <span className="score-of">/{tiles.limit}</span>
               </>
             )}
+          </span>
+        </div>
+      )}
+      {standing && (
+        <div
+          className="score-block"
+          title={`${standing.alive} of ${standing.of} players still standing`}
+        >
+          <span className="score-label">Standing</span>
+          <span className="score-value">
+            {standing.alive}
+            <span className="score-of"> of {standing.of}</span>
           </span>
         </div>
       )}

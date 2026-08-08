@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BATTLE_MAX_PLAYERS,
+  BATTLE_MIN_PLAYERS,
   FAST_BATCH_ROUNDS,
   FAST_DRIP_SECONDS,
   FAST_INITIAL_SECONDS,
@@ -25,6 +27,7 @@ import {
   endlessInitialSeconds,
   formatSeconds,
   puzzleRefillTiles,
+  splitAttackTiles,
 } from '../modes';
 
 describe('endlessInitialSeconds', () => {
@@ -237,6 +240,60 @@ describe('duelAttackTiles', () => {
 describe('duel constants', () => {
   it('caps the pile at twenty-five', () => {
     expect(DUEL_PILE_LIMIT).toBe(25);
+  });
+});
+
+describe('battle constants', () => {
+  it('seats two to eight players', () => {
+    expect(BATTLE_MIN_PLAYERS).toBe(2);
+    expect(BATTLE_MAX_PLAYERS).toBe(8);
+  });
+});
+
+describe('splitAttackTiles', () => {
+  it('hands a duel-sized field the whole attack', () => {
+    expect(splitAttackTiles(4, 1)).toEqual([4]);
+    expect(splitAttackTiles(1, 1)).toEqual([1]);
+  });
+
+  it('splits evenly when the attack divides', () => {
+    expect(splitAttackTiles(6, 3)).toEqual([2, 2, 2]);
+    expect(splitAttackTiles(7, 7)).toEqual([1, 1, 1, 1, 1, 1, 1]);
+  });
+
+  it('always sums to the attack — a single tile still lands somewhere', () => {
+    for (let count = 0; count <= 12; count++) {
+      for (let targets = 1; targets <= 7; targets++) {
+        const shares = splitAttackTiles(count, targets);
+        expect(shares).toHaveLength(targets);
+        expect(shares.reduce((sum, share) => sum + share, 0)).toBe(count);
+      }
+    }
+  });
+
+  it('lands the remainder from the given seat, wrapping round', () => {
+    expect(splitAttackTiles(5, 3, 0)).toEqual([2, 2, 1]);
+    expect(splitAttackTiles(5, 3, 1)).toEqual([1, 2, 2]);
+    expect(splitAttackTiles(5, 3, 2)).toEqual([2, 1, 2]);
+    // The rotation is a courtesy, not a requirement — any offset still sums.
+    expect(splitAttackTiles(5, 3, 7)).toEqual([1, 2, 2]);
+    expect(splitAttackTiles(5, 3, -1)).toEqual([2, 1, 2]);
+  });
+
+  it('never scales the total up with the size of the room', () => {
+    // Eight players: seven targets take, between them, exactly what a duel's
+    // one opponent would — the room makes each hit smaller, not the game
+    // harder.
+    const duelAttack = duelAttackTiles(8, 3); // a big final-round word
+    const shares = splitAttackTiles(duelAttack, 7);
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBe(duelAttack);
+    for (const share of shares) expect(share).toBeLessThanOrEqual(Math.ceil(duelAttack / 7));
+  });
+
+  it('shrugs off nonsense', () => {
+    expect(splitAttackTiles(5, 0)).toEqual([]);
+    expect(splitAttackTiles(-3, 4)).toEqual([0, 0, 0, 0]);
+    expect(splitAttackTiles(Number.NaN, 4)).toEqual([]);
   });
 });
 
