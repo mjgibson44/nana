@@ -14,7 +14,9 @@
  *    placed word can still be moved (see PuzzleLock).
  *  - Duel: head-to-head for exactly two players. Placed words are permanent,
  *    and every word you place sends tiles to your opponent. First player to
- *    overflow their pile loses.
+ *    overflow their pile loses. Battle is the same game thrown open to a
+ *    room of up to eight — attacks are split across the field, and the last
+ *    player standing wins — so it plays under GameMode 'duel' too.
  *  - Tutorial: a guided walk through placing words, at your own pace.
  */
 
@@ -44,13 +46,14 @@ export interface ModeInfo {
 }
 
 /**
- * The doors out of the home screen — the four buttons that lead to a game.
+ * The doors out of the home screen — the five buttons that lead to a game.
  * Not the same list as GameMode: the solo pair each raise a setup sheet on the
- * way in — Blitz for its pace, Puzzle for its style and board — Survival and
- * Duel lead to a lobby before any game starts, and Survival is Endless
- * played against other people.
+ * way in — Blitz for its pace, Puzzle for its style and board — while
+ * Survival, Duel and Battle lead to a lobby before any game starts. Survival
+ * is Endless played against other people; Battle is Duel thrown open to a
+ * room.
  */
-export type GameDoor = 'blitz' | 'puzzle' | 'survival' | 'duel';
+export type GameDoor = 'blitz' | 'puzzle' | 'survival' | 'duel' | 'battle';
 
 export const BLITZ_INFO: ModeInfo = {
   name: 'Blitz',
@@ -94,7 +97,7 @@ export const PUZZLE_INFO: ModeInfo = {
  * player's game runs as Endless at the regular pace, and the multiplayer
  * wrapping (lobby, shared deal, standings) lives in src/game/battle.ts.
  */
-export const BATTLE_INFO: ModeInfo = {
+export const SURVIVAL_INFO: ModeInfo = {
   name: 'Survival',
   tagline: 'Outlive your friends (2+ players)',
   details: [
@@ -111,6 +114,24 @@ export const DUEL_INFO: ModeInfo = {
     'Two players, same tiles',
     'Placed words are permanent — and send tiles to your opponent',
     'Overflow 25 tiles in your pile and you lose',
+  ],
+};
+
+/**
+ * Battle's home-screen card — Duel's game thrown open to a room. The rules
+ * are Duel's to the letter (permanent words, attack tiles, the same pile
+ * limit and rounds); what changes is the field, so every attack is split
+ * across the rivals still standing and the game runs until one player is
+ * left. See splitAttackTiles for the split, and src/game/battle.ts for the
+ * elimination bookkeeping.
+ */
+export const BATTLE_ROYALE_INFO: ModeInfo = {
+  name: 'Battle',
+  tagline: 'Free-for-all. Last one standing wins (2–8 players).',
+  details: [
+    'Up to eight players, same tiles',
+    'Words are permanent — attack tiles are split across your rivals',
+    'Overflow 25 tiles and you’re out; outlast everyone to win',
   ],
 };
 
@@ -133,8 +154,9 @@ export const TUTORIAL_INFO: ModeInfo = {
 export const DOOR_INFO: Record<GameDoor, ModeInfo> = {
   blitz: BLITZ_INFO,
   puzzle: PUZZLE_INFO,
-  survival: BATTLE_INFO,
+  survival: SURVIVAL_INFO,
   duel: DUEL_INFO,
+  battle: BATTLE_ROYALE_INFO,
 };
 
 /* -------------------------------- Endless --------------------------------- */
@@ -377,6 +399,42 @@ export function duelAttackTiles(
   const absorbed = grewFrom.reduce((sum, length) => sum + base(length), 0);
   const growth = Math.max(0, base(wordLength) - absorbed);
   return Math.round(growth * duelAttackMultiplier(round));
+}
+
+/* --------------------------------- Battle ---------------------------------- */
+
+/**
+ * How many players a Battle seats. Two is a Duel in all but name; eight is
+ * where a phone's header, the lobby roster and the attack arithmetic all
+ * still breathe.
+ */
+export const BATTLE_MIN_PLAYERS = 2;
+export const BATTLE_MAX_PLAYERS = 8;
+
+/**
+ * Split one attack across the rivals still standing. A Battle word earns
+ * exactly what a Duel word does (duelAttackTiles) — but with up to seven
+ * targets, sending the whole attack to each of them would multiply the
+ * pressure by the size of the room. So the attack's total is what a duel
+ * would send, divided across the field: everyone takes the fair floor, and
+ * the remainder lands one tile each on the targets starting at `from`
+ * (wrapping round), so the caller can rotate who takes the odd tile rather
+ * than always the same seat.
+ *
+ * The shares always sum to the attack, so a 1-tile attack still lands
+ * somewhere instead of rounding away to nothing — and as players fall, the
+ * same words hit the survivors harder, which is the endgame tightening by
+ * itself.
+ */
+export function splitAttackTiles(count: number, targets: number, from = 0): number[] {
+  if (!Number.isFinite(count) || targets <= 0) return [];
+  const total = Math.max(0, Math.floor(count));
+  const base = Math.floor(total / targets);
+  const extra = total % targets;
+  const start = ((Math.floor(from) % targets) + targets) % targets;
+  const shares = new Array<number>(targets).fill(base);
+  for (let i = 0; i < extra; i++) shares[(start + i) % targets] += 1;
+  return shares;
 }
 
 /* --------------------------------- shared --------------------------------- */

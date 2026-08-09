@@ -30,6 +30,12 @@ const COPY: Record<BattleMode, { title: string; tagline: string; host: string }>
       'Two players, the same tiles. Placed words are permanent — and every word sends tiles to your opponent. Overflow your pile and you lose.',
     host: 'Host a duel',
   },
+  battle: {
+    title: 'Battle',
+    tagline:
+      'Up to eight players, the same tiles. Placed words are permanent — and every word scatters tiles across your rivals. Overflow your pile and you’re out; the last one standing wins.',
+    host: 'Host a battle',
+  },
 };
 
 /**

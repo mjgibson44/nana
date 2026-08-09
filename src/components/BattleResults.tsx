@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import {
   battleWinners,
   ordinal,
+  rankByElimination,
   rankPlayers,
   type BattlePlayer,
   type BattleState,
@@ -28,7 +29,9 @@ const MEDALS = ['🥇', '🥈', '🥉'];
  * everyone else sees the same table and waits, or bows out.
  *
  * An Endless Battle ranks by score. A Duel is simpler: the survivor named by
- * the host wins, whatever the scores say.
+ * the host wins, whatever the scores say. A Battle ranks the whole field by
+ * how long each player lasted — the winner first, then everyone else in
+ * reverse order of falling.
  */
 export function BattleResults({
   state,
@@ -40,12 +43,18 @@ export function BattleResults({
   onClose,
 }: BattleResultsProps) {
   const duel = state.mode === 'duel';
+  const battle = state.mode === 'battle';
   const contestants = useMemo(
     () => state.players.filter((p) => !p.waiting),
     [state.players],
   );
 
   const rows = useMemo(() => {
+    if (battle) {
+      // A battle's standings are the elimination order, read backwards:
+      // the last one standing leads, the first buried brings up the rear.
+      return rankByElimination(contestants).map(({ player, rank }) => ({ player, rank }));
+    }
     if (!duel) {
       return rankPlayers(contestants).map(({ player, rank }) => ({ player, rank }));
     }
@@ -59,36 +68,39 @@ export function BattleResults({
       player,
       rank: state.winnerId === null ? 1 : i + 1,
     }));
-  }, [duel, contestants, state.winnerId]);
+  }, [duel, battle, contestants, state.winnerId]);
 
   const waiting = state.players.filter((p) => p.waiting);
 
   const winners = useMemo(() => battleWinners(state), [state]);
   const selfWon = winners.some((player) => player.id === selfId);
-  const title = duel
-    ? state.winnerId === null
-      ? 'It’s a draw!'
-      : selfWon
-        ? 'You win the duel!'
-        : `${winners[0]?.name ?? 'Nobody'} wins the duel!`
-    : winners.length > 1
-      ? 'It’s a tie!'
-      : selfWon
-        ? 'You win!'
-        : `${winners[0]?.name ?? 'Nobody'} wins!`;
+  const title =
+    duel || battle
+      ? state.winnerId === null
+        ? 'It’s a draw!'
+        : selfWon
+          ? `You win the ${duel ? 'duel' : 'battle'}!`
+          : `${winners[0]?.name ?? 'Nobody'} wins the ${duel ? 'duel' : 'battle'}!`
+      : winners.length > 1
+        ? 'It’s a tie!'
+        : selfWon
+          ? 'You win!'
+          : `${winners[0]?.name ?? 'Nobody'} wins!`;
 
-  const duelOutcome = (player: BattlePlayer) =>
+  const survivalOutcome = (player: BattlePlayer) =>
     player.id === state.winnerId ? 'survived' : player.left ? 'left' : 'buried';
 
-  // A duel can only go again with both seats still filled.
+  // A duel or battle can only go again with enough seats still filled.
   const present = state.players.filter((p) => p.connected && !p.left).length;
-  const canRestart = !duel || present >= 2;
+  const canRestart = (!duel && !battle) || present >= 2;
 
   return (
     <div className="summary" role="dialog" aria-modal="true" aria-label="Game finished">
       <div className="summary-inner">
         <header className="summary-header">
-          <span className="splash-eyebrow">{duel ? 'Duel finished' : 'Battle finished'}</span>
+          <span className="splash-eyebrow">
+            {duel ? 'Duel finished' : battle ? 'Battle finished' : 'Survival finished'}
+          </span>
           <h1 className="summary-title">{title}</h1>
         </header>
 
@@ -111,7 +123,7 @@ export function BattleResults({
                   {player.left && <span className="battle-results-left">left the game</span>}
                 </span>
                 <span className="battle-results-score">
-                  {duel ? duelOutcome(player) : player.score}
+                  {duel || battle ? survivalOutcome(player) : player.score}
                 </span>
               </li>
             ))}

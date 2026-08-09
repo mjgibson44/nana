@@ -337,7 +337,8 @@ export default function App() {
 
   /* ------------------------------ battle state ------------------------------ */
 
-  /** Which multiplayer door the battle screen opens: Endless Battle or Duel. */
+  /** Which multiplayer door the battle screen opens: Endless Battle, Duel,
+   * or the free-for-all Battle. */
   const [battleIntent, setBattleIntent] = useState<BattleMode>('endless');
   /** The live multiplayer connection, or null outside one. */
   const [battle, setBattle] = useState<BattleHandle | null>(null);
@@ -628,6 +629,9 @@ export default function App() {
             : nextMode === 'duel'
               ? {
                   kind: 'duelRound',
+                  // The same duel game opens two doors; the card names the
+                  // one this lobby is playing.
+                  eyebrow: battleRef.current?.snapshot().mode === 'battle' ? 'Battle' : 'Duel',
                   round: 1,
                   final: false,
                   multiplier: duelAttackMultiplier(1),
@@ -712,7 +716,7 @@ export default function App() {
       }
       setBattleNotice(null);
       setBattleError(null);
-      setBattleIntent(door === 'survival' ? 'endless' : 'duel');
+      setBattleIntent(door === 'survival' ? 'endless' : door === 'battle' ? 'battle' : 'duel');
       setScreen('battle');
     },
     [soloPace, puzzleVariant, puzzleLock, puzzleSize],
@@ -847,18 +851,21 @@ export default function App() {
   const handleBattleStart = useCallback(
     (seed: string) => {
       const handle = battleRef.current;
-      const duel = handle?.snapshot().mode === 'duel';
+      const lobbyMode = handle?.snapshot().mode ?? 'endless';
+      // A Battle is Duel's game for a room, so both play under GameMode
+      // 'duel': permanent words, attack tiles, the same pile limit.
+      const duelish = lobbyMode === 'duel' || lobbyMode === 'battle';
       const stream = createTileStream(seed);
       battleStream.current = stream;
       attackStream.current =
-        duel && handle ? createTileStream(`${seed}/attacks/${handle.selfId}`) : null;
+        duelish && handle ? createTileStream(`${seed}/attacks/${handle.selfId}`) : null;
       setShowBattleResults(false);
       setConfirmBattle(null);
       // Survival is always the regular pace — one shared deal, one schedule.
       newGame(
-        duel ? 'duel' : 'endless',
+        duelish ? 'duel' : 'endless',
         'regular',
-        stream.next(duel ? DUEL_START_TILES : ENDLESS_START_TILES),
+        stream.next(duelish ? DUEL_START_TILES : ENDLESS_START_TILES),
       );
       setScreen('game');
     },
@@ -897,9 +904,9 @@ export default function App() {
     setBattleNotice(message);
   }, []);
 
-  /** Duel: the opponent's word landed — their attack tiles join our pile.
-   * The letters are drawn locally from the attack stream; only the count
-   * crossed the network. */
+  /** Duel and Battle: someone's word landed — their attack tiles join our
+   * pile. The letters are drawn locally from the attack stream; only the
+   * count crossed the network. */
   const handleAttack = useCallback((count: number) => {
     const stream = attackStream.current;
     if (!stream || count <= 0 || finished.current) return;
@@ -910,8 +917,12 @@ export default function App() {
     playSound('attack');
     const serial = ++dropSerial.current;
     setTileDrop({ count: letters.length, serial });
+    // A battle attack arrives as a share of somebody's word, and the wire
+    // doesn't say whose — a duel's can only be the opponent's.
+    const from =
+      battleRef.current?.snapshot().mode === 'battle' ? 'a rival' : 'your opponent';
     setToast({
-      text: `Incoming! +${letters.length} tile${letters.length === 1 ? '' : 's'} from your opponent`,
+      text: `Incoming! +${letters.length} tile${letters.length === 1 ? '' : 's'} from ${from}`,
       serial,
     });
   }, []);
@@ -1623,6 +1634,7 @@ export default function App() {
       setDuelRound(next);
       setSplash({
         kind: 'duelRound',
+        eyebrow: battleState?.mode === 'battle' ? 'Battle' : 'Duel',
         round: next,
         final: next >= DUEL_ROUNDS,
         multiplier: duelAttackMultiplier(next),
@@ -1761,9 +1773,11 @@ export default function App() {
     if (rack.length > DUEL_PILE_LIMIT) finishGame('buried');
   }, [mode, complete, rack.length, finishGame]);
 
-  /** Duel: the opponent's side of the header — their pile against the limit. */
+  /** Duel: the opponent's side of the header — their pile against the limit.
+   * A Battle has up to seven of these, so it shows the standing count below
+   * instead. */
   const duelOpponent = useMemo(() => {
-    if (mode !== 'duel' || !battle || !battleState) return null;
+    if (mode !== 'duel' || !battle || !battleState || battleState.mode !== 'duel') return null;
     const other = battleState.players.find(
       (p) => p.id !== battle.selfId && !p.waiting && !p.left,
     );
@@ -1775,6 +1789,48 @@ export default function App() {
       out: other.buried,
     };
   }, [mode, battle, battleState]);
+
+  /** Battle: how much of the field is still standing, for the header. */
+  const battleStanding = useMemo(() => {
+    if (mode !== 'duel' || !battleState || battleState.mode !== 'battle') return null;
+    const contestants = battleState.players.filter((p) => !p.waiting);
+    if (contestants.length === 0) return null;
+    return {
+      alive: contestants.filter((p) => !p.buried && !p.left).length,
+      of: contestants.length,
+    };
+  }, [mode, battleState]);
+
+  /**
+   * Battle: call out each rival's fall the moment the host reports it, with
+   * how much of the field is left. The set remembers who has already been
+   * called out, so a re-broadcast (scores move constantly) doesn't repeat
+   * the news; it resets whenever a game isn't running. A player's own fall
+   * isn't in here — it gets its own message below, and the game's end
+   * raises the standings instead of a toast.
+   */
+  const outSeen = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!battle || !battleState || battleState.mode !== 'battle' || battlePhase !== 'playing') {
+      outSeen.current = new Set();
+      return;
+    }
+    const out = battleState.players.filter((p) => !p.waiting && (p.buried || p.left));
+    const fresh = out.filter((p) => !outSeen.current.has(p.id));
+    if (fresh.length === 0) return;
+    for (const p of fresh) outSeen.current.add(p.id);
+    const named = fresh.filter((p) => p.id !== battle.selfId);
+    if (named.length === 0) return;
+    const standing = battleState.players.filter(
+      (p) => !p.waiting && !p.buried && !p.left,
+    ).length;
+    setToast({
+      text:
+        `${named[named.length - 1].name} is out! ` +
+        `${standing} player${standing === 1 ? '' : 's'} still standing`,
+      serial: ++dropSerial.current,
+    });
+  }, [battle, battleState, battlePhase]);
 
   /* -------------------------------- endless --------------------------------- */
 
@@ -1867,14 +1923,23 @@ export default function App() {
     }
   }, [battle, battlePhase, battleState, screen, finishGame]);
 
-  // Going under in an Endless Battle isn't the end of the show — say so,
-  // once, while the survivors race on. (A duel ends the moment anyone does.)
+  // Going under in an Endless Battle or a Battle isn't the end of the show —
+  // say so, once, while the survivors race on. (A duel ends the moment
+  // anyone does, so it never lands here.)
+  const battleLobbyMode = battleState?.mode ?? null;
   useEffect(() => {
-    if (!inBattle || mode !== 'endless' || battlePhase !== 'playing') return;
+    if (!inBattle || battlePhase !== 'playing') return;
+    if (mode !== 'endless' && battleLobbyMode !== 'battle') return;
     if (!complete || endReason !== 'buried') return;
     const serial = ++dropSerial.current;
-    setToast({ text: 'You’re buried! The race goes on…', serial });
-  }, [inBattle, mode, battlePhase, complete, endReason]);
+    setToast({
+      text:
+        mode === 'endless'
+          ? 'You’re buried! The race goes on…'
+          : 'You’re out! The battle rages on…',
+      serial,
+    });
+  }, [inBattle, mode, battleLobbyMode, battlePhase, complete, endReason]);
 
   // Banners and landing animations clean themselves up.
   useEffect(() => {
@@ -2245,8 +2310,14 @@ export default function App() {
         if (attack > 0) {
           battleRef.current.sendAttack(attack);
           const serial = ++dropSerial.current;
+          // In a battle the host splits the total across the field; the
+          // sender's banner talks about the whole volley either way.
+          const at =
+            battleRef.current.snapshot().mode === 'battle'
+              ? 'across your rivals'
+              : 'to your opponent';
           setToast({
-            text: `Sent ${attack} tile${attack === 1 ? '' : 's'} to your opponent!`,
+            text: `Sent ${attack} tile${attack === 1 ? '' : 's'} ${at}!`,
             serial,
           });
         }
@@ -3272,6 +3343,7 @@ export default function App() {
                 : null
           }
           opponent={duelOpponent}
+          standing={battleStanding}
           rank={battleRank}
           pops={scorePops}
           onPopEnd={endScorePop}

@@ -50,7 +50,7 @@ src/
     types.ts            #   board = plain serializable Record<"row,col", letter>
     board.ts            #   word extraction, dictionary + connectivity validation
     generator.ts        #   crossword-construction letter dealing
-    modes.ts            #   the rules: Blitz pacing (regular/fast), Puzzle boards and dials, Duel rounds
+    modes.ts            #   the rules: Blitz pacing (regular/fast), Puzzle boards and dials, Duel rounds, Battle's attack split
     setups.ts           #   the solo doors' last-played settings, kept between visits
     battle.ts           #   multiplayer brain: codes, shared deal, referees
     dictionary.ts       #   word list loading/parsing
@@ -147,6 +147,20 @@ that preference.)
   a drip of 1 then 2 tiles every 20 seconds; the final round has no clock,
   ×2 attacks, and 4 tiles every 20 seconds. Let your pile exceed 25 tiles —
   for any reason, at any moment — and you lose. Last one standing wins.
+- **Battle** — Duel's game thrown open to a free-for-all of **2–8 players**,
+  rule for rule: the same permanent words, the same rounds and drip, the
+  same 25-tile pile limit. What changes is the field, so each attack is
+  **split across every rival still standing** rather than multiplied by
+  them: a word earns exactly what it would in a duel, everyone takes the
+  fair floor of that total, and the remainder rotates round the seats so no
+  one is always the unlucky one (`splitAttackTiles` in
+  `src/game/modes.ts`). The pressure on any one player stays at duel level
+  however big the room is — and as players fall, the same words hit the
+  survivors harder by themselves. A toast calls out each elimination, the
+  header counts the field still standing, and the game runs until one
+  player is left. The results screen ranks everyone by how long they lasted
+  — the host notes the order players fall (`outOrder`), and
+  `rankByElimination` reads the standings straight off it.
 - **Tutorial** — a guided three-step walkthrough, scripted in
   `src/game/tutorial.ts`: SOLAR spelled out in the pile to place, then ORBIT
   dealt an R short so it has to cross the one already down, then POLE dealt two
@@ -196,8 +210,9 @@ hears one land on top of the last:
   goes quiet.
 - A rising **three-note chime** whenever tiles land in your own pile, in any
   mode — a timed batch, a board-clear reward, a tutorial step's letters.
-- A low, **falling growl** for tiles a Duel opponent sends you: incoming trouble
-  should never sound like the arrival of tiles you earned.
+- A low, **falling growl** for tiles a Duel opponent or a Battle rival sends
+  you: incoming trouble should never sound like the arrival of tiles you
+  earned.
 - A two-note **click** as a word goes down on the board. Every road to a landing
   runs through `commit`, so a dragged tile and a typed word sound alike.
 - A two-tone **alarm** the moment the loose pile goes over the limit, along with
@@ -214,16 +229,16 @@ Two end a game, and may take their time since nothing follows them:
   a loss sounds the same.
 - The same shape **climbing** for the player who takes a multiplayer game.
   `battleWinners` in `src/game/battle.ts` decides who that is — top score in a
-  Survival (all of them, on a tie), the surviving duellist in a Duel — and the
-  results screen names the winner from the same function, so the fanfare and the
-  headline can never disagree.
+  Survival (all of them, on a tie), the last one standing in a Duel or a
+  Battle — and the results screen names the winner from the same function, so
+  the fanfare and the headline can never disagree.
 
 **Game sound** on the Settings screen silences the lot, remembered in
 `localStorage`. While it's off no audio context is ever built at all; switching
 it on plays a sound, both to demonstrate the switch and because that click is
 the user gesture browsers want before they will let audio start.
 
-## Multiplayer (Survival & Duel)
+## Multiplayer (Survival, Duel & Battle)
 
 - `src/game/rng.ts` — a tiny seeded PRNG (xmur3 + mulberry32) that slots into
   the generator's injectable `rng` parameter.
@@ -238,8 +253,11 @@ the user gesture browsers want before they will let audio start.
 Tiles are never sent over the wire. The host shares one random seed per game
 and every client grows the identical deal from it: the generator builds the
 same hidden crossword batch by batch because its RNG, word pool, and call
-sequence match everywhere. Even duel attacks travel as a count — the receiver
-draws the letters from a stream seeded off the shared seed and their own id.
+sequence match everywhere. Even duel and battle attacks travel as a count —
+the receiver draws the letters from a stream seeded off the shared seed and
+their own id. In a Battle the host is also the one who splits each attack
+across the field before relaying the shares, and the one who stamps the
+elimination order the final standings are ranked by.
 
 ### Connection failsafes
 
@@ -271,6 +289,9 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
 - [x] Multiplayer: Survival (Endless Battle) — shared deal from one seed, lobbies with
       codes/invite links, live standings, host controls, final rankings
 - [x] Duel mode: permanent words, attack tiles, escalating rounds
+- [x] Battle mode: Duel for 2–8 players — attacks split across the field,
+      elimination toasts, last one standing wins, standings by how long
+      each player lasted
 - [x] Light/dark/system theme and a settings screen
 - [x] Game sounds — synthesized cues for ticks, tiles, attacks, words and endings
 - [x] Reconnection grace, auto-redial, and pause-on-disconnect

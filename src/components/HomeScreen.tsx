@@ -1,6 +1,7 @@
 import { DOOR_INFO, type GameDoor } from '../game/modes';
 import {
   BlitzIcon,
+  CrownIcon,
   DuelIcon,
   HelpIcon,
   PlayersIcon,
@@ -28,6 +29,7 @@ const DOORS: Array<{ door: GameDoor; icon: React.ReactNode }> = [
   { door: 'puzzle', icon: <PuzzleIcon /> },
   { door: 'survival', icon: <PlayersIcon /> },
   { door: 'duel', icon: <DuelIcon /> },
+  { door: 'battle', icon: <CrownIcon /> },
 ];
 
 /** The utility grid's buttons: an icon over a label. */

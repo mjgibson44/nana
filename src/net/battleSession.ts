@@ -6,8 +6,10 @@ import {
   duelWinner,
   newBattleCode,
   type BattleMode,
+  type BattlePlayer,
   type BattleState,
 } from '../game/battle';
+import { BATTLE_MAX_PLAYERS, splitAttackTiles } from '../game/modes';
 import { randomSeed } from '../game/rng';
 
 /**
@@ -40,7 +42,7 @@ import { randomSeed } from '../game/rng';
  */
 
 /** Bumped when messages change shape, so a stale tab fails loud, not weird. */
-const PROTOCOL = 2;
+const PROTOCOL = 3;
 
 /** How long connecting may take before it's called a failure. */
 const CONNECT_TIMEOUT_MS = 20_000;
@@ -224,6 +226,11 @@ class HostSession implements BattleHandle {
   private readonly state: BattleState;
   private pingTimer: number | undefined;
   private left = false;
+  /** How many contestants have fallen this game — the next outOrder. */
+  private outCounter = 0;
+  /** Where a battle attack's remainder starts landing next, so the odd tile
+   * rotates round the field instead of always hitting the same seat. */
+  private attackSpread = 0;
 
   private readonly onVisible = () => {
     // Coming back from a phone's app switch: make sure the broker link is
@@ -256,6 +263,7 @@ class HostSession implements BattleHandle {
           left: false,
           waiting: false,
           tiles: 0,
+          outOrder: null,
         },
       ],
     };
@@ -344,14 +352,22 @@ class HostSession implements BattleHandle {
       const existing = this.state.players.find((p) => p.id === key);
 
       if (!existing) {
-        // A duel seats exactly two. Anyone else is politely turned away.
-        if (
-          this.state.mode === 'duel' &&
-          this.state.players.filter((p) => !p.left).length >= 2
-        ) {
+        // A duel seats exactly two, a battle up to eight. Anyone past the
+        // limit is politely turned away.
+        const seated = this.state.players.filter((p) => !p.left).length;
+        const full =
+          this.state.mode === 'duel'
+            ? seated >= 2
+            : this.state.mode === 'battle'
+              ? seated >= BATTLE_MAX_PLAYERS
+              : false;
+        if (full) {
           const reject: HostMessage = {
             t: 'reject',
-            reason: 'This duel already has two players.',
+            reason:
+              this.state.mode === 'duel'
+                ? 'This duel already has two players.'
+                : `This battle is full — ${BATTLE_MAX_PLAYERS} players are already in.`,
           };
           conn.send(reject);
           window.setTimeout(() => conn.close(), 250);
@@ -367,6 +383,7 @@ class HostSession implements BattleHandle {
           left: false,
           waiting: this.state.phase !== 'lobby',
           tiles: 0,
+          outOrder: null,
         });
       } else {
         // The same seat dialing back in — from a drop, or a fresh tab that
@@ -418,7 +435,9 @@ class HostSession implements BattleHandle {
       const player = this.state.players.find((p) => p.id === playerId);
       if (!player || player.waiting || this.state.phase !== 'playing') return null;
       player.score = Math.max(0, Math.floor(Number(msg.score))) || 0;
-      player.buried = Boolean(msg.buried);
+      const buried = Boolean(msg.buried);
+      if (buried && !player.buried) this.markOut(player);
+      player.buried = buried;
       player.tiles = Math.max(0, Math.floor(Number(msg.tiles))) || 0;
       this.checkOver();
       this.publish();
@@ -433,26 +452,49 @@ class HostSession implements BattleHandle {
     return null;
   }
 
-  /** Pass a duel attack from one player to the other — or take it ourselves. */
+  /**
+   * Fan an attack out from `fromId` — or take our share ourselves. A duel's
+   * one opponent takes the lot; a battle splits the same total across every
+   * rival still standing (splitAttackTiles), with the remainder rotating
+   * round the field so no seat is always the one taking the odd tile. Each
+   * target still only ever hears a count — the letters come from their own
+   * attack stream.
+   */
   private relayAttack(fromId: string, count: number): void {
-    if (this.state.mode !== 'duel' || this.state.phase !== 'playing') return;
+    const { mode, phase } = this.state;
+    if ((mode !== 'duel' && mode !== 'battle') || phase !== 'playing') return;
     if (!Number.isFinite(count) || count <= 0) return;
     const sender = this.state.players.find((p) => p.id === fromId);
     if (!sender || sender.waiting || sender.buried || sender.left) return;
-    const target = this.state.players.find(
-      (p) => p.id !== fromId && !p.waiting && !p.left,
+    const targets = this.state.players.filter(
+      (p) => p.id !== fromId && !p.waiting && !p.left && !p.buried,
     );
-    if (!target || target.buried) return;
+    if (targets.length === 0) return;
     const clamped = Math.min(50, Math.floor(count));
-    if (target.id === this.selfId) {
-      this.events.onAttack(clamped);
-      return;
-    }
-    const conn = this.conns.get(target.id);
-    if (conn?.open) {
-      const msg: HostMessage = { t: 'attack', count: clamped };
-      conn.send(msg);
-    }
+    const shares = splitAttackTiles(clamped, targets.length, this.attackSpread);
+    // Next attack's remainder starts where this one's left off.
+    this.attackSpread = (this.attackSpread + (clamped % targets.length)) % targets.length;
+    targets.forEach((target, i) => {
+      const share = shares[i];
+      if (share <= 0) return;
+      if (target.id === this.selfId) {
+        this.events.onAttack(share);
+        return;
+      }
+      const conn = this.conns.get(target.id);
+      if (conn?.open) {
+        const msg: HostMessage = { t: 'attack', count: share };
+        conn.send(msg);
+      }
+    });
+  }
+
+  /** Note the moment a contestant fell — first out is 1, counting up. It's
+   * written once and never rewritten, so a Battle's standings can be read
+   * straight off it however the game ends. */
+  private markOut(player: BattlePlayer): void {
+    if (player.outOrder !== null) return;
+    player.outOrder = ++this.outCounter;
   }
 
   /**
@@ -480,6 +522,9 @@ class HostSession implements BattleHandle {
       const p = this.state.players.find((entry) => entry.id === id);
       if (!p || p.connected) return;
       p.left = true;
+      // Out of the running the moment the grace runs out — that's their
+      // place in the standings.
+      this.markOut(p);
       this.recomputePaused();
       this.checkOver();
       this.publish();
@@ -501,6 +546,7 @@ class HostSession implements BattleHandle {
       // standings, and the referee treats them as out of the running.
       player.connected = false;
       player.left = true;
+      this.markOut(player);
       this.recomputePaused();
       this.checkOver();
     } else {
@@ -521,7 +567,9 @@ class HostSession implements BattleHandle {
 
   private checkOver(): void {
     if (this.state.phase !== 'playing') return;
-    if (this.state.mode === 'duel') {
+    if (this.state.mode === 'duel' || this.state.mode === 'battle') {
+      // Both are survival games: over on the last player standing, whatever
+      // the size of the field.
       if (duelOver(this.state.players)) {
         this.state.winnerId = duelWinner(this.state.players)?.id ?? null;
         this.state.phase = 'finished';
@@ -559,7 +607,10 @@ class HostSession implements BattleHandle {
       player.buried = false;
       player.waiting = false;
       player.tiles = 0;
+      player.outOrder = null;
     }
+    this.outCounter = 0;
+    this.attackSpread = 0;
     this.state.phase = 'playing';
     this.state.game += 1;
     this.state.paused = false;
@@ -579,7 +630,10 @@ class HostSession implements BattleHandle {
       player.buried = false;
       player.waiting = false;
       player.tiles = 0;
+      player.outOrder = null;
     }
+    this.outCounter = 0;
+    this.attackSpread = 0;
     this.state.phase = 'lobby';
     this.state.paused = false;
     this.state.winnerId = null;
@@ -595,6 +649,7 @@ class HostSession implements BattleHandle {
       return;
     }
     self.score = score;
+    if (buried && !self.buried) this.markOut(self);
     self.buried = buried;
     self.tiles = tiles;
     this.checkOver();

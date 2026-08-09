@@ -9,6 +9,7 @@ import {
   newBattleCode,
   normalizeBattleCode,
   ordinal,
+  rankByElimination,
   rankPlayers,
   type BattleMode,
   type BattlePlayer,
@@ -201,6 +202,49 @@ describe('duelOver / duelWinner', () => {
     expect(duelOver(players)).toBe(true);
     expect(duelWinner(players)).toBeNull();
   });
+
+  it('referees a whole battle field the same way: last one standing', () => {
+    // Seven of eight down — the game runs until exactly one is left.
+    const field = (alive: number) =>
+      Array.from({ length: 8 }, (_, i) => player({ buried: i >= alive }));
+    expect(duelOver(field(3))).toBe(false);
+    expect(duelOver(field(2))).toBe(false);
+    const done = field(1);
+    expect(duelOver(done)).toBe(true);
+    expect(duelWinner(done)).toBe(done[0]);
+  });
+});
+
+describe('rankByElimination', () => {
+  function faller(outOrder: number | null, overrides: Partial<Contestant> = {}) {
+    return { ...player({ buried: outOrder !== null, ...overrides }), outOrder };
+  }
+
+  it('leads with the survivor and walks back through the falls', () => {
+    const winner = faller(null);
+    const first = faller(1);
+    const second = faller(2);
+    const third = faller(3);
+    const ranked = rankByElimination([first, third, winner, second]);
+    expect(ranked.map((r) => r.player)).toEqual([winner, third, second, first]);
+    expect(ranked.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('shares the top rank in a draw where nobody survived', () => {
+    // The theoretical draw: the last two went down together, so the two
+    // never-marked entries would both be survivors — but here everyone
+    // fell, and the two who share an outOrder share a rank.
+    const ranked = rankByElimination([faller(null), faller(null), faller(1)]);
+    expect(ranked.map((r) => r.rank)).toEqual([1, 1, 3]);
+  });
+
+  it('ranks a leaver by when they left, like any other fall', () => {
+    const winner = faller(null);
+    const quitter = faller(1, { buried: false, left: true });
+    const fighter = faller(2);
+    const ranked = rankByElimination([quitter, winner, fighter]);
+    expect(ranked.map((r) => r.player)).toEqual([winner, fighter, quitter]);
+  });
 });
 
 describe('rankPlayers', () => {
@@ -237,6 +281,7 @@ describe('battleWinners', () => {
       left: false,
       waiting: false,
       tiles: 0,
+      outOrder: null,
       ...overrides,
     };
   }
@@ -283,6 +328,32 @@ describe('battleWinners', () => {
   it('gives a drawn Duel to nobody', () => {
     const winners = battleWinners(
       state('duel', [seat('a', { buried: true }), seat('b', { buried: true })], null),
+    );
+    expect(winners).toEqual([]);
+  });
+
+  it('gives a Battle to the last one standing, whatever the scores say', () => {
+    const winners = battleWinners(
+      state(
+        'battle',
+        [
+          seat('a', { score: 99, buried: true, outOrder: 2 }),
+          seat('b', { score: 1 }),
+          seat('c', { score: 50, buried: true, outOrder: 1 }),
+        ],
+        'b',
+      ),
+    );
+    expect(winners.map((p) => p.id)).toEqual(['b']);
+  });
+
+  it('gives a drawn Battle to nobody', () => {
+    const winners = battleWinners(
+      state(
+        'battle',
+        [seat('a', { buried: true, outOrder: 1 }), seat('b', { buried: true, outOrder: 2 })],
+        null,
+      ),
     );
     expect(winners).toEqual([]);
   });

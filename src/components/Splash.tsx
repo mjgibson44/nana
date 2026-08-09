@@ -17,13 +17,21 @@ export interface RoundStanding {
  *  - `speedup`: Endless turning the screw (bigger batches from here), badged
  *    with the solo pace the game is being played at.
  *  - `round`: an Endless Battle round ending, with the whole field's scores.
- *  - `duelRound`: a Duel round starting, with its multiplier and drip.
+ *  - `duelRound`: a Duel or Battle round starting, with its multiplier and
+ *    drip — the eyebrow names which of the two games it is.
  */
 export type Splash =
   | { kind: 'start'; title: string; eyebrow: string; note: string }
   | { kind: 'speedup'; seconds: number; tiles: number; pace: SoloPace }
   | { kind: 'round'; standings: RoundStanding[]; seconds: number; tiles: number }
-  | { kind: 'duelRound'; round: number; final: boolean; multiplier: number; dripTiles: number };
+  | {
+      kind: 'duelRound';
+      eyebrow: string;
+      round: number;
+      final: boolean;
+      multiplier: number;
+      dripTiles: number;
+    };
 
 interface SplashCardProps {
   /** The card to show, or null when nothing is showing. */
@@ -84,7 +92,7 @@ export function SplashCard({ splash, onDismiss }: SplashCardProps) {
             note: `+${splash.tiles} tiles every ${formatSeconds(splash.seconds)} from here`,
           }
         : {
-            eyebrow: 'Duel',
+            eyebrow: splash.eyebrow,
             name: splash.final ? 'Final round!' : `Round ${splash.round}`,
             note:
               `Words hit ×${splash.multiplier} · +${splash.dripTiles} ` +
