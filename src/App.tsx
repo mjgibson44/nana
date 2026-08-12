@@ -275,6 +275,19 @@ type Interaction =
 
 const IDLE: Interaction = { kind: 'idle' };
 
+/**
+ * A move's worth of state, kept so it can be taken back: the board and pile as
+ * they stood, plus the word staged above the pile at the time. Undo is about
+ * where the tiles are, not about what the player had typed — so the staged
+ * letters travel with the snapshot and come back with it, and only the pile's
+ * own clear button ever throws a typed word away.
+ */
+interface Snapshot {
+  board: TileMap;
+  rack: string[];
+  picks: number[];
+}
+
 function picksOf(interaction: Interaction): number[] {
   return interaction.kind === 'idle' ? [] : interaction.picks;
 }
@@ -498,14 +511,18 @@ export default function App() {
   /**
    * Board-and-pile snapshots, oldest first, for undo. Duels never record —
    * placed words are permanent there, so there is nothing to take back.
+   *
+   * `picks` is the word staged above the pile at the time, as pile indices
+   * into this snapshot's own rack, so taking a placement back hands the
+   * player their typed word again rather than making them spell it twice.
    */
-  const [history, setHistory] = useState<Array<{ board: TileMap; rack: string[] }>>([]);
+  const [history, setHistory] = useState<Array<Snapshot>>([]);
   /**
    * Moves taken back and waiting to be redone, most recent last. Any fresh
    * move forks the timeline and empties it — see remember — so redo is only
    * offered while going forward again still makes sense.
    */
-  const [future, setFuture] = useState<Array<{ board: TileMap; rack: string[] }>>([]);
+  const [future, setFuture] = useState<Array<Snapshot>>([]);
   /** What the splash card is announcing, or null while nothing is showing. */
   const [splash, setSplash] = useState<Splash | null>(null);
   /** Cell size in px, driven by pinch on touch devices. */
@@ -1051,30 +1068,45 @@ export default function App() {
   const boardLocked = mode === 'duel' || (mode === 'puzzle' && puzzleLock === 'locked');
 
   /**
-   * Remember the board and pile as they are, so the change about to be made can
-   * be taken back. Called before a move, never after. Locked boards don't
+   * Remember the board, pile and staged word as they are, so the change about
+   * to be made can be taken back. Called before a move, never after — which is
+   * what puts the word still standing above the pile into the snapshot, rather
+   * than the empty bar the placement leaves behind. Locked boards don't
    * record: placed words are permanent there.
    */
   const remember = useCallback(() => {
     if (boardLocked) return;
-    setHistory((past) => [...past.slice(-UNDO_DEPTH + 1), { board, rack }]);
+    setHistory((past) => [
+      ...past.slice(-UNDO_DEPTH + 1),
+      { board, rack, picks: picksOf(interaction) },
+    ]);
     // A new move forks the timeline; the moves undone before it can't come
     // back any more.
     setFuture([]);
-  }, [boardLocked, board, rack]);
+  }, [boardLocked, board, rack, interaction]);
+
+  /**
+   * Step a snapshot's worth of state back onto the screen. The staged word
+   * comes back as loose letters waiting for a spot rather than aimed at the
+   * cell it was aimed at before: the whole point of the step was to get the
+   * tiles off that cell, so nothing goes back on it, not even as a preview.
+   */
+  const restore = useCallback((snap: Snapshot) => {
+    setBoard(snap.board);
+    setRack(snap.rack);
+    setInteraction(withPicks(IDLE, snap.picks));
+    setSelection(null);
+    setHighlightedWord(null);
+  }, []);
 
   const undo = useCallback(() => {
     const last = history[history.length - 1];
     if (!last) return;
     // The state being left is exactly what redo comes back to.
-    setFuture((ahead) => [...ahead, { board, rack }]);
+    setFuture((ahead) => [...ahead, { board, rack, picks: picksOf(interaction) }]);
     setHistory(history.slice(0, -1));
-    setBoard(last.board);
-    setRack(last.rack);
-    setInteraction(IDLE);
-    setSelection(null);
-    setHighlightedWord(null);
-  }, [history, board, rack]);
+    restore(last);
+  }, [history, board, rack, interaction, restore]);
 
   /** Walk forward again through the moves undo took back. */
   const redo = useCallback(() => {
@@ -1083,13 +1115,12 @@ export default function App() {
     setFuture(future.slice(0, -1));
     // Straight onto the history stack rather than via remember — redoing a
     // move mustn't wipe the rest of the way forward.
-    setHistory((past) => [...past.slice(-UNDO_DEPTH + 1), { board, rack }]);
-    setBoard(next.board);
-    setRack(next.rack);
-    setInteraction(IDLE);
-    setSelection(null);
-    setHighlightedWord(null);
-  }, [future, board, rack]);
+    setHistory((past) => [
+      ...past.slice(-UNDO_DEPTH + 1),
+      { board, rack, picks: picksOf(interaction) },
+    ]);
+    restore(next);
+  }, [future, board, rack, interaction, restore]);
 
   useEffect(() => {
     let cancelled = false;
