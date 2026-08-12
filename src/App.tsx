@@ -90,9 +90,10 @@ import { HowToModal } from './components/HowToModal';
 import { CloseIcon, GapIcon } from './components/icons';
 import { Menu } from './components/Menu';
 import { ModeInfoDialog } from './components/ModeInfoDialog';
+import { PauseScreen } from './components/PauseScreen';
 import { PileTools } from './components/PileTools';
 import { Rack } from './components/Rack';
-import { Scoreboard, type ScorePop } from './components/Scoreboard';
+import { Scoreboard, tileTone, type ScorePop, type TileGauge } from './components/Scoreboard';
 import { SettingsPage } from './components/SettingsPage';
 import { SplashCard, type Splash } from './components/Splash';
 import { StatsPage } from './components/StatsPage';
@@ -426,6 +427,9 @@ export default function App() {
   const [stopwatch, setStopwatch] = useState<Stopwatch | null>(null);
   /** Puzzle: whether the Finish button is asking "really?". */
   const [confirmFinish, setConfirmFinish] = useState(false);
+  /** Whether the player has put a solo game on hold. Every clock stops and
+   * the board goes behind the pause screen until they come back. */
+  const [paused, setPaused] = useState(false);
   /** A door waiting on its setup sheet, or null while no sheet is up. */
   const [doorSetup, setDoorSetup] = useState<DoorSetup | null>(null);
   /** Endless: how many drip intervals have run out (the opening phase isn't
@@ -651,6 +655,8 @@ export default function App() {
       setTileDrop(null);
       setZoom(1);
       setConfirmFinish(false);
+      // A fresh game is never handed over already on hold.
+      setPaused(false);
       finished.current = false;
       expiryHandled.current = null;
       dripHandled.current = null;
@@ -685,6 +691,7 @@ export default function App() {
     setStopwatch(null);
     setShowSummary(false);
     setConfirmFinish(false);
+    setPaused(false);
     setSplash(null);
   }, []);
 
@@ -1486,16 +1493,23 @@ export default function App() {
 
   /* ------------------------------- the clock -------------------------------- */
 
-  // Anything worth reading over the board stops the clock while it's up.
-  // Except in multiplayer: everyone's clock has to run as one, so nothing a
-  // single player does — opening the how-to, reading a splash — may stop
-  // theirs while the others' tick on. What does stop a multiplayer clock is
-  // connection trouble: the host pauses the game for everyone while a
-  // dropped player redials, and a player redialing pauses their own.
+  // Anything worth reading over the board stops the clock while it's up — as
+  // does the player asking for a break outright, which is the same hold with
+  // the board covered as well. Except in multiplayer: everyone's clock has to
+  // run as one, so nothing a single player does — opening the how-to, reading
+  // a splash — may stop theirs while the others' tick on. What does stop a
+  // multiplayer clock is connection trouble: the host pauses the game for
+  // everyone while a dropped player redials, and a player redialing pauses
+  // their own.
   const battlePaused = inBattle && ((battleState?.paused ?? false) || selfReconnecting);
   const clockPaused = inBattle
     ? battlePaused
-    : showHowTo || splash !== null || settingsOpen || statsView !== null || confirmFinish;
+    : paused ||
+      showHowTo ||
+      splash !== null ||
+      settingsOpen ||
+      statsView !== null ||
+      confirmFinish;
 
   // Flip the clocks between running and paused as overlays come and go.
   // Written as normalization (rather than one effect per transition) so a
@@ -2528,8 +2542,9 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // The board owns the keyboard only while it's actually being played.
-      if (screen !== 'game' || showHowTo || showBattleResults || battlePaused) return;
+      // The board owns the keyboard only while it's actually being played —
+      // a held game hands it back, and Escape means resume there instead.
+      if (screen !== 'game' || showHowTo || showBattleResults || battlePaused || paused) return;
       // The explainer stands over the tutorial's board on the way to a game.
       if (explainer !== null) return;
       if (settingsOpen || statsView !== null) return;
@@ -2610,6 +2625,7 @@ export default function App() {
     showHowTo,
     showBattleResults,
     battlePaused,
+    paused,
     settingsOpen,
     statsView,
     explainer,
@@ -3125,6 +3141,41 @@ export default function App() {
         : Math.max(0, duelDrip.endsAt - clockNow);
   const duelDripSeconds = duelDripMs === null ? null : Math.ceil(duelDripMs / 1000);
 
+  /**
+   * The count that can end this game: loose tiles once Endless starts dripping
+   * — Blitz and Survival both — and the whole pile in a Duel or Battle. Null
+   * in Puzzle, in Endless's opening phase, and once a game is over, none of
+   * which have a limit to run into.
+   */
+  const tileGauge: TileGauge | null =
+    mode === 'endless' && endlessPhase === 'drip' && !complete
+      ? { label: 'Loose tiles', loose: looseTiles, limit: ENDLESS_LOOSE_LIMIT }
+      : mode === 'duel' && !complete
+        ? {
+            label: 'Pile',
+            loose: rack.length,
+            limit: DUEL_PILE_LIMIT,
+            warnAt: DUEL_PILE_WARN,
+            urgentAt: DUEL_PILE_URGENT,
+          }
+        : null;
+
+  /**
+   * The board's own alarm, for when the header count alone is too easy to miss
+   * with your eyes down on the tiles: once that count goes orange or red, the
+   * whole board picks up a border pulsing in the same colour. Two stages, the
+   * same two the count pleads in — the orange "this is getting close" and the
+   * faster red "you are about to lose" — so the two warnings can never say
+   * different things. Null while there's nothing to warn about.
+   */
+  const alarmTone = tileTone(tileGauge);
+  const boardAlarm =
+    alarmTone === 'warn' || alarmTone === 'alert'
+      ? 'warn'
+      : alarmTone === 'urgent' || alarmTone === 'over'
+        ? 'urgent'
+        : null;
+
   /* --------------------------------- screens -------------------------------- */
 
   /**
@@ -3329,19 +3380,7 @@ export default function App() {
                 : 'Final'
               : null
           }
-          tiles={
-            mode === 'endless' && endlessPhase === 'drip' && !complete
-              ? { label: 'Loose tiles', loose: looseTiles, limit: ENDLESS_LOOSE_LIMIT }
-              : mode === 'duel' && !complete
-                ? {
-                    label: 'Pile',
-                    loose: rack.length,
-                    limit: DUEL_PILE_LIMIT,
-                    warnAt: DUEL_PILE_WARN,
-                    urgentAt: DUEL_PILE_URGENT,
-                  }
-                : null
-          }
+          tiles={tileGauge}
           opponent={duelOpponent}
           standing={battleStanding}
           rank={battleRank}
@@ -3408,6 +3447,10 @@ export default function App() {
             </>
           ) : (
             <Menu
+              // Solo only, and only while there's a game left to hold: a
+              // multiplayer game's clock belongs to the whole room, and a
+              // finished one has stopped of its own accord.
+              onPause={inBattle || complete ? null : () => setPaused(true)}
               onResetGame={inBattle ? null : () => newGame(mode, soloPace)}
               onShowHowTo={() => setShowHowTo(true)}
               onShowSettings={() => setSettingsOpen(true)}
@@ -3464,8 +3507,10 @@ export default function App() {
         </div>
       )}
 
-      {/* The zoom rides on a CSS variable so only the tiles resize. */}
-      <div className="board-area">
+      {/* The zoom rides on a CSS variable so only the tiles resize. The alarm
+          border, when the pile is closing in, rides the area rather than the
+          scrolling board inside it, so it frames what's on screen. */}
+      <div className={`board-area${boardAlarm ? ` board-alarm board-alarm-${boardAlarm}` : ''}`}>
       {/* Announces new tiles the moment they land, and says why a placement was
           refused. It hangs inside the board rather than over the header strip,
           which the tutorial's instructions are already using. */}
@@ -3618,6 +3663,19 @@ export default function App() {
       )}
 
       <SplashCard splash={splash} onDismiss={() => setSplash(null)} />
+
+      {/* The held game, behind a whole window. Only ever solo — see the menu's
+          Pause — so the eyebrow names one of the two solo modes, in the same
+          words the start splash used. */}
+      <PauseScreen
+        open={paused}
+        eyebrow={
+          mode === 'puzzle'
+            ? `${PUZZLE_VARIANT_NAMES[puzzleVariant]} · ${puzzleSize}×${puzzleSize}`
+            : PACE_NAMES[soloPace]
+        }
+        onResume={() => setPaused(false)}
+      />
 
       {showSummary && !inBattle && (
         <GameSummary
