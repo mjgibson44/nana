@@ -11,6 +11,10 @@ export interface MenuBattleControls {
 }
 
 interface MenuProps {
+  /** Hold the game where it stands and cover the board. Null hides the item —
+   * a finished game has nothing to hold, and a multiplayer game runs on one
+   * clock nobody gets to stop for themselves. */
+  onPause: (() => void) | null;
   /** Start the current mode over from scratch. Null hides the item — in a
    * battle only the host restarts, through the battle controls instead. */
   onResetGame: (() => void) | null;
@@ -27,6 +31,7 @@ interface MenuProps {
 
 /** Header menu for the actions that aren't part of playing a turn. */
 export function Menu({
+  onPause,
   onResetGame,
   onShowHowTo,
   onShowSettings,
@@ -86,6 +91,8 @@ export function Menu({
 
       {open && (
         <div className="menu-panel" role="menu">
+          {/* First: it's the one item wanted mid-turn, with a clock running. */}
+          {onPause && item('Pause', onPause)}
           {onResetGame && item('Reset game', onResetGame)}
           {battle?.isHost && item('Restart battle', battle.onRestart)}
           {battle?.isHost && item('Everyone to the lobby', battle.onToLobby)}

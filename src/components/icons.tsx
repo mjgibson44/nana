@@ -262,6 +262,16 @@ export function SettingsIcon(props: IconProps) {
   );
 }
 
+/** The two bars every player already reads as "held": the game is stopped
+ * where it stands, not finished. */
+export function PauseIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 5v14M15 5v14" />
+    </Svg>
+  );
+}
+
 /** A trash can: the word comes off the board and its letters go back to the
  * pile. */
 export function TrashIcon(props: IconProps) {
