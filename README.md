@@ -158,7 +158,12 @@ that preference.)
   however big the room is — and as players fall, the same words hit the
   survivors harder by themselves. A toast calls out each elimination, the
   header counts the field still standing, and the game runs until one
-  player is left. The results screen ranks everyone by how long they lasted
+  player is left. Falling knocks you out for good: a spectator view covers
+  your dead board — no more playing or touching it — and follows the field
+  live (who's still standing, how deep each pile is, your own final place,
+  already decided by when you fell) until the winner is revealed. The host
+  keeps their controls on it; anyone can still leave. The results screen
+  then ranks everyone by how long they lasted
   — the host notes the order players fall (`outOrder`), and
   `rankByElimination` reads the standings straight off it.
 - **Tutorial** — a guided three-step walkthrough, scripted in
