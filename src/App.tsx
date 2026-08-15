@@ -80,6 +80,7 @@ import { applyTheme, loadThemePref, saveThemePref, type ThemePref } from './them
 import { BattleLobby } from './components/BattleLobby';
 import { BattleMenu } from './components/BattleMenu';
 import { BattleResults } from './components/BattleResults';
+import { BattleSpectator } from './components/BattleSpectator';
 import { SetupDialog } from './components/SetupDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
@@ -1968,23 +1969,32 @@ export default function App() {
     }
   }, [battle, battlePhase, battleState, screen, finishGame]);
 
-  // Going under in an Endless Battle or a Battle isn't the end of the show —
-  // say so, once, while the survivors race on. (A duel ends the moment
-  // anyone does, so it never lands here.)
+  // Going under in an Endless Battle isn't the end of the show — say so,
+  // once, while the survivors race on. A buried racer's score still holds
+  // its place there, so their board stays worth looking at; a Battle's
+  // eliminated player gets the spectator view below instead, and a duel
+  // ends the moment anyone goes under, so it never lands here.
   const battleLobbyMode = battleState?.mode ?? null;
   useEffect(() => {
-    if (!inBattle || battlePhase !== 'playing') return;
-    if (mode !== 'endless' && battleLobbyMode !== 'battle') return;
+    if (!inBattle || battlePhase !== 'playing' || mode !== 'endless') return;
     if (!complete || endReason !== 'buried') return;
     const serial = ++dropSerial.current;
-    setToast({
-      text:
-        mode === 'endless'
-          ? 'You’re buried! The race goes on…'
-          : 'You’re out! The battle rages on…',
-      serial,
-    });
-  }, [inBattle, mode, battleLobbyMode, battlePhase, complete, endReason]);
+    setToast({ text: 'You’re buried! The race goes on…', serial });
+  }, [inBattle, mode, battlePhase, complete, endReason]);
+
+  /**
+   * Battle: this player has been eliminated mid-game. Their board is dead —
+   * nothing done on it can count for anything — so a spectator view covers
+   * it, screen and keyboard both, and follows the rest of the field until
+   * the battle is decided; the finish effect above then swaps it for the
+   * results. A restart or a trip back to the lobby clears it with `complete`.
+   */
+  const spectating =
+    inBattle &&
+    battleLobbyMode === 'battle' &&
+    battlePhase === 'playing' &&
+    complete &&
+    endReason === 'buried';
 
   // Banners and landing animations clean themselves up.
   useEffect(() => {
@@ -2575,7 +2585,9 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       // The board owns the keyboard only while it's actually being played —
       // a held game hands it back, and Escape means resume there instead.
+      // A spectator's board isn't being played at all any more.
       if (screen !== 'game' || showHowTo || showBattleResults || battlePaused || paused) return;
+      if (spectating) return;
       // The explainer stands over the tutorial's board on the way to a game.
       if (explainer !== null) return;
       if (settingsOpen || statsView !== null) return;
@@ -2657,6 +2669,7 @@ export default function App() {
     showBattleResults,
     battlePaused,
     paused,
+    spectating,
     settingsOpen,
     statsView,
     explainer,
@@ -3763,6 +3776,21 @@ export default function App() {
       <ModeInfoDialog info={explainer} confirmLabel="Let’s play" onConfirm={playPendingDoor} />
       {doorSetupSheet}
 
+      {/* Eliminated from a Battle: the board is done for this player, so the
+          spectator view covers it and follows the field live until the last
+          player stands — the results then take over. Its own buttons raise
+          the confirm dialogs below, which stack above it. */}
+      {spectating && battle && battleState && (
+        <BattleSpectator
+          state={battleState}
+          selfId={battle.selfId}
+          isHost={battle.isHost}
+          onRestart={requestBattleRestart}
+          onToLobby={requestBattleLobby}
+          onLeave={requestLeaveBattle}
+        />
+      )}
+
       {/* Connection trouble: our own redial, or the host pausing for someone. */}
       <ConnectionOverlay
         reconnecting={selfReconnecting}
@@ -3804,7 +3832,8 @@ export default function App() {
               ? 'Back to the lobby'
               : 'Leave game'
         }
-        cancelLabel="Keep playing"
+        // A spectator isn't playing any more — staying means watching on.
+        cancelLabel={spectating ? 'Keep watching' : 'Keep playing'}
         onConfirm={() => {
           setConfirmBattle(null);
           if (confirmBattle === 'restart') battleRef.current?.start();
