@@ -55,8 +55,14 @@ export function BattleSpectator({
    * fully decides a Battle's standings, so going out k-th of n means
    * finishing (n − k + 1)th whatever happens after. Null only until the
    * host's broadcast writes the fall down.
+   *
+   * A player whose connection outlasted the host's grace isn't among the
+   * contestants at all any more — they rejoined as `waiting`, dealt into
+   * the next game — so `self` is undefined and the note says what actually
+   * happened instead of blaming their pile.
    */
   const self = contestants.find((p) => p.id === selfId);
+  const dropped = self === undefined;
   const place =
     self !== undefined && self.outOrder !== null
       ? contestants.length - self.outOrder + 1
@@ -68,8 +74,20 @@ export function BattleSpectator({
         <span className="splash-eyebrow">Battle</span>
         <h2 className="spectate-title">You&rsquo;re out!</h2>
         <p className="spectate-note">
-          Your pile buried you
-          {place !== null && <> &mdash; you finish {ordinal(place)} of {contestants.length}</>}.
+          {dropped ? (
+            <>
+              Your connection dropped and the battle went on without you
+              &mdash; you&rsquo;re back in and deal into the next game.
+            </>
+          ) : (
+            <>
+              Your pile buried you
+              {place !== null && (
+                <> &mdash; you finish {ordinal(place)} of {contestants.length}</>
+              )}
+              .
+            </>
+          )}{' '}
           The battle rages on below; the standings come up when it&rsquo;s decided.
         </p>
         <p className="spectate-standing" role="status">

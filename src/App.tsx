@@ -1389,11 +1389,11 @@ export default function App() {
   // does the player asking for a break outright, which is the same hold with
   // the board covered as well. Except in multiplayer: everyone's clock has to
   // run as one, so nothing a single player does — opening the how-to, reading
-  // a splash — may stop theirs while the others' tick on. What does stop a
-  // multiplayer clock is connection trouble: the host pauses the game for
-  // everyone while a dropped player redials, and a player redialing pauses
-  // their own.
-  const battlePaused = inBattle && ((battleState?.paused ?? false) || selfReconnecting);
+  // a splash — may stop theirs while the others' tick on. The one thing that
+  // stops a multiplayer clock is this player's own connection trouble: a
+  // redialing player's board holds where it stands, while everyone else's
+  // game plays on without them.
+  const battlePaused = inBattle && selfReconnecting;
   const clockPaused = inBattle
     ? battlePaused
     : paused || splash !== null || settingsOpen || statsView !== null;
@@ -1590,12 +1590,32 @@ export default function App() {
   /* -------------------------------- battle ----------------------------------- */
 
   /**
+   * Battle: this player is out of the running game. Two ways in: their pile
+   * buried them, or a connection drop outlasted the host's grace and they
+   * reconnected to find the game had gone on without them (their seat says
+   * `waiting` — dealt into the next game). Either way the board is dead —
+   * nothing done on it can count for anything — so a spectator view covers
+   * it, screen and keyboard both, and follows the rest of the field until
+   * the battle is decided; the finish effect then swaps it for the results.
+   * A restart or a trip back to the lobby clears it with `complete`/`phase`.
+   */
+  const selfSeat = inBattle
+    ? battleState?.players.find((p) => p.id === battle?.selfId)
+    : undefined;
+  const spectating =
+    inBattle &&
+    battlePhase === 'playing' &&
+    ((complete && endReason === 'buried') || Boolean(selfSeat?.waiting));
+
+  /**
    * The Battle drip: every 20 seconds a batch lands in the pile, sized by
    * the round the game is in. Every player draws drip k from the same
    * stream, so the letters stay identical however their clocks drift.
+   * A spectator's dead board takes no drips — there's no game left on it
+   * for them to feed.
    */
   useEffect(() => {
-    if (mode !== 'battle' || complete || battleDrip?.kind !== 'running') return;
+    if (mode !== 'battle' || complete || spectating || battleDrip?.kind !== 'running') return;
     if (battleDrip.endsAt - clockNow > 0) return;
     if (dripHandled.current === battleDrip.endsAt) return;
     dripHandled.current = battleDrip.endsAt;
@@ -1605,16 +1625,17 @@ export default function App() {
     const batch = battleDripTilesAt(index);
     dealBonusTiles(batch, `+${batch} tile${batch === 1 ? '' : 's'}`);
     setBattleDrip(runningCountdown(BATTLE_DRIP_SECONDS));
-  }, [clockNow, battleDrip, mode, complete, dealBonusTiles]);
+  }, [clockNow, battleDrip, mode, complete, spectating, dealBonusTiles]);
 
   /**
    * The Battle's one loss rule: let the pile exceed the limit — for any
-   * reason, at any moment — and you're out on the spot.
+   * reason, at any moment — and you're out on the spot. A spectator is out
+   * already; their dead board can't bury them twice.
    */
   useEffect(() => {
-    if (mode !== 'battle' || complete) return;
+    if (mode !== 'battle' || complete || spectating) return;
     if (rack.length > BATTLE_PILE_LIMIT) finishGame('buried');
-  }, [mode, complete, rack.length, finishGame]);
+  }, [mode, complete, spectating, rack.length, finishGame]);
 
   /** Battle: how much of the field is still standing, for the header. A
    * room of rival piles won't fit it, so the count stands in for them. */
@@ -1720,16 +1741,6 @@ export default function App() {
       playSound('win');
     }
   }, [battle, battlePhase, battleState, screen, finishGame]);
-
-  /**
-   * Battle: this player has been eliminated mid-game. Their board is dead —
-   * nothing done on it can count for anything — so a spectator view covers
-   * it, screen and keyboard both, and follows the rest of the field until
-   * the battle is decided; the finish effect above then swaps it for the
-   * results. A restart or a trip back to the lobby clears it with `complete`.
-   */
-  const spectating =
-    inBattle && battlePhase === 'playing' && complete && endReason === 'buried';
 
   // Banners and landing animations clean themselves up.
   useEffect(() => {
@@ -3028,12 +3039,7 @@ export default function App() {
             }}
           />
         )}
-        <ConnectionOverlay
-          reconnecting={selfReconnecting}
-          state={battleState}
-          selfId={battle?.selfId ?? null}
-          onLeave={leaveBattle}
-        />
+        <ConnectionOverlay reconnecting={selfReconnecting} onLeave={leaveBattle} />
         <ConfirmDialog
           message={
             confirmBattle === 'leave'
@@ -3416,13 +3422,8 @@ export default function App() {
         />
       )}
 
-      {/* Connection trouble: our own redial, or the host pausing for someone. */}
-      <ConnectionOverlay
-        reconnecting={selfReconnecting}
-        state={battleState}
-        selfId={battle?.selfId ?? null}
-        onLeave={leaveBattle}
-      />
+      {/* Connection trouble: our own redial. Everyone else's game plays on. */}
+      <ConnectionOverlay reconnecting={selfReconnecting} onLeave={leaveBattle} />
 
       {/* The end of a multiplayer game: who won, and what the host does next. */}
       {showBattleResults && battle && battleState && (

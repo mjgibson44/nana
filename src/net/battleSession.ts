@@ -30,13 +30,14 @@ import { randomSeed } from '../game/rng';
  *  - Identity survives the connection. Every player carries a stable random
  *    key (per tab), so when their WebRTC link dies and they dial back in,
  *    the host re-attaches them to the same seat — score, board and all.
- *  - The host forgives drops. A player who vanishes mid-game isn't out;
- *    they're "reconnecting" for a grace period while the game pauses for
- *    everyone. Only when the grace runs out (or they left on purpose) do
- *    they count as gone.
+ *  - The game never waits. A player who vanishes mid-game doesn't pause
+ *    anyone: the battle plays on while the host holds their seat for a
+ *    short grace. Dial back inside it and nothing happened; miss it and
+ *    they're counted out and the game continues without them. Coming back
+ *    even later still lands them in the lobby, dealt into the next game.
  *  - Clients heal themselves. On any loss — or on waking from a phone's app
  *    switch to find the link stale — the client quietly redials with backoff
- *    until the grace period is spent, and only then gives up.
+ *    until the reconnect budget is spent, and only then gives up.
  *  - Joining retries itself. A first dial that silently stalls (a flaky
  *    broker, a jammed negotiation) isn't the answer — joinBattle keeps
  *    dialing with fresh connections until its budget runs out, and only a
@@ -44,7 +45,7 @@ import { randomSeed } from '../game/rng';
  */
 
 /** Bumped when messages change shape, so a stale tab fails loud, not weird. */
-const PROTOCOL = 4;
+const PROTOCOL = 5;
 
 /** How long connecting may take before it's called a failure. */
 const CONNECT_TIMEOUT_MS = 20_000;
@@ -55,11 +56,19 @@ const JOIN_ATTEMPT_MS = 12_000;
 /** Total time joining may spend across attempts before giving up. */
 const JOIN_BUDGET_MS = 30_000;
 
-/** How long the host holds a dropped player's seat before they're out. */
-export const RECONNECT_GRACE_MS = 120_000;
+/**
+ * How long the host holds a dropped player's seat before they're out. The
+ * game plays on regardless — this only decides how long a redial gets them
+ * their board back rather than a spectator's seat for the next game. Long
+ * enough for a couple of fresh dials through the broker; short enough that
+ * the field isn't fighting a ghost for long.
+ */
+export const RECONNECT_GRACE_MS = 30_000;
 
-/** How long a client keeps redialing before giving up — a touch under the
- * host's grace so the client stops asking before the seat is gone. */
+/** How long a client keeps redialing before giving up. Deliberately far past
+ * the host's grace: landing late doesn't fail the reconnect, it just means
+ * this game went on without them — they're back in the lobby, dealt into
+ * the next one. */
 const RECONNECT_BUDGET_MS = 115_000;
 
 /** Each reconnect attempt gets this long before the next try. */
@@ -70,9 +79,9 @@ const PING_INTERVAL_MS = 10_000;
 
 /**
  * Silence longer than this means the link is gone even if nobody said so —
- * wide enough that one delayed ping doesn't trip it, tight enough that the
- * other players aren't left wondering. (Tripping it isn't fatal anyway: the
- * game pauses and the seat is held while the player redials.)
+ * wide enough that one delayed ping doesn't trip it, tight enough that a
+ * dead player doesn't haunt the field for long. (Tripping it isn't fatal
+ * anyway: the seat is held for the grace while the player redials.)
  */
 const STALE_LINK_MS = 25_000;
 
@@ -203,7 +212,8 @@ export interface BattleEvents {
   onAttack(count: number): void;
   /** This client's own link dropped; it's redialing in the background. */
   onReconnecting(): void;
-  /** The redial worked — same seat, game resumes. */
+  /** The redial worked — same seat inside the host's grace; back as a
+   * spectator dealt into the next game after it. */
   onReconnected(): void;
 }
 
@@ -305,7 +315,6 @@ class HostSession implements BattleHandle {
     this.state = {
       phase: 'lobby',
       game: 0,
-      paused: false,
       winnerId: null,
       players: [
         {
@@ -355,7 +364,7 @@ class HostSession implements BattleHandle {
       const seen = this.lastSeen.get(id) ?? now;
       if (now - seen > STALE_LINK_MS) {
         // Close it ourselves; the close handler runs the normal drop path,
-        // which holds the player's seat and pauses the game for them.
+        // which holds the player's seat while the game plays on.
         this.conns.delete(id);
         try {
           conn.close();
@@ -460,7 +469,6 @@ class HostSession implements BattleHandle {
       }
       this.conns.set(key, conn);
       this.lastSeen.set(key, Date.now());
-      this.recomputePaused();
       this.publish();
       return key;
     }
@@ -542,8 +550,9 @@ class HostSession implements BattleHandle {
   }
 
   /**
-   * A player's link died. Mid-game their seat is held and the game pauses
-   * while they redial; in the lobby (or as a spectator) they just leave.
+   * A player's link died. Mid-game their seat is held while they redial —
+   * the game plays on for everyone else meanwhile; in the lobby (or as a
+   * spectator) they just leave.
    */
   private dropPlayer(id: string): void {
     const player = this.state.players.find((p) => p.id === id);
@@ -556,11 +565,10 @@ class HostSession implements BattleHandle {
     }
 
     player.connected = false;
-    this.recomputePaused();
     this.publish();
 
-    // The grace clock: come back before it runs out and nothing happened;
-    // miss it and the game goes on without them.
+    // The grace clock: come back before it runs out and the seat is still
+    // theirs; miss it and they're out — the game has moved on without them.
     const timer = window.setTimeout(() => {
       this.graceTimers.delete(id);
       const p = this.state.players.find((entry) => entry.id === id);
@@ -569,7 +577,6 @@ class HostSession implements BattleHandle {
       // Out of the running the moment the grace runs out — that's their
       // place in the standings.
       this.markOut(p);
-      this.recomputePaused();
       this.checkOver();
       this.publish();
     }, RECONNECT_GRACE_MS);
@@ -591,22 +598,11 @@ class HostSession implements BattleHandle {
       player.connected = false;
       player.left = true;
       this.markOut(player);
-      this.recomputePaused();
       this.checkOver();
     } else {
       this.state.players = this.state.players.filter((p) => p.id !== id);
-      this.recomputePaused();
     }
     this.publish();
-  }
-
-  /** The game holds while any contestant's connection is down. */
-  private recomputePaused(): void {
-    this.state.paused =
-      this.state.phase === 'playing' &&
-      this.state.players.some(
-        (p) => !p.left && !p.waiting && !p.buried && !p.connected,
-      );
   }
 
   private checkOver(): void {
@@ -616,7 +612,6 @@ class HostSession implements BattleHandle {
     if (battleOver(this.state.players)) {
       this.state.winnerId = battleWinner(this.state.players)?.id ?? null;
       this.state.phase = 'finished';
-      this.state.paused = false;
     }
   }
 
@@ -650,7 +645,6 @@ class HostSession implements BattleHandle {
     this.attackSpread = 0;
     this.state.phase = 'playing';
     this.state.game += 1;
-    this.state.paused = false;
     this.state.winnerId = null;
     const seed = randomSeed();
     this.broadcast({ t: 'start', seed });
@@ -672,7 +666,6 @@ class HostSession implements BattleHandle {
     this.outCounter = 0;
     this.attackSpread = 0;
     this.state.phase = 'lobby';
-    this.state.paused = false;
     this.state.winnerId = null;
     this.broadcast({ t: 'stop' });
     this.publish();
@@ -864,7 +857,9 @@ class ClientSession implements BattleHandle {
   /**
    * The link to the host is down (or too stale to trust). Not the end: dial
    * back in with the same identity, backing off between tries, until the
-   * reconnect budget is spent. The host is holding our seat meanwhile.
+   * reconnect budget is spent. The game plays on meanwhile — land inside
+   * the host's grace and the seat is still ours, board and all; later, and
+   * it's a spectator's seat until the next game deals us in.
    */
   private linkDown(fromPeer?: Peer, fromConn?: DataConnection): void {
     if (this.left || this.reconnecting) return;

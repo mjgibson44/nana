@@ -221,14 +221,16 @@ Multiplayer assumes phones will be phones:
 
 - Every player carries a **stable identity** (a per-tab key), so a dropped
   WebRTC link can be re-attached to the same seat — score, board and all.
-- The **host forgives drops**: a player who vanishes mid-game is
-  "reconnecting" for a two-minute grace period while the game **pauses for
-  everyone**, with an overlay naming who it's waiting for. Only when the
-  grace runs out (or they deliberately left) does the game move on.
+- **The game never waits**: a player who vanishes mid-game doesn't pause
+  anyone. The battle plays on while the host holds their seat for a short
+  grace; redial inside it and they're back on their own board, miss it and
+  they're counted out (that's their place in the standings) and the game
+  continues without them. Coming back even later still works — they rejoin
+  as a spectator and deal into the next game.
 - **Clients heal themselves**: on any loss — or on returning from an app
-  switch to find the link stale — the client redials with backoff until the
-  grace period is spent. A heartbeat tells live links from dead ones, so a
-  quick app switch doesn't disconnect you at all.
+  switch to find the link stale — the client redials with backoff until its
+  budget is spent. A heartbeat tells live links from dead ones, so a quick
+  app switch doesn't disconnect you at all.
 
 Signaling defaults to PeerJS's free public cloud; only introductions run
 through it — gameplay flows peer to peer. To use your own broker (e.g.
@@ -255,6 +257,7 @@ when a direct path fails.
       one standing wins, standings by how long each player lasted
 - [x] Light/dark/system theme and a settings screen
 - [x] Game sounds — synthesized cues for ticks, tiles, attacks, words and endings
-- [x] Reconnection grace, auto-redial, and pause-on-disconnect
+- [x] Reconnection grace and auto-redial — the game plays on through drops,
+      counting out players who don't make it back
 - [ ] Hints powered by the generator's known solution
 - [ ] Live opponent boards (spectate other players' crosswords mid-battle)
