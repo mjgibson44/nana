@@ -909,6 +909,14 @@ export default function App() {
     else battleRef.current?.stop();
   }, [battlePhase]);
 
+  /** A guest heading back to the lobby after a finished game. Only the host
+   * can move the room, but anyone can go wait in it — the host's next start
+   * or stop lands there the same as anywhere. */
+  const waitInBattleLobby = useCallback(() => {
+    setShowBattleResults(false);
+    setScreen('battle');
+  }, []);
+
   /** Leaving deserves a second thought when it costs something: a host with
    * guests takes the lobby down, and a live board is abandoned mid-game. */
   const requestLeaveBattle = useCallback(() => {
@@ -1325,8 +1333,9 @@ export default function App() {
     if (from === null || from === totalScore) return;
     // A pop is dropped when its animation ends, so one raised where no score is
     // shown would never be shown or dropped — it would just be waiting in the
-    // corner of the next game that does keep score.
-    if (mode === 'tutorial') return;
+    // corner of the next game that does keep score. The tutorial and Battle
+    // both run without a score block.
+    if (mode === 'tutorial' || mode === 'battle') return;
     const pop = { id: ++popSerial.current, delta: totalScore - from };
     setScorePops((pops) => [...pops, pop]);
   }, [gameId, totalScore, mode]);
@@ -2878,8 +2887,8 @@ export default function App() {
 
   /**
    * Battle: the header counts down to the next tile drop — the clock the
-   * player is actually racing — while the round chip says where the match
-   * stands. The round clock still runs underneath to advance the rounds.
+   * player is actually racing. The round clock still runs underneath to
+   * advance the rounds; which round it is stays off the header.
    */
   const battleDripMs =
     battleDrip === null
@@ -3049,7 +3058,9 @@ export default function App() {
     <div className="app">
       <header className="header">
         <Scoreboard
-          score={totalScore}
+          // A Battle isn't won on points — the standings say who's ahead — so
+          // its header drops the score and keeps to the clock and the pile.
+          score={mode === 'battle' ? null : totalScore}
           // The tutorial isn't a game with a score — the step counter takes the
           // corner instead, and the all-tiles chip would only be noise there.
           // The count holds at the last step through the free practice after it.
@@ -3081,13 +3092,6 @@ export default function App() {
                       looseTiles > ENDLESS_LOOSE_LIMIT,
                   }
                 : null
-          }
-          round={
-            mode === 'battle' && !complete
-              ? battleRound < BATTLE_ROUNDS
-                ? `${battleRound}/${BATTLE_ROUNDS}`
-                : 'Final'
-              : null
           }
           tiles={tileGauge}
           standing={battleStanding}
@@ -3162,8 +3166,11 @@ export default function App() {
                 inBattle && battle
                   ? {
                       isHost: battle.isHost,
+                      finished: battlePhase === 'finished',
                       onRestart: requestBattleRestart,
-                      onToLobby: requestBattleLobby,
+                      // The host gathers everyone; a guest, once the game is
+                      // decided, just goes to wait in the room.
+                      onToLobby: battle.isHost ? requestBattleLobby : waitInBattleLobby,
                     }
                   : null
               }
@@ -3423,6 +3430,7 @@ export default function App() {
           state={battleState}
           selfId={battle.selfId}
           isHost={battle.isHost}
+          words={finalWords}
           onPlayAgain={() => battleRef.current?.start()}
           onToLobby={() => battleRef.current?.stop()}
           onLeave={requestLeaveBattle}

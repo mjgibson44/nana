@@ -12,9 +12,14 @@ import {
 /** The battle-only entries: host controls, and leaving reads differently. */
 export interface MenuBattleControls {
   isHost: boolean;
+  /** The battle is decided. Ending a live game and regrouping after one are
+   * different asks, so the lobby item changes hands and words on it. */
+  finished: boolean;
   /** Host: reset everyone and deal a fresh shared game. */
   onRestart: () => void;
-  /** Host: end the game and gather every player in the lobby. */
+  /** Back to the lobby. From the host this gathers every player there —
+   * mid-game that means ending the game; a guest gets it only once the game
+   * is finished, to go wait in the room for the host's next move. */
   onToLobby: () => void;
 }
 
@@ -103,8 +108,19 @@ export function Menu({
           {/* First: it's the one item wanted mid-turn, with a clock running. */}
           {onPause && item(<PauseIcon />, 'Pause', onPause)}
           {onResetGame && item(<RestartIcon />, 'Reset game', onResetGame)}
-          {battle?.isHost && item(<RestartIcon />, 'Restart battle', battle.onRestart)}
-          {battle?.isHost && item(<PlayersIcon />, 'Everyone to the lobby', battle.onToLobby)}
+          {battle?.isHost &&
+            item(
+              <RestartIcon />,
+              battle.finished ? 'Start another game' : 'Restart battle',
+              battle.onRestart,
+            )}
+          {battle &&
+            (battle.isHost || battle.finished) &&
+            item(
+              <PlayersIcon />,
+              battle.finished ? 'Back to the lobby' : 'Everyone to the lobby',
+              battle.onToLobby,
+            )}
           {onShowSummary &&
             item(<StatsIcon />, battle ? 'Standings' : 'Final score', onShowSummary)}
           {item(<SettingsIcon />, 'Settings', onShowSettings)}

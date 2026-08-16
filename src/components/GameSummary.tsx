@@ -6,6 +6,63 @@ export interface ScoredWord {
   points: number;
 }
 
+/**
+ * The played-words half of an end screen, shared by solo and battle: how the
+ * words broke down by length, then every word with what it was worth.
+ */
+export function WordReport({ words }: { words: ScoredWord[] }) {
+  // Longest first: the lengths that earned the most, and within the word list
+  // the proudest words at the top.
+  const byLength = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const { word } of words) {
+      counts.set(word.length, (counts.get(word.length) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[0] - a[0]);
+  }, [words]);
+
+  const sortedWords = useMemo(
+    () => [...words].sort((a, b) => b.points - a.points || a.word.localeCompare(b.word)),
+    [words],
+  );
+
+  return (
+    <>
+      {byLength.length > 0 && (
+        <section className="summary-section">
+          <h2 className="summary-section-title">By length</h2>
+          <ul className="summary-lengths">
+            {byLength.map(([length, count]) => (
+              <li key={length} className="summary-length">
+                <span className="summary-length-count">{count}×</span> {length}-letter
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="summary-section">
+        <h2 className="summary-section-title">Your words</h2>
+        {sortedWords.length === 0 ? (
+          <p className="summary-empty">No words made it onto the board.</p>
+        ) : (
+          <ul className="summary-words">
+            {sortedWords.map(({ word, points }, i) => (
+              // The same word can be on the board twice, so the key needs the
+              // position too.
+              // eslint-disable-next-line react/no-array-index-key
+              <li key={`${word}-${i}`} className="summary-word">
+                <span className="summary-word-text">{word.toUpperCase()}</span>
+                <span className="summary-word-points">+{points}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+
 interface GameSummaryProps {
   /** Null while the game is still going — nothing renders. */
   words: ScoredWord[] | null;
@@ -20,9 +77,9 @@ interface GameSummaryProps {
 }
 
 /**
- * The end-of-game report card. Fills the whole screen: the score and word
- * count up top, then how the words broke down by length, then every word
- * with what it was worth.
+ * The end-of-game report card. Fills the whole screen: the ways onward right
+ * under the headline — no scrolling past the word list to leave — then the
+ * score and word count, then the words themselves.
  */
 export function GameSummary({
   words,
@@ -33,25 +90,6 @@ export function GameSummary({
   onClose,
   onReturnHome,
 }: GameSummaryProps) {
-  // Longest first: the lengths that earned the most, and within the word list
-  // the proudest words at the top.
-  const byLength = useMemo(() => {
-    if (!words) return [];
-    const counts = new Map<number, number>();
-    for (const { word } of words) {
-      counts.set(word.length, (counts.get(word.length) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[0] - a[0]);
-  }, [words]);
-
-  const sortedWords = useMemo(
-    () =>
-      words
-        ? [...words].sort((a, b) => b.points - a.points || a.word.localeCompare(b.word))
-        : [],
-    [words],
-  );
-
   if (!words) return null;
 
   return (
@@ -61,45 +99,6 @@ export function GameSummary({
           <span className="splash-eyebrow">{eyebrow}</span>
           <h1 className="summary-title">{title}</h1>
         </header>
-
-        <div className="summary-totals">
-          <div className="summary-stat">
-            <span className="summary-stat-value">{score}</span>
-            <span className="summary-stat-label">Final score</span>
-          </div>
-          <div className="summary-stat">
-            <span className="summary-stat-value">{words.length}</span>
-            <span className="summary-stat-label">{words.length === 1 ? 'Word' : 'Words'}</span>
-          </div>
-        </div>
-
-        {byLength.length > 0 && (
-          <section className="summary-section">
-            <h2 className="summary-section-title">By length</h2>
-            <ul className="summary-lengths">
-              {byLength.map(([length, count]) => (
-                <li key={length} className="summary-length">
-                  <span className="summary-length-count">{count}×</span> {length}-letter
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <section className="summary-section">
-          <h2 className="summary-section-title">Your words</h2>
-          <ul className="summary-words">
-            {sortedWords.map(({ word, points }, i) => (
-              // The same word can be on the board twice, so the key needs the
-              // position too.
-              // eslint-disable-next-line react/no-array-index-key
-              <li key={`${word}-${i}`} className="summary-word">
-                <span className="summary-word-text">{word.toUpperCase()}</span>
-                <span className="summary-word-points">+{points}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
 
         <div className="summary-actions">
           <button type="button" className="btn btn-primary" onClick={onPlayAgain}>
@@ -112,6 +111,19 @@ export function GameSummary({
             Return home
           </button>
         </div>
+
+        <div className="summary-totals">
+          <div className="summary-stat">
+            <span className="summary-stat-value">{score}</span>
+            <span className="summary-stat-label">Final score</span>
+          </div>
+          <div className="summary-stat">
+            <span className="summary-stat-value">{words.length}</span>
+            <span className="summary-stat-label">{words.length === 1 ? 'Word' : 'Words'}</span>
+          </div>
+        </div>
+
+        <WordReport words={words} />
       </div>
     </div>
   );
