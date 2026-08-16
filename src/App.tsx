@@ -69,8 +69,7 @@ import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
 import { HomeScreen } from './components/HomeScreen';
-import { HowToModal } from './components/HowToModal';
-import { CloseIcon, GapIcon } from './components/icons';
+import { CheckIcon, CloseIcon, GapIcon } from './components/icons';
 import { Menu } from './components/Menu';
 import { ModeInfoDialog } from './components/ModeInfoDialog';
 import { PauseScreen } from './components/PauseScreen';
@@ -362,8 +361,6 @@ export default function App() {
 
   const inBattle = battle !== null;
   const battlePhase = battleState?.phase ?? null;
-  /** Whether the how-to reference is up, opened from a menu. */
-  const [showHowTo, setShowHowTo] = useState(false);
   /**
    * A door chosen on the home screen that hasn't been walked through yet, and
    * what's holding it up: the tutorial, for a player's very first game, and
@@ -1390,7 +1387,7 @@ export default function App() {
   const battlePaused = inBattle && ((battleState?.paused ?? false) || selfReconnecting);
   const clockPaused = inBattle
     ? battlePaused
-    : paused || showHowTo || splash !== null || settingsOpen || statsView !== null;
+    : paused || splash !== null || settingsOpen || statsView !== null;
 
   // Flip the clocks between running and paused as overlays come and go.
   // Written as normalization (rather than one effect per transition) so a
@@ -2295,7 +2292,7 @@ export default function App() {
       // The board owns the keyboard only while it's actually being played —
       // a held game hands it back, and Escape means resume there instead.
       // A spectator's board isn't being played at all any more.
-      if (screen !== 'game' || showHowTo || showBattleResults || battlePaused || paused) return;
+      if (screen !== 'game' || showBattleResults || battlePaused || paused) return;
       if (spectating) return;
       // The explainer stands over the tutorial's board on the way to a game.
       if (explainer !== null) return;
@@ -2374,7 +2371,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     screen,
-    showHowTo,
     showBattleResults,
     battlePaused,
     paused,
@@ -2958,7 +2954,6 @@ export default function App() {
         <HomeScreen
           onPlay={chooseDoor}
           onTutorial={openTutorial}
-          onShowHowTo={() => setShowHowTo(true)}
           onShowStats={() => setStatsView(loadStats())}
           onShowSettings={() => setSettingsOpen(true)}
         />
@@ -2984,7 +2979,6 @@ export default function App() {
           onConfirm={playPendingDoor}
         />
         {doorSetupSheet}
-        {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
         <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
         <SettingsPage
           open={settingsOpen}
@@ -3153,7 +3147,6 @@ export default function App() {
               // finished one has stopped of its own accord.
               onPause={inBattle || complete ? null : () => setPaused(true)}
               onResetGame={inBattle ? null : () => newGame(mode, soloPace)}
-              onShowHowTo={() => setShowHowTo(true)}
               onShowSettings={() => setSettingsOpen(true)}
               onShowSummary={
                 inBattle
@@ -3186,7 +3179,11 @@ export default function App() {
           {tutorialStep === 1 ? (
             <p className="tutorial-text">
               Your pile spells <strong>SOLAR</strong>. Type it out — the middle square is already
-              chosen — then press <kbd>Enter</kbd>, or the ✓, to place it.
+              chosen — then press <kbd>Enter</kbd>, or the{' '}
+              <kbd className="tutorial-gap tutorial-confirm">
+                <CheckIcon size={15} />
+              </kbd>{' '}
+              button, to place it.
             </p>
           ) : tutorialStep === 2 ? (
             <p className="tutorial-text">
@@ -3381,8 +3378,6 @@ export default function App() {
           onReturnHome={returnHome}
         />
       )}
-
-      {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
 
       <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
 

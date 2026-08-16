@@ -956,7 +956,9 @@ body {
 }
 
 .menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   padding: 9px 12px;
   font: inherit;
@@ -967,6 +969,13 @@ body {
   border: 0;
   border-radius: 7px;
   cursor: pointer;
+}
+
+.menu-item-icon {
+  display: flex;
+  flex-shrink: 0;
+  font-size: 16px;
+  opacity: 0.75;
 }
 
 .menu-item:hover {
@@ -1612,10 +1621,12 @@ body {
  * quieter tiles rather than four more full-width rows, so the modes stay the
  * column the eye runs down.
  */
+/* The three things that aren't a game, set a little apart from the doors. */
 .home-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
+  margin-top: 22px;
 }
 
 .home-action {
@@ -1676,6 +1687,13 @@ body {
   vertical-align: -4px;
 }
 
+/* The confirm button named in the sentence wears the real one's green. */
+.tutorial-text .tutorial-confirm {
+  color: var(--ok-ink);
+  background: var(--ok-bg);
+  border-color: var(--ok-edge);
+}
+
 /* The way past a step that isn't landing. Lives in the header beside the way
    out of the tutorial altogether, quieter than the ✕ it sits next to. */
 .tutorial-skip {
@@ -1704,7 +1722,7 @@ body {
 
 /* ---------- full-page overlays ---------- */
 
-/* The way out of a full-page overlay — how-to, stats, settings. The X rides the
+/* The way out of a full-page overlay — stats, settings. The X rides the
    viewport rather than the page, so it's always in reach however far the page
    has been scrolled, and sits above the page's own content (both overlays make
    a stacking context of their own, so a small z-index is enough). */
@@ -1713,139 +1731,6 @@ body {
   top: 14px;
   right: 16px;
   z-index: 10;
-}
-
-/* ---------- how-to modal ---------- */
-
-.howto {
-  position: fixed;
-  inset: 0;
-  z-index: 400;
-  overflow-y: auto;
-  background: var(--bg);
-  animation: splash-in 180ms ease-out;
-}
-
-.howto-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  max-width: 560px;
-  margin: 0 auto;
-  padding: 36px 22px calc(36px + env(safe-area-inset-bottom));
-}
-
-.howto-goal {
-  margin: 8px 0 0;
-  font-size: 15px;
-  line-height: 1.5;
-}
-
-.howto-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.howto-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 12px;
-  font-size: 14px;
-  line-height: 1.45;
-  background: var(--surface);
-  border: 2px solid var(--line-soft);
-  border-radius: 12px;
-}
-
-.howto-tiles {
-  display: flex;
-  gap: 3px;
-  flex-shrink: 0;
-}
-
-/* A game tile in miniature, in each of the board's states — same colours the
-   real board uses. */
-.howto-tile {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  font-size: 16px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--ink);
-  background: var(--tile-face);
-  border: 2px solid var(--tile-edge);
-  border-radius: 8px;
-  box-shadow: 0 2px 3px var(--shadow);
-}
-
-.howto-tile-valid {
-  background: var(--ok-bg);
-  border-color: var(--ok-edge);
-  color: var(--ok-ink);
-}
-
-.howto-tile-disconnected {
-  background: var(--warn-bg);
-  border-color: var(--warn-edge);
-  color: var(--warn-ink);
-}
-
-.howto-tile-invalid {
-  background: var(--bad-bg);
-  border-color: var(--bad-edge);
-  color: var(--bad-ink);
-}
-
-.howto-tile-gap {
-  background: var(--surface-alt);
-  border-style: dashed;
-  border-color: var(--line);
-  box-shadow: none;
-}
-
-.howto-tile-cursor {
-  background: var(--focus-bg);
-  border-color: var(--focus);
-  box-shadow: inset 0 0 0 3px var(--focus);
-}
-
-/* Game buttons shown as pictures — the same classes the live ones wear, made
-   inert. */
-.howto-btn {
-  display: inline-flex;
-  flex-shrink: 0;
-  pointer-events: none;
-  cursor: default;
-}
-
-/* The same picture-button sat in the middle of a sentence. */
-.howto-btn-inline {
-  width: 26px;
-  height: 26px;
-  margin: 0 2px;
-  font-size: 15px;
-  vertical-align: middle;
-}
-
-.howto kbd {
-  padding: 1px 6px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  background: var(--surface-alt);
-  border: 1px solid var(--line);
-  border-bottom-width: 2px;
-  border-radius: 5px;
-  white-space: nowrap;
 }
 
 @media (max-width: 600px) {

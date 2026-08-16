@@ -170,27 +170,6 @@ export function CrownIcon(props: IconProps) {
   );
 }
 
-/** A graduation cap: the guided walkthrough. */
-export function TutorialIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M12 4L2 9l10 5 10-5-10-5z" />
-      <path d="M6 11.5V17c0 1.4 2.7 2.6 6 2.6s6-1.2 6-2.6v-5.5" />
-    </Svg>
-  );
-}
-
-/** A question mark in a ring: how the game is played. */
-export function HelpIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M9.3 9.2a2.8 2.8 0 0 1 5.5.8c0 1.9-2.8 2.2-2.8 4" />
-      <path d="M12 17.6h.01" />
-    </Svg>
-  );
-}
-
 /** Bars on a baseline: the stats page. */
 export function StatsIcon(props: IconProps) {
   return (
@@ -201,17 +180,45 @@ export function StatsIcon(props: IconProps) {
   );
 }
 
-/**
- * Two sliders with their knobs: the settings page. A cog's teeth turn to mush
- * at this size — sliders stay legible, and this screen is preferences anyway.
- */
+/** A gear: the settings page. */
 export function SettingsIcon(props: IconProps) {
   return (
     <Svg {...props}>
-      <path d="M3.5 8.5h6.2M15.3 8.5h5.2" />
-      <circle cx="12.5" cy="8.5" r="2.4" />
-      <path d="M3.5 15.5h3.2M12.3 15.5h8.2" />
-      <circle cx="9.5" cy="15.5" r="2.4" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </Svg>
+  );
+}
+
+/** An arrow chasing its own tail: start this game over from scratch. */
+export function RestartIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M21 4v6h-6" />
+      <path d="M20.5 14a8.5 8.5 0 1 1-2-8.5L21 8" />
+    </Svg>
+  );
+}
+
+/** Two people: the whole room, gathered back in the lobby. */
+export function PlayersIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="9" cy="8.5" r="3" />
+      <path d="M3 19a6 6 0 0 1 12 0" />
+      <path d="M16 6.2a3 3 0 0 1 0 4.6" />
+      <path d="M18.5 19a6 6 0 0 0-2.6-4.4" />
+    </Svg>
+  );
+}
+
+/** A doorway with an arrow through it: leave for home (or the lobby). */
+export function ExitIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
     </Svg>
   );
 }

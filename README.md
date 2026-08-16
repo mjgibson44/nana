@@ -152,8 +152,7 @@ Two things front a first game, each shown once and never again (remembered in
   choice and the game, which is why there's no ⓘ on the mode buttons: the
   details arrive when they're wanted, unasked.
 
-The fuller "How to play" reference never interrupts; it waits on the home screen
-and in the in-game menu.
+The tutorial can always be retaken from the home screen's ⓘ button.
 
 ### Sound
 

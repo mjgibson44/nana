@@ -1,12 +1,5 @@
 import { DOOR_INFO, type GameDoor } from '../game/modes';
-import {
-  CrownIcon,
-  HelpIcon,
-  SettingsIcon,
-  SoloIcon,
-  StatsIcon,
-  TutorialIcon,
-} from './icons';
+import { CrownIcon, InfoIcon, SettingsIcon, SoloIcon, StatsIcon } from './icons';
 
 interface HomeScreenProps {
   /** Head through one of the game doors. What happens next is the door's
@@ -15,7 +8,6 @@ interface HomeScreenProps {
   onPlay: (door: GameDoor) => void;
   /** Start the guided tutorial. */
   onTutorial: () => void;
-  onShowHowTo: () => void;
   onShowStats: () => void;
   onShowSettings: () => void;
 }
@@ -46,18 +38,13 @@ function HomeAction({
 
 /**
  * The splash screen the app opens on: the game's name up top, then the two
- * mode cards side by side — alone with friends, in one glance — and under
- * them the things that aren't a game. A mode button says only what the mode
- * is called; what it *is* gets explained once, in the popover that fronts its
- * first game, rather than sitting behind an ⓘ nobody presses.
+ * mode cards side by side — alone with friends, in one glance — and, set a
+ * little apart below, the three things that aren't a game. A mode button says
+ * only what the mode is called; what it *is* gets explained once, in the
+ * popover that fronts its first game, rather than sitting behind an ⓘ nobody
+ * presses.
  */
-export function HomeScreen({
-  onPlay,
-  onTutorial,
-  onShowHowTo,
-  onShowStats,
-  onShowSettings,
-}: HomeScreenProps) {
+export function HomeScreen({ onPlay, onTutorial, onShowStats, onShowSettings }: HomeScreenProps) {
   return (
     <div className="home">
       <div className="home-inner">
@@ -76,8 +63,7 @@ export function HomeScreen({
         </div>
 
         <div className="home-actions">
-          <HomeAction icon={<TutorialIcon />} label="Tutorial" onClick={onTutorial} />
-          <HomeAction icon={<HelpIcon />} label="How to play" onClick={onShowHowTo} />
+          <HomeAction icon={<InfoIcon />} label="Tutorial" onClick={onTutorial} />
           <HomeAction icon={<StatsIcon />} label="Stats" onClick={onShowStats} />
           <HomeAction icon={<SettingsIcon />} label="Settings" onClick={onShowSettings} />
         </div>

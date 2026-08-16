@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { MenuIcon } from './icons';
+import {
+  ExitIcon,
+  MenuIcon,
+  PauseIcon,
+  PlayersIcon,
+  RestartIcon,
+  SettingsIcon,
+  StatsIcon,
+} from './icons';
 
 /** The battle-only entries: host controls, and leaving reads differently. */
 export interface MenuBattleControls {
@@ -18,7 +26,6 @@ interface MenuProps {
   /** Start the current mode over from scratch. Null hides the item — in a
    * battle only the host restarts, through the battle controls instead. */
   onResetGame: (() => void) | null;
-  onShowHowTo: () => void;
   onShowSettings: () => void;
   /** Reopen the final-score breakdown; null while the game is still going. */
   onShowSummary: (() => void) | null;
@@ -33,7 +40,6 @@ interface MenuProps {
 export function Menu({
   onPause,
   onResetGame,
-  onShowHowTo,
   onShowSettings,
   onShowSummary,
   onReturnHome,
@@ -59,7 +65,7 @@ export function Menu({
     };
   }, [open]);
 
-  const item = (label: string, action: () => void) => (
+  const item = (icon: React.ReactNode, label: string, action: () => void) => (
     <button
       type="button"
       className="menu-item"
@@ -69,6 +75,9 @@ export function Menu({
         action();
       }}
     >
+      <span className="menu-item-icon" aria-hidden="true">
+        {icon}
+      </span>
       {label}
     </button>
   );
@@ -92,14 +101,14 @@ export function Menu({
       {open && (
         <div className="menu-panel" role="menu">
           {/* First: it's the one item wanted mid-turn, with a clock running. */}
-          {onPause && item('Pause', onPause)}
-          {onResetGame && item('Reset game', onResetGame)}
-          {battle?.isHost && item('Restart battle', battle.onRestart)}
-          {battle?.isHost && item('Everyone to the lobby', battle.onToLobby)}
-          {onShowSummary && item(battle ? 'Standings' : 'Final score', onShowSummary)}
-          {item('How to play', onShowHowTo)}
-          {item('Settings', onShowSettings)}
-          {item(battle ? 'Leave game' : 'Return home', onReturnHome)}
+          {onPause && item(<PauseIcon />, 'Pause', onPause)}
+          {onResetGame && item(<RestartIcon />, 'Reset game', onResetGame)}
+          {battle?.isHost && item(<RestartIcon />, 'Restart battle', battle.onRestart)}
+          {battle?.isHost && item(<PlayersIcon />, 'Everyone to the lobby', battle.onToLobby)}
+          {onShowSummary &&
+            item(<StatsIcon />, battle ? 'Standings' : 'Final score', onShowSummary)}
+          {item(<SettingsIcon />, 'Settings', onShowSettings)}
+          {item(<ExitIcon />, battle ? 'Leave game' : 'Return home', onReturnHome)}
         </div>
       )}
     </div>
