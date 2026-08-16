@@ -1,4 +1,4 @@
-import { Peer } from 'peerjs';
+import { Peer, util } from 'peerjs';
 import type { DataConnection, PeerJSOption } from 'peerjs';
 import {
   battleOver,
@@ -144,40 +144,44 @@ function brokerOptions(): { host: string; port: number; path: string; secure: bo
 }
 
 /**
- * Which servers help the browsers find a path to each other. WebRTC needs a
- * TURN relay when a player's network refuses direct connections (symmetric
- * NAT, strict firewalls). PeerJS's defaults include its free shared relay —
- * best-effort infrastructure that's often the reason joining feels flaky —
- * so a deployment that wants dependable joins brings its own: set
- * VITE_TURN_URL (comma-separated turn:/turns: urls) plus VITE_TURN_USERNAME
- * and VITE_TURN_CREDENTIAL at build time, and every connection gets that
- * relay as the fallback path.
+ * Which servers help the browsers find a path to each other. Always PeerJS's
+ * own defaults (Google and Twilio STUN plus its free shared TURN relay) and
+ * one more public STUN host on the standard port — no-account infrastructure
+ * that costs nothing to carry and gives a network that filters one server
+ * another to try.
+ *
+ * WebRTC needs a TURN relay when a player's network refuses direct
+ * connections (symmetric NAT, strict firewalls), and the free shared relay
+ * is best-effort — often the reason joining feels flaky. A deployment that
+ * wants dependable joins brings its own: set VITE_TURN_URL (comma-separated
+ * turn:/turns: urls) plus VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL at
+ * build time — a managed relay's free tier works as well as a self-hosted
+ * coturn, and infra/README.md walks through both. The configured relay
+ * joins the list rather than replacing it, so an outage — or a spent
+ * free-tier quota — on it degrades to the default behavior instead of
+ * breaking connections outright.
  */
-function iceConfig(): RTCConfiguration | null {
-  const raw = import.meta.env.VITE_TURN_URL as string | undefined;
-  if (!raw) return null;
-  const urls = raw
+function iceConfig(): RTCConfiguration {
+  const iceServers: RTCIceServer[] = [
+    ...util.defaultConfig.iceServers,
+    { urls: 'stun:stun.cloudflare.com:3478' },
+  ];
+  const urls = ((import.meta.env.VITE_TURN_URL as string | undefined) ?? '')
     .split(',')
     .map((url) => url.trim())
     .filter(Boolean);
-  if (urls.length === 0) return null;
-  return {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      {
-        urls,
-        username: (import.meta.env.VITE_TURN_USERNAME as string | undefined) ?? '',
-        credential: (import.meta.env.VITE_TURN_CREDENTIAL as string | undefined) ?? '',
-      },
-    ],
-  };
+  if (urls.length > 0) {
+    iceServers.push({
+      urls,
+      username: (import.meta.env.VITE_TURN_USERNAME as string | undefined) ?? '',
+      credential: (import.meta.env.VITE_TURN_CREDENTIAL as string | undefined) ?? '',
+    });
+  }
+  return { iceServers };
 }
 
 function newPeer(id?: string): Peer {
-  const broker = brokerOptions();
-  const config = iceConfig();
-  if (!broker && !config) return id !== undefined ? new Peer(id) : new Peer();
-  const options: PeerJSOption = { ...(broker ?? {}), ...(config ? { config } : {}) };
+  const options: PeerJSOption = { ...(brokerOptions() ?? {}), config: iceConfig() };
   return id !== undefined ? new Peer(id, options) : new Peer(options);
 }
 

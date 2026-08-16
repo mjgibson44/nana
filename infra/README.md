@@ -16,6 +16,19 @@ all via a single `docker compose up`. The game itself stays a static site;
 only these two support services run on the server, and only introductions and
 relayed-fallback traffic flow through them.
 
+## The zero-cost version (no server at all)
+
+The VPS below runs ~$5/month. To fix the biggest source of trouble — the
+shared TURN relay — for free instead, sign up for a managed relay's free
+tier: [Metered's Open Relay](https://www.metered.ca/tools/openrelay/) gives
+20 GB of relayed traffic a month with static credentials, no card required.
+That's effectively unlimited here — this game relays tile counts and scores,
+never media. Put the credentials they issue into the three `VITE_TURN_*`
+build variables (see `.env.example` at the repo root) and rebuild; the broker
+stays PeerJS's free public one. The client keeps the free shared relay in
+its server list beside the configured one, so even a spent free-tier quota
+only degrades to the default behavior rather than breaking joins.
+
 ## What you need
 
 - A VPS with a public IPv4 address and Docker installed (any provider;

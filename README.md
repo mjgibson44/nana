@@ -250,7 +250,10 @@ when a direct path fails.
 **Ready-made setup**: the [`infra/`](infra/) directory runs both — the broker
 behind automatic HTTPS and a locked-down coturn — on one small VPS with a
 single `docker compose up`, and [`.env.example`](.env.example) lists the build
-variables that point the game at them. `infra/README.md` walks through it.
+variables that point the game at them. `infra/README.md` walks through it,
+including a zero-cost variant (a managed relay's free tier, no server). A
+configured relay always joins the default server list rather than replacing
+it, so it can only make connections better, never newly fragile.
 
 ## Roadmap
 
