@@ -255,6 +255,11 @@ including a zero-cost variant (a managed relay's free tier, no server). A
 configured relay always joins the default server list rather than replacing
 it, so it can only make connections better, never newly fragile.
 
+This repo's production builds already do the zero-cost variant:
+[`.env.production`](.env.production) points them at a Metered free-tier
+relay (committed deliberately — the values ship in the bundle anyway, and
+its comment header explains the rotation story).
+
 ## Roadmap
 
 - [x] Single-player: solvable deals, drag & drop, live validation
