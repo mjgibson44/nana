@@ -947,7 +947,8 @@ body {
   top: calc(100% + 6px);
   right: 0;
   z-index: 60;
-  min-width: 150px;
+  /* Wide enough that the longest entries sit on one line. */
+  min-width: 220px;
   padding: 5px;
   background: var(--surface);
   border: 2px solid var(--line);
@@ -964,6 +965,7 @@ body {
   font: inherit;
   font-weight: 600;
   text-align: left;
+  white-space: nowrap;
   color: var(--ink);
   background: none;
   border: 0;

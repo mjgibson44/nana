@@ -49,9 +49,10 @@ export function tileTone(tiles: TileGauge | null): TileTone {
 interface ScoreboardProps {
   /**
    * The whole running total: every word on the board right now, plus the
-   * bonuses banked along the way.
+   * bonuses banked along the way. Null hides the block — a Battle isn't won
+   * on points, so its header keeps to the clock and the pile.
    */
-  score: number;
+  score: number | null;
   /**
    * The tutorial's progress, which takes the score's corner while it runs —
    * there's nothing to win there, and the step in hand is what's worth a
@@ -66,8 +67,6 @@ interface ScoreboardProps {
   complete: boolean;
   /** The header clock, or null in modes without one. */
   timer: { label: string; seconds: number; urgent: boolean } | null;
-  /** Battle: which round the game is in ("1/3", "Final"). Null elsewhere. */
-  round: string | null;
   /** Tiles against the limit that ends the game. Null while not in play. */
   tiles: TileGauge | null;
   /** Battle: how much of the field is still standing. A room of piles won't
@@ -86,7 +85,6 @@ export function Scoreboard({
   bonusAmount,
   complete,
   timer,
-  round,
   tiles,
   standing,
   pops,
@@ -108,7 +106,7 @@ export function Scoreboard({
             <span className="score-of"> of {step.of}</span>
           </span>
         </div>
-      ) : (
+      ) : score !== null ? (
         <div className="score-block score-block-points">
           <span className="score-label">{complete ? 'Final score' : 'Score'}</span>
           {/* Keyed by value so every change replays the little bump. */}
@@ -128,13 +126,7 @@ export function Scoreboard({
             ))}
           </div>
         </div>
-      )}
-      {round !== null && (
-        <div className="score-block">
-          <span className="score-label">Round</span>
-          <span className="score-value">{round}</span>
-        </div>
-      )}
+      ) : null}
       {timer && (
         <div className="score-block">
           <span className="score-label">{timer.label}</span>

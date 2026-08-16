@@ -100,7 +100,15 @@ export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: B
                   <span className="battle-roster-note">reconnecting…</span>
                 ) : gameRunning ? (
                   <span className="battle-roster-note">
-                    {player.waiting ? 'next game' : player.buried ? 'out' : 'playing'}
+                    {player.waiting
+                      ? 'next game'
+                      : state.phase === 'finished'
+                        ? player.id === state.winnerId
+                          ? 'won'
+                          : 'out'
+                        : player.buried
+                          ? 'out'
+                          : 'playing'}
                   </span>
                 ) : null}
               </li>
@@ -109,7 +117,9 @@ export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: B
 
           {gameRunning ? (
             <p className="battle-status" role="status">
-              A game is running — you&rsquo;ll deal in when the next one starts.
+              {state.phase === 'finished'
+                ? `The game has finished — waiting for ${host?.name ?? 'the host'} to start another or reopen the lobby…`
+                : 'A game is running — you’ll deal in when the next one starts.'}
             </p>
           ) : isHost ? (
             <>
