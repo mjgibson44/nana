@@ -235,6 +235,16 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
 `npx peer --port 9000`), set `VITE_PEER_HOST` (and optionally
 `VITE_PEER_PORT`, `VITE_PEER_PATH`, `VITE_PEER_SECURE=false`) at build time.
 
+Some networks (carrier-grade NAT on mobile data, strict corporate or campus
+Wi-Fi) refuse direct browser-to-browser connections; those players need a
+TURN relay to get through. The default is PeerJS's free shared relay, which
+is best-effort — for dependable joins, bring your own by setting
+`VITE_TURN_URL` (comma-separated `turn:`/`turns:` URLs), `VITE_TURN_USERNAME`
+and `VITE_TURN_CREDENTIAL` at build time. A self-hosted
+[coturn](https://github.com/coturn/coturn) or a managed TURN service (many
+have free tiers) both work; only relayed traffic flows through it, and only
+when a direct path fails.
+
 ## Roadmap
 
 - [x] Single-player: solvable deals, drag & drop, live validation
