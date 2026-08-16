@@ -1,17 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   battleOver,
+  battleWinner,
   battleWinners,
   createTileStream,
-  duelOver,
-  duelWinner,
   isValidBattleCode,
   newBattleCode,
   normalizeBattleCode,
   ordinal,
   rankByElimination,
-  rankPlayers,
-  type BattleMode,
   type BattlePlayer,
   type Contestant,
 } from '../battle';
@@ -83,7 +80,7 @@ describe('createTileStream', () => {
     expect(a.join('')).not.toBe(b.join(''));
   });
 
-  it('serves requests smaller than a word — duel attacks ask for one tile', () => {
+  it('serves requests smaller than a word — attacks ask for one tile', () => {
     const stream = createTileStream('attacks');
     expect(stream.next(1)).toHaveLength(1);
     expect(stream.next(2)).toHaveLength(2);
@@ -120,98 +117,45 @@ describe('battle codes', () => {
   });
 });
 
-describe('battleOver', () => {
-  it('is not over while several players are still standing', () => {
-    expect(battleOver([player({ score: 50 }), player({ score: 10 })])).toBe(false);
-  });
-
-  it('ends when every player is buried', () => {
-    expect(
-      battleOver([player({ buried: true, score: 30 }), player({ buried: true, score: 12 })]),
-    ).toBe(true);
-  });
-
-  it('ends when the last player standing is already strictly ahead', () => {
-    expect(
-      battleOver([player({ score: 40 }), player({ buried: true, score: 30 })]),
-    ).toBe(true);
-  });
-
-  it('plays on while the last player standing is behind or tied', () => {
-    expect(
-      battleOver([player({ score: 20 }), player({ buried: true, score: 30 })]),
-    ).toBe(false);
-    expect(
-      battleOver([player({ score: 30 }), player({ buried: true, score: 30 })]),
-    ).toBe(false);
-  });
-
-  it('never ends a solo game just for being solo', () => {
-    expect(battleOver([player({ score: 100 })])).toBe(false);
-    expect(battleOver([player({ score: 100, buried: true })])).toBe(true);
-  });
-
-  it('treats a player who left for good as out of the running', () => {
-    // The survivor leads the leaver's frozen score, so it's over.
-    expect(
-      battleOver([player({ score: 40 }), player({ score: 10, left: true })]),
-    ).toBe(true);
-    // Everyone left; nobody can move the game forward.
-    expect(
-      battleOver([
-        player({ score: 40, left: true }),
-        player({ score: 10, left: true }),
-      ]),
-    ).toBe(true);
-  });
-
-  it('ignores players waiting for the next game', () => {
-    expect(
-      battleOver([player({ score: 5, buried: true }), player({ score: 0, waiting: true })]),
-    ).toBe(true);
-    expect(battleOver([player({ waiting: true })])).toBe(false);
-  });
-});
-
-describe('duelOver / duelWinner', () => {
+describe('battleOver / battleWinner', () => {
   it('is not decided before two players are dealt in', () => {
-    expect(duelOver([player()])).toBe(false);
-    expect(duelOver([player(), player({ waiting: true })])).toBe(false);
+    expect(battleOver([player()])).toBe(false);
+    expect(battleOver([player(), player({ waiting: true })])).toBe(false);
   });
 
-  it('plays on while both duellists are alive', () => {
-    expect(duelOver([player(), player()])).toBe(false);
+  it('plays on while two players are alive', () => {
+    expect(battleOver([player(), player()])).toBe(false);
   });
 
-  it('ends the moment one goes under, and names the survivor', () => {
+  it('ends the moment the field is down to one, and names the survivor', () => {
     const survivor = player({ score: 12 });
     const players = [survivor, player({ buried: true })];
-    expect(duelOver(players)).toBe(true);
-    expect(duelWinner(players)).toBe(survivor);
+    expect(battleOver(players)).toBe(true);
+    expect(battleWinner(players)).toBe(survivor);
   });
 
-  it('ends when one leaves for good', () => {
+  it('ends when the last rival leaves for good', () => {
     const survivor = player();
     const players = [survivor, player({ left: true })];
-    expect(duelOver(players)).toBe(true);
-    expect(duelWinner(players)).toBe(survivor);
+    expect(battleOver(players)).toBe(true);
+    expect(battleWinner(players)).toBe(survivor);
   });
 
-  it('calls a draw when both are gone', () => {
+  it('calls a draw when everyone is gone', () => {
     const players = [player({ buried: true }), player({ buried: true })];
-    expect(duelOver(players)).toBe(true);
-    expect(duelWinner(players)).toBeNull();
+    expect(battleOver(players)).toBe(true);
+    expect(battleWinner(players)).toBeNull();
   });
 
-  it('referees a whole battle field the same way: last one standing', () => {
+  it('referees a full field of eight: last one standing', () => {
     // Seven of eight down — the game runs until exactly one is left.
     const field = (alive: number) =>
       Array.from({ length: 8 }, (_, i) => player({ buried: i >= alive }));
-    expect(duelOver(field(3))).toBe(false);
-    expect(duelOver(field(2))).toBe(false);
+    expect(battleOver(field(3))).toBe(false);
+    expect(battleOver(field(2))).toBe(false);
     const done = field(1);
-    expect(duelOver(done)).toBe(true);
-    expect(duelWinner(done)).toBe(done[0]);
+    expect(battleOver(done)).toBe(true);
+    expect(battleWinner(done)).toBe(done[0]);
   });
 });
 
@@ -247,28 +191,6 @@ describe('rankByElimination', () => {
   });
 });
 
-describe('rankPlayers', () => {
-  it('ranks by score, best first', () => {
-    const ranked = rankPlayers([
-      player({ score: 10 }),
-      player({ score: 30 }),
-      player({ score: 20 }),
-    ]);
-    expect(ranked.map((r) => r.player.score)).toEqual([30, 20, 10]);
-    expect(ranked.map((r) => r.rank)).toEqual([1, 2, 3]);
-  });
-
-  it('shares ranks on ties and skips past them', () => {
-    const ranked = rankPlayers([
-      player({ score: 20 }),
-      player({ score: 30 }),
-      player({ score: 20 }),
-      player({ score: 10 }),
-    ]);
-    expect(ranked.map((r) => r.rank)).toEqual([1, 2, 2, 4]);
-  });
-});
-
 describe('battleWinners', () => {
   function seat(id: string, overrides: Partial<BattlePlayer> = {}): BattlePlayer {
     return {
@@ -286,56 +208,13 @@ describe('battleWinners', () => {
     };
   }
 
-  function state(mode: BattleMode, players: BattlePlayer[], winnerId: string | null = null) {
-    return { mode, phase: 'finished' as const, players, game: 1, paused: false, winnerId };
+  function state(players: BattlePlayer[], winnerId: string | null = null) {
+    return { phase: 'finished' as const, players, game: 1, paused: false, winnerId };
   }
 
-  it('gives an Endless Battle to the top score', () => {
-    const winners = battleWinners(
-      state('endless', [seat('a', { score: 10 }), seat('b', { score: 30 })]),
-    );
-    expect(winners.map((p) => p.id)).toEqual(['b']);
-  });
-
-  it('gives a tied Endless Battle to everyone who shares the top score', () => {
-    const winners = battleWinners(
-      state('endless', [
-        seat('a', { score: 30 }),
-        seat('b', { score: 20 }),
-        seat('c', { score: 30 }),
-      ]),
-    );
-    expect(winners.map((p) => p.id).sort()).toEqual(['a', 'c']);
-  });
-
-  it('leaves out players who sat the game out, however well they scored', () => {
-    const winners = battleWinners(
-      state('endless', [
-        seat('a', { score: 10 }),
-        seat('latecomer', { score: 999, waiting: true }),
-      ]),
-    );
-    expect(winners.map((p) => p.id)).toEqual(['a']);
-  });
-
-  it('gives a Duel to the survivor the host named, whatever the scores say', () => {
-    const winners = battleWinners(
-      state('duel', [seat('a', { score: 99, buried: true }), seat('b', { score: 1 })], 'b'),
-    );
-    expect(winners.map((p) => p.id)).toEqual(['b']);
-  });
-
-  it('gives a drawn Duel to nobody', () => {
-    const winners = battleWinners(
-      state('duel', [seat('a', { buried: true }), seat('b', { buried: true })], null),
-    );
-    expect(winners).toEqual([]);
-  });
-
-  it('gives a Battle to the last one standing, whatever the scores say', () => {
+  it('gives the battle to the last one standing, whatever the scores say', () => {
     const winners = battleWinners(
       state(
-        'battle',
         [
           seat('a', { score: 99, buried: true, outOrder: 2 }),
           seat('b', { score: 1 }),
@@ -347,13 +226,20 @@ describe('battleWinners', () => {
     expect(winners.map((p) => p.id)).toEqual(['b']);
   });
 
-  it('gives a drawn Battle to nobody', () => {
+  it('gives a drawn battle to nobody', () => {
     const winners = battleWinners(
       state(
-        'battle',
         [seat('a', { buried: true, outOrder: 1 }), seat('b', { buried: true, outOrder: 2 })],
         null,
       ),
+    );
+    expect(winners).toEqual([]);
+  });
+
+  it('never crowns a player who sat the game out', () => {
+    // A winnerId pointing at a waiting player names nobody — contestants only.
+    const winners = battleWinners(
+      state([seat('a', { buried: true, outOrder: 1 }), seat('w', { waiting: true })], 'w'),
     );
     expect(winners).toEqual([]);
   });

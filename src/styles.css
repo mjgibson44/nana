@@ -308,7 +308,7 @@ body {
   color: var(--warn-ink);
 }
 
-/* Duel's pile counter pleads in stages as it fills: a medium orange blink
+/* Battle's pile counter pleads in stages as it fills: a medium orange blink
    first, then a faster red one as the limit closes in. */
 .tile-count-alert {
   color: var(--warn-ink);
@@ -425,7 +425,7 @@ body {
   overflow: auto;
   background: var(--board-bg);
   /* Flex with auto margins on the board: a board smaller than the viewport
-     (Puzzle's fixed grids) centres both ways, while one bigger than it still
+     (the tutorial's early board) centres both ways, while one bigger than it still
      scrolls to every corner — auto margins collapse to zero on overflow. */
   display: flex;
 }
@@ -634,7 +634,7 @@ body {
   box-shadow: none;
 }
 
-/* Duel: a placed tile is down for good. No grab cursor, no pretending. */
+/* Battle: a placed tile is down for good. No grab cursor, no pretending. */
 .board-tile.is-locked {
   cursor: default;
 }
@@ -1024,61 +1024,6 @@ body {
   font-size: 14px;
   font-weight: 600;
   opacity: 0.75;
-}
-
-/* The between-rounds battle scoreboard: the splash card grown a list. */
-.splash-round {
-  min-width: min(320px, 80vw);
-}
-
-.splash-standings {
-  list-style: none;
-  margin: 8px 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-self: stretch;
-  text-align: left;
-  font-size: 15px;
-}
-
-.splash-standing {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 8px;
-  font-weight: 600;
-}
-
-.splash-standing-self {
-  background: var(--surface-alt);
-  border-radius: 8px;
-}
-
-.splash-standing-buried {
-  opacity: 0.55;
-}
-
-.splash-standing-place {
-  width: 18px;
-  text-align: right;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.6;
-}
-
-.splash-standing-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.splash-standing-score {
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- finish summary & stats page ---------- */
@@ -1506,24 +1451,25 @@ body {
 }
 
 /*
- * One column, at every width. The buttons stay stacked under one another
- * wherever the reading eye (and on a phone, the thumb) already is; spreading
- * them across a wide screen turned the choice into a toolbar.
+ * The two doors, side by side: alone on the left, with friends on the right,
+ * read in one glance. Two big tiles make the choice feel like a choice — a
+ * taller stack read as a menu.
  */
 .home-modes {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
 
 .mode-card {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
+  justify-content: center;
+  gap: 10px;
+  padding: 26px 14px;
   font: inherit;
-  text-align: left;
+  text-align: center;
   color: var(--ink);
   background: var(--surface);
   border: 3px solid var(--line);
@@ -1533,11 +1479,11 @@ body {
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
-/* Sized off the name beside it, so icon and label grow together. */
+/* Sized off the name under it, so icon and label grow together. */
 .mode-card-icon {
   display: flex;
   flex-shrink: 0;
-  font-size: 27px;
+  font-size: 32px;
   opacity: 0.85;
 }
 
@@ -1600,9 +1546,9 @@ body {
   padding-right: 34px;
 }
 
-/* The setup sheet a configurable mode raises on the way in — Blitz's speed,
-   Puzzle's style and board. One row per setting, laid out like the settings
-   page rather than like a menu, since that's what it is. */
+/* The setup sheet a configurable mode raises on the way in — Solo's speed.
+   One row per setting, laid out like the settings page rather than like a
+   menu, since that's what it is. */
 .setup-settings {
   display: flex;
   flex-direction: column;

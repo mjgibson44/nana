@@ -5,9 +5,8 @@ import { seededRng } from './rng';
 import type { TileMap } from './types';
 
 /**
- * Multiplayer: several players race the same Endless game (Endless Battle),
- * exactly two fight a Duel, or up to eight fight a Battle — Duel's rules
- * with every attack split across the field, run until one player stands.
+ * Multiplayer: a Battle — two to eight players on one shared deal, every
+ * attack split across the field, run until one player stands.
  *
  * Everything here is pure and serializable — the networking layer
  * (src/net/battleSession.ts) moves these values between browsers, and the
@@ -20,10 +19,6 @@ import type { TileMap } from './types';
 
 /** Where a battle currently stands, for everyone in it. */
 export type BattlePhase = 'lobby' | 'playing' | 'finished';
-
-/** What game the lobby plays: Endless raced by everyone, a two-player Duel,
- * or a Battle — Duel's game for a room of up to eight, last one standing. */
-export type BattleMode = 'endless' | 'duel' | 'battle';
 
 export interface BattlePlayer {
   /**
@@ -48,7 +43,7 @@ export interface BattlePlayer {
   left: boolean;
   /** Joined while a game was running; playing from the next start. */
   waiting: boolean;
-  /** How many tiles are in the player's pile right now — the Duel gauge. */
+  /** How many tiles are in the player's pile right now — the pile gauge. */
   tiles: number;
   /**
    * When this player fell out of the running — 1 for the first buried (or
@@ -61,15 +56,13 @@ export interface BattlePlayer {
 
 /** The whole shared truth, owned by the host and broadcast on every change. */
 export interface BattleState {
-  mode: BattleMode;
   phase: BattlePhase;
   players: BattlePlayer[];
   /** Counts the games started in this lobby, so clients can tell restarts apart. */
   game: number;
   /** True while the game is held for a player who lost their connection. */
   paused: boolean;
-  /** Duel and Battle only: who won, once the phase is 'finished'. Null for
-   * a draw. */
+  /** Who won, once the phase is 'finished'. Null for a draw. */
   winnerId: string | null;
 }
 
@@ -146,10 +139,10 @@ const STREAM_CHUNK = 5;
  *
  * Determinism contract: two streams with the same seed deal the same opening
  * batch (every client asks for the same one) and after it the identical
- * sequence of letters, however the requests are sized. Drip batches grow as
- * an Endless game wears on while pile-clears stay small, so players' request
- * sizes interleave differently — which is why the hidden board always grows
- * by the same fixed chunk and requests just drain the resulting sequence.
+ * sequence of letters, however the requests are sized. Drips and attacks
+ * interleave differently on every player's screen — which is why the hidden
+ * board always grows by the same fixed chunk and requests just drain the
+ * resulting sequence.
  */
 export function createTileStream(seed: string, wordPool: string[] = COMMON_WORDS): TileStream {
   const rng = seededRng(seed);
@@ -160,8 +153,8 @@ export function createTileStream(seed: string, wordPool: string[] = COMMON_WORDS
     next(count: number): string[] {
       if (hidden === null) {
         // The opening deal sizes the hidden board — but never below what a
-        // crossword needs, so a stream can serve requests of any size (duel
-        // attacks ask for as little as one tile).
+        // crossword needs, so a stream can serve requests of any size
+        // (attacks ask for as little as one tile).
         const puzzle = generatePuzzle(wordPool, Math.max(count, STREAM_CHUNK), rng);
         hidden = puzzle.solution ?? {};
         pending.push(...puzzle.letters);
@@ -194,44 +187,22 @@ function isAlive(player: Contestant): boolean {
 }
 
 /**
- * Whether the game is decided. It ends when every player is buried (or gone),
- * and also as soon as a single player is left standing while already strictly
- * ahead — nothing they do can change the outcome, so there's no reason to
- * make them dig on. A last player standing who is tied or behind plays on:
- * the result still hangs on them.
+ * Whether a battle is decided: at least two players are dealt in and at most
+ * one is still alive. (No game can be decided before it has two
+ * contestants.) The size of the field doesn't matter — a Battle of eight
+ * ends exactly when one of two does, on the last player standing.
  */
 export function battleOver(players: Contestant[]): boolean {
-  const inGame = players.filter((p) => !p.waiting);
-  if (inGame.length === 0) return false;
-  const alive = inGame.filter(isAlive);
-  if (alive.length === 0) return true;
-  if (alive.length === 1 && inGame.length > 1) {
-    const best = Math.max(
-      ...inGame.filter((p) => p !== alive[0]).map((p) => p.score),
-    );
-    return alive[0].score > best;
-  }
-  return false;
-}
-
-/**
- * Whether a duel or battle is decided: at least two players are dealt in and
- * at most one is still alive. (Neither game can be decided before it has two
- * contestants.) The size of the field doesn't matter — a Battle of eight ends
- * exactly when a Duel does, on the last player standing.
- */
-export function duelOver(players: Contestant[]): boolean {
   const inGame = players.filter((p) => !p.waiting);
   if (inGame.length < 2) return false;
   return inGame.filter(isAlive).length <= 1;
 }
 
 /**
- * Who won a decided duel or battle: the last player alive, or null when
- * nobody is — a draw, which in practice takes the last players going down
- * together.
+ * Who won a decided battle: the last player alive, or null when nobody is —
+ * a draw, which in practice takes the last players going down together.
  */
-export function duelWinner<T extends Contestant>(players: T[]): T | null {
+export function battleWinner<T extends Contestant>(players: T[]): T | null {
   const alive = players.filter((p) => !p.waiting).filter(isAlive);
   return alive.length === 1 ? alive[0] : null;
 }
@@ -245,26 +216,12 @@ export interface RankedPlayer<T extends Contestant> {
 }
 
 /**
- * The standings, best first. Waiting players aren't in this game and don't
- * get a rank — filter them out before calling. Ties share a rank.
- */
-export function rankPlayers<T extends Contestant>(players: T[]): RankedPlayer<T>[] {
-  const sorted = [...players].sort((a, b) => b.score - a.score);
-  const ranked: RankedPlayer<T>[] = [];
-  for (let i = 0; i < sorted.length; i++) {
-    const tied = i > 0 && sorted[i].score === sorted[i - 1].score;
-    ranked.push({ player: sorted[i], rank: tied ? ranked[i - 1].rank : i + 1 });
-  }
-  return ranked;
-}
-
-/**
  * The standings of a survival game, best first: whoever is still standing
  * (outOrder null) leads, then everyone else in reverse order of falling —
  * the later you went out, the higher you place. Ties share a rank, which in
  * practice is only the draw where the last players went down together and
  * nobody has a null outOrder to lead with. Waiting players sat this game
- * out — filter them out before calling, as with rankPlayers.
+ * out — filter them out before calling.
  */
 export function rankByElimination<T extends Contestant & { outOrder: number | null }>(
   players: T[],
@@ -285,24 +242,17 @@ export function rankByElimination<T extends Contestant & { outOrder: number | nu
 }
 
 /**
- * Who took a decided game. An Endless Battle is won on score, so a tie hands
- * back every player who shares the top rank; a Duel or Battle is won on
- * survival, so it hands back the one the host named — and nobody at all for
- * the draw where the last players went down together.
+ * Who took a decided game: the survivor the host named — and nobody at all
+ * for the draw where the last players went down together.
  *
  * Waiting players sat this game out and can't have won it. Callers who only
  * want a yes or no for themselves ask whether their own id is in here.
  */
 export function battleWinners(state: BattleState): BattlePlayer[] {
   const contestants = state.players.filter((p) => !p.waiting);
-  if (state.mode === 'duel' || state.mode === 'battle') {
-    return state.winnerId === null
-      ? []
-      : contestants.filter((p) => p.id === state.winnerId);
-  }
-  return rankPlayers(contestants)
-    .filter(({ rank }) => rank === 1)
-    .map(({ player }) => player);
+  return state.winnerId === null
+    ? []
+    : contestants.filter((p) => p.id === state.winnerId);
 }
 
 /** "1st", "2nd", "3rd"… for the rank badge and the results screen. */

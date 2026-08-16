@@ -4,8 +4,7 @@ import { PauseIcon } from './icons';
 interface PauseScreenProps {
   /** False while the game is running — nothing renders. */
   open: boolean;
-  /** What's on hold, in the words the start splash used — "Blitz · Fast",
-   * "Puzzle Solve". */
+  /** What's on hold, in the words the start splash used — "Solo · Fast". */
   eyebrow: string;
   /** Back to the board, with every clock picking up where it stopped. */
   onResume: () => void;

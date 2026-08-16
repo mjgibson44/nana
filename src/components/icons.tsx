@@ -160,52 +160,6 @@ export function SoloIcon(props: IconProps) {
   );
 }
 
-/** A lightning bolt: Blitz, the pile racing you on a clock. */
-export function BlitzIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M13.5 3L6 13.5h5L9.5 21 18 10.5h-5L13.5 3z" />
-    </Svg>
-  );
-}
-
-/** A small bounded grid: Puzzle, a board with real edges to fill. */
-export function PuzzleIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4" y="4" width="16" height="16" rx="2" />
-      <path d="M9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16" />
-    </Svg>
-  );
-}
-
-/** A crowd: Survival, the whole field racing at once. */
-export function PlayersIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="9" cy="8.5" r="3" />
-      <path d="M3 19a6 6 0 0 1 12 0" />
-      <path d="M16 6.2a3 3 0 0 1 0 4.6" />
-      <path d="M18.5 19a6 6 0 0 0-2.6-4.4" />
-    </Svg>
-  );
-}
-
-/**
- * Crossed swords: a Duel, two players head to head. Two blades on the
- * diagonals, each with a crossguard set square across it above the hilt.
- */
-export function DuelIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M18.5 5.5L5 19" />
-      <path d="M6.5 13L11 17.5" />
-      <path d="M5.5 5.5L19 19" />
-      <path d="M13 17.5L17.5 13" />
-    </Svg>
-  );
-}
-
 /** A crown: Battle, the free-for-all the last player standing takes. */
 export function CrownIcon(props: IconProps) {
   return (

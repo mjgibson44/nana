@@ -1,20 +1,17 @@
 import { DOOR_INFO, type GameDoor } from '../game/modes';
 import {
-  BlitzIcon,
   CrownIcon,
-  DuelIcon,
   HelpIcon,
-  PlayersIcon,
-  PuzzleIcon,
   SettingsIcon,
+  SoloIcon,
   StatsIcon,
   TutorialIcon,
 } from './icons';
 
 interface HomeScreenProps {
   /** Head through one of the game doors. What happens next is the door's
-   * business: a solo pace starts a game, the multiplayer pair open a lobby,
-   * and a first-timer gets the tutorial before any of it. */
+   * business: Solo raises its setup sheet, Battle opens a lobby, and a
+   * first-timer gets the tutorial before either. */
   onPlay: (door: GameDoor) => void;
   /** Start the guided tutorial. */
   onTutorial: () => void;
@@ -25,10 +22,7 @@ interface HomeScreenProps {
 
 /** The doors, in the order they're offered. */
 const DOORS: Array<{ door: GameDoor; icon: React.ReactNode }> = [
-  { door: 'blitz', icon: <BlitzIcon /> },
-  { door: 'puzzle', icon: <PuzzleIcon /> },
-  { door: 'survival', icon: <PlayersIcon /> },
-  { door: 'duel', icon: <DuelIcon /> },
+  { door: 'solo', icon: <SoloIcon /> },
   { door: 'battle', icon: <CrownIcon /> },
 ];
 
@@ -51,15 +45,11 @@ function HomeAction({
 }
 
 /**
- * The splash screen the app opens on: the game's name up top, then one column
- * of buttons — the modes, then the things that aren't a game. A mode button
- * says only what the mode is called; what it *is* gets explained once, in the
- * popover that fronts its first game, rather than sitting behind an ⓘ nobody
- * presses.
- *
- * The column stays a single column at every width: it keeps the buttons under
- * one another wherever the thumb already is, and a four-across row of huge
- * targets on a desktop looked like a toolbar rather than a choice.
+ * The splash screen the app opens on: the game's name up top, then the two
+ * mode cards side by side — alone with friends, in one glance — and under
+ * them the things that aren't a game. A mode button says only what the mode
+ * is called; what it *is* gets explained once, in the popover that fronts its
+ * first game, rather than sitting behind an ⓘ nobody presses.
  */
 export function HomeScreen({
   onPlay,

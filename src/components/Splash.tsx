@@ -1,32 +1,18 @@
 import { PACE_NAMES, formatSeconds, type SoloPace } from '../game/modes';
 
-/** One line of the between-rounds battle scoreboard. */
-export interface RoundStanding {
-  rank: number;
-  name: string;
-  score: number;
-  self: boolean;
-  /** Buried or gone — out of the running either way. */
-  buried: boolean;
-}
-
 /**
  * What the card is announcing:
  *
  *  - `start`: a game opening — how many tiles and how long to place them.
  *  - `speedup`: Endless turning the screw (bigger batches from here), badged
  *    with the solo pace the game is being played at.
- *  - `round`: an Endless Battle round ending, with the whole field's scores.
- *  - `duelRound`: a Duel or Battle round starting, with its multiplier and
- *    drip — the eyebrow names which of the two games it is.
+ *  - `battleRound`: a Battle round starting, with its multiplier and drip.
  */
 export type Splash =
   | { kind: 'start'; title: string; eyebrow: string; note: string }
   | { kind: 'speedup'; seconds: number; tiles: number; pace: SoloPace }
-  | { kind: 'round'; standings: RoundStanding[]; seconds: number; tiles: number }
   | {
-      kind: 'duelRound';
-      eyebrow: string;
+      kind: 'battleRound';
       round: number;
       final: boolean;
       multiplier: number;
@@ -41,46 +27,11 @@ interface SplashCardProps {
 
 /**
  * A card that pops over the board to announce something — a game starting,
- * Endless speeding up, a Duel round turning the screw, or a battle round
- * ending with the whole field's scores — then gets out of the way on its
- * own. Clicking anywhere dismisses it early.
+ * Endless speeding up, or a Battle round turning the screw — then gets out
+ * of the way on its own. Clicking anywhere dismisses it early.
  */
 export function SplashCard({ splash, onDismiss }: SplashCardProps) {
   if (splash === null) return null;
-
-  if (splash.kind === 'round') {
-    return (
-      <div className="splash-backdrop" onClick={onDismiss} role="presentation">
-        <div className="splash splash-round" role="status" aria-live="polite">
-          <span className="splash-eyebrow">Survival</span>
-          <span className="splash-name">Round over!</span>
-          <ol className="splash-standings">
-            {splash.standings.map((standing, i) => (
-              <li
-                // eslint-disable-next-line react/no-array-index-key
-                key={i}
-                className={
-                  'splash-standing' +
-                  (standing.self ? ' splash-standing-self' : '') +
-                  (standing.buried ? ' splash-standing-buried' : '')
-                }
-              >
-                <span className="splash-standing-place">{standing.rank}</span>
-                <span className="splash-standing-name">
-                  {standing.name}
-                  {standing.buried && ' 💀'}
-                </span>
-                <span className="splash-standing-score">{standing.score}</span>
-              </li>
-            ))}
-          </ol>
-          <span className="splash-note">
-            +{splash.tiles} tiles · next batch in {formatSeconds(splash.seconds)}
-          </span>
-        </div>
-      </div>
-    );
-  }
 
   const content =
     splash.kind === 'start'
@@ -92,7 +43,7 @@ export function SplashCard({ splash, onDismiss }: SplashCardProps) {
             note: `+${splash.tiles} tiles every ${formatSeconds(splash.seconds)} from here`,
           }
         : {
-            eyebrow: splash.eyebrow,
+            eyebrow: 'Battle',
             name: splash.final ? 'Final round!' : `Round ${splash.round}`,
             note:
               `Words hit ×${splash.multiplier} · +${splash.dripTiles} ` +
