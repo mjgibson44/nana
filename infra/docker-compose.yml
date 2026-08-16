@@ -1,0 +1,70 @@
+# The game's own multiplayer infrastructure: a PeerJS broker (signaling) and
+# a coturn TURN relay, with Caddy terminating HTTPS for the broker. One small
+# VPS runs all three. See README.md in this directory for the full setup —
+# copy .env.example to .env here first.
+#
+# What talks to what:
+#   - Browsers find each other through the broker: wss://$MP_HOST (Caddy on
+#     443 -> peerjs on 9000). Only introductions flow through it.
+#   - When a network refuses a direct browser-to-browser path, the game's
+#     WebRTC traffic falls back to the TURN relay: turn:$MP_HOST:3478.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      MP_HOST: ${MP_HOST}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  peerjs:
+    image: peerjs/peerjs-server
+    restart: unless-stopped
+    # --proxied: trust X-Forwarded-For from Caddy, so rate limiting and logs
+    # see real client addresses instead of the proxy's.
+    command: ['--port', '9000', '--proxied', 'true']
+    expose:
+      - '9000'
+
+  coturn:
+    image: coturn/coturn
+    restart: unless-stopped
+    # Host networking: the relay allocates one UDP port per connected player
+    # out of min-port..max-port, and publishing hundreds of ports through
+    # Docker's proxy is slow and flaky. On the host net they just work.
+    network_mode: host
+    # $$(detect-external-ip) is resolved by the coturn image's entrypoint on
+    # start — it handles VPSes whose public address isn't on the interface
+    # (AWS, GCP, Oracle) and is a no-op on ones where it is.
+    command: >
+      -n
+      --log-file=stdout
+      --listening-port=3478
+      --external-ip=$$(detect-external-ip)
+      --fingerprint
+      --lt-cred-mech
+      --user=${TURN_USERNAME}:${TURN_PASSWORD}
+      --realm=${MP_HOST}
+      --min-port=49152
+      --max-port=49400
+      --no-cli
+      --no-tcp-relay
+      --no-multicast-peers
+      --total-quota=100
+      --user-quota=50
+      --max-bps=500000
+      --denied-peer-ip=10.0.0.0-10.255.255.255
+      --denied-peer-ip=172.16.0.0-172.31.255.255
+      --denied-peer-ip=192.168.0.0-192.168.255.255
+      --denied-peer-ip=127.0.0.0-127.255.255.255
+      --denied-peer-ip=169.254.0.0-169.254.255.255
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -3,5 +3,10 @@ dist
 *.log
 .DS_Store
 
+# Local build-time endpoints and server credentials, at the root and in
+# infra/ (.env.example files are the committed templates).
+.env
+.env.local
+
 # Playwright MCP scratch output (page snapshots, console logs, screenshots)
 .playwright-mcp/

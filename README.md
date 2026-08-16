@@ -247,6 +247,11 @@ and `VITE_TURN_CREDENTIAL` at build time. A self-hosted
 have free tiers) both work; only relayed traffic flows through it, and only
 when a direct path fails.
 
+**Ready-made setup**: the [`infra/`](infra/) directory runs both — the broker
+behind automatic HTTPS and a locked-down coturn — on one small VPS with a
+single `docker compose up`, and [`.env.example`](.env.example) lists the build
+variables that point the game at them. `infra/README.md` walks through it.
+
 ## Roadmap
 
 - [x] Single-player: solvable deals, drag & drop, live validation
