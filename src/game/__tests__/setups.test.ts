@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  DEFAULT_BLITZ,
-  DEFAULT_PUZZLE,
-  loadBlitzSetup,
-  loadPuzzleSetup,
-  saveBlitzSetup,
-  savePuzzleSetup,
-} from '../setups';
+import { DEFAULT_SOLO, loadSoloSetup, saveSoloSetup } from '../setups';
 
 /**
  * The tests run in node, so there's no window to read from — and blocked
@@ -39,66 +32,51 @@ afterEach(() => {
 });
 
 describe('defaults', () => {
-  it('opens Puzzle on Flow, flexible tiles and the middle board', () => {
-    expect(DEFAULT_PUZZLE).toEqual({ variant: 'flow', lock: 'flexible', size: 13 });
+  it('opens Solo at the regular pace', () => {
+    expect(DEFAULT_SOLO).toEqual({ pace: 'regular' });
   });
 
   it('are what a player with nothing stored gets', () => {
-    expect(loadPuzzleSetup()).toEqual(DEFAULT_PUZZLE);
-    expect(loadBlitzSetup()).toEqual(DEFAULT_BLITZ);
+    expect(loadSoloSetup()).toEqual(DEFAULT_SOLO);
   });
 });
 
 describe('round trip', () => {
-  it('gives a saved Puzzle setup back', () => {
-    savePuzzleSetup({ variant: 'solve', lock: 'locked', size: 19 });
-    expect(loadPuzzleSetup()).toEqual({ variant: 'solve', lock: 'locked', size: 19 });
-  });
-
-  it('gives a saved Blitz setup back', () => {
-    saveBlitzSetup({ pace: 'fast' });
-    expect(loadBlitzSetup()).toEqual({ pace: 'fast' });
+  it('gives a saved Solo setup back', () => {
+    saveSoloSetup({ pace: 'fast' });
+    expect(loadSoloSetup()).toEqual({ pace: 'fast' });
   });
 
   it('keeps the last save, not the first', () => {
-    savePuzzleSetup({ variant: 'solve', lock: 'locked', size: 9 });
-    savePuzzleSetup({ variant: 'flow', lock: 'flexible', size: 19 });
-    expect(loadPuzzleSetup().size).toBe(19);
+    saveSoloSetup({ pace: 'fast' });
+    saveSoloSetup({ pace: 'regular' });
+    expect(loadSoloSetup().pace).toBe('regular');
   });
 });
 
 describe('untrustworthy storage', () => {
   it('falls back to the defaults for anything that isn’t JSON', () => {
-    store?.set('nana.setup.puzzle.v1', 'not json {');
-    expect(loadPuzzleSetup()).toEqual(DEFAULT_PUZZLE);
+    store?.set('nana.setup.solo.v1', 'not json {');
+    expect(loadSoloSetup()).toEqual(DEFAULT_SOLO);
   });
 
   it('falls back for JSON that isn’t an object', () => {
-    store?.set('nana.setup.puzzle.v1', '[1, 2, 3]');
-    expect(loadPuzzleSetup()).toEqual(DEFAULT_PUZZLE);
+    store?.set('nana.setup.solo.v1', '[1, 2, 3]');
+    expect(loadSoloSetup()).toEqual(DEFAULT_SOLO);
   });
 
-  it('replaces only the fields it can’t use', () => {
-    store?.set(
-      'nana.setup.puzzle.v1',
-      JSON.stringify({ variant: 'solve', lock: 'melted', size: 400 }),
-    );
-    // The style survives; the two nonsense fields come back as defaults.
-    expect(loadPuzzleSetup()).toEqual({
-      variant: 'solve',
-      lock: DEFAULT_PUZZLE.lock,
-      size: DEFAULT_PUZZLE.size,
-    });
+  it('replaces a pace it can’t use', () => {
+    store?.set('nana.setup.solo.v1', JSON.stringify({ pace: 'ludicrous' }));
+    expect(loadSoloSetup()).toEqual(DEFAULT_SOLO);
   });
 
   it('reads the defaults when storage is blocked outright', () => {
     store = null;
-    expect(loadPuzzleSetup()).toEqual(DEFAULT_PUZZLE);
-    expect(loadBlitzSetup()).toEqual(DEFAULT_BLITZ);
+    expect(loadSoloSetup()).toEqual(DEFAULT_SOLO);
   });
 
   it('swallows a write that can’t land', () => {
     store = null;
-    expect(() => savePuzzleSetup(DEFAULT_PUZZLE)).not.toThrow();
+    expect(() => saveSoloSetup(DEFAULT_SOLO)).not.toThrow();
   });
 });

@@ -56,29 +56,23 @@ function CopyButton({ label, text }: { label: string; text: string }) {
 }
 
 /**
- * The room where a multiplayer game gathers. The host shares the code (or
- * the link that carries it) and starts the game once everyone's in; everyone
- * else watches the roster fill. A player who joins while a game is running
- * waits here for the next one. A Duel seats exactly two and a Battle two to
- * eight, so their start buttons wait for enough of a field.
+ * The room where a battle gathers. The host shares the code (or the link
+ * that carries it) and starts the game once everyone's in; everyone else
+ * watches the roster fill. A player who joins while a game is running waits
+ * here for the next one. A battle seats two to eight, so the start button
+ * waits for enough of a field.
  */
 export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: BattleLobbyProps) {
   const host = state.players.find((p) => p.host);
   const gameRunning = state.phase !== 'lobby';
-  const alone = state.players.length === 1;
-  const duel = state.mode === 'duel';
-  const battle = state.mode === 'battle';
   const seated = state.players.filter((p) => !p.left).length;
-  const duelReady = seated >= 2;
-  const battleReady = seated >= BATTLE_MIN_PLAYERS;
+  const ready = seated >= BATTLE_MIN_PLAYERS;
 
   return (
     <div className="home">
       <div className="home-inner battle-inner">
         <header className="home-header">
-          <span className="splash-eyebrow">
-            {duel ? 'Duel' : battle ? 'Battle' : 'Survival'}
-          </span>
+          <span className="splash-eyebrow">Battle</span>
           <h1 className="home-title battle-lobby-title">Lobby</h1>
         </header>
 
@@ -119,40 +113,23 @@ export function BattleLobby({ state, code, selfId, isHost, onStart, onLeave }: B
             </p>
           ) : isHost ? (
             <>
-              {duel && !duelReady && (
+              {ready ? (
                 <p className="battle-status">
-                  A duel needs two — share the code and wait for your opponent.
+                  {seated} of {BATTLE_MAX_PLAYERS} seats filled — start now, or wait for more.
                 </p>
-              )}
-              {battle &&
-                (battleReady ? (
-                  <p className="battle-status">
-                    {seated} of {BATTLE_MAX_PLAYERS} seats filled — start now, or wait for more.
-                  </p>
-                ) : (
-                  <p className="battle-status">
-                    A battle needs at least two — share the code and gather up to{' '}
-                    {BATTLE_MAX_PLAYERS} players.
-                  </p>
-                ))}
-              {!duel && !battle && alone && (
+              ) : (
                 <p className="battle-status">
-                  Share the code so friends can join — or start solo to warm up.
+                  A battle needs at least two — share the code and gather up to{' '}
+                  {BATTLE_MAX_PLAYERS} players.
                 </p>
               )}
               <button
                 type="button"
                 className="btn btn-primary battle-wide-btn"
-                disabled={(duel && !duelReady) || (battle && !battleReady)}
+                disabled={!ready}
                 onClick={onStart}
               >
-                {state.game === 0
-                  ? duel
-                    ? 'Start the duel'
-                    : battle
-                      ? 'Start the battle'
-                      : 'Start game'
-                  : 'Start another game'}
+                {state.game === 0 ? 'Start the battle' : 'Start another game'}
               </button>
             </>
           ) : (

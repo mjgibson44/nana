@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { ordinal, rankByElimination, type BattleState } from '../game/battle';
-import { DUEL_PILE_LIMIT } from '../game/modes';
+import { BATTLE_PILE_LIMIT } from '../game/modes';
 
 interface BattleSpectatorProps {
   /** The host's latest broadcast — the card re-renders live off it. */
@@ -98,7 +98,7 @@ export function BattleSpectator({
                   {fallen ? (
                     <>{player.left ? 'left' : 'out'} 💀</>
                   ) : (
-                    `${player.tiles}/${DUEL_PILE_LIMIT} tiles`
+                    `${player.tiles}/${BATTLE_PILE_LIMIT} tiles`
                   )}
                 </span>
               </li>

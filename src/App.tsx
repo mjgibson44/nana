@@ -5,51 +5,35 @@ import { loadDictionary } from './game/dictionary';
 import { extendPuzzle, generatePuzzle } from './game/generator';
 import { BOARD_SIZE, boardBounds, scoreBoard, wordScore } from './game/levels';
 import {
+  BATTLE_DRIP_SECONDS,
+  BATTLE_PILE_LIMIT,
+  BATTLE_PILE_URGENT,
+  BATTLE_PILE_WARN,
+  BATTLE_ROUNDS,
+  BATTLE_ROUND_SECONDS,
+  BATTLE_START_TILES,
   DOOR_INFO,
-  DUEL_DRIP_SECONDS,
-  DUEL_PILE_LIMIT,
-  DUEL_PILE_URGENT,
-  DUEL_PILE_WARN,
-  DUEL_ROUNDS,
-  DUEL_ROUND_SECONDS,
-  DUEL_START_TILES,
   ENDLESS_CLEAR_TILES,
   ENDLESS_CONNECT_BONUS,
   ENDLESS_LOOSE_LIMIT,
   ENDLESS_START_TILES,
   PACE_NAMES,
   PACE_OPTIONS,
-  PUZZLE_BATCH_TILES,
-  PUZZLE_LOCK_OPTIONS,
-  PUZZLE_SIZE_OPTIONS,
-  PUZZLE_START_TILES,
-  PUZZLE_VARIANT_NAMES,
-  PUZZLE_VARIANT_OPTIONS,
   TUTORIAL_INFO,
-  duelAttackMultiplier,
-  duelAttackTiles,
-  duelDripTiles,
-  duelDripTilesAt,
+  battleAttackMultiplier,
+  battleAttackTiles,
+  battleDripTiles,
+  battleDripTilesAt,
   endlessDripSeconds,
   endlessDripTiles,
   endlessInitialSeconds,
   formatSeconds,
-  puzzleRefillTiles,
   type GameDoor,
   type GameMode,
-  type PuzzleLock,
-  type PuzzleSize,
-  type PuzzleVariant,
   type SoloPace,
 } from './game/modes';
 import { doorSeen, markDoorSeen, markTutorialSeen, tutorialSeen } from './game/onboarding';
-import {
-  loadBlitzSetup,
-  loadPuzzleSetup,
-  saveBlitzSetup,
-  savePuzzleSetup,
-  type PuzzleSetup,
-} from './game/setups';
+import { loadSoloSetup, saveSoloSetup } from './game/setups';
 import {
   GAP,
   anchorForGapTarget,
@@ -68,8 +52,6 @@ import {
   battleWinners,
   codeFromHash,
   createTileStream,
-  rankPlayers,
-  type BattleMode,
   type BattleState,
   type TileStream,
 } from './game/battle';
@@ -87,8 +69,7 @@ import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { GameSummary, type ScoredWord } from './components/GameSummary';
 import { Grid } from './components/Grid';
 import { HomeScreen } from './components/HomeScreen';
-import { HowToModal } from './components/HowToModal';
-import { CloseIcon, GapIcon } from './components/icons';
+import { CheckIcon, CloseIcon, GapIcon } from './components/icons';
 import { Menu } from './components/Menu';
 import { ModeInfoDialog } from './components/ModeInfoDialog';
 import { PauseScreen } from './components/PauseScreen';
@@ -108,9 +89,6 @@ const UNDO_DEPTH = 50;
 
 /** How long the splash card stays up before bowing out. */
 const SPLASH_MS = 1700;
-
-/** The between-rounds battle scoreboard gets longer — five seconds of reading. */
-const ROUND_SPLASH_MS = 5000;
 
 /** Holding a touch this long on the board picks the staged word up to drag. */
 const HOLD_DRAG_MS = 300;
@@ -200,7 +178,7 @@ function alignPinch(
 const PLAYER_NAME_KEY = 'nana.player.v1';
 
 /** How the game came to an end — the summary's headline depends on it. */
-type EndReason = 'won' | 'timeout' | 'buried';
+type EndReason = 'won' | 'buried';
 
 /**
  * The header clock. It's either counting toward a wall-clock deadline or
@@ -214,13 +192,6 @@ type Countdown = { kind: 'running'; endsAt: number } | { kind: 'paused'; remaini
 function runningCountdown(seconds: number): Countdown {
   return { kind: 'running', endsAt: Date.now() + seconds * 1000 };
 }
-
-/**
- * The Countdown's counting-up twin, for Puzzle's elapsed clock: `base` is the
- * time already banked, and a running watch adds everything since `since`. It
- * pauses exactly when the countdowns do, so reading a dialog stays free.
- */
-type Stopwatch = { kind: 'running'; base: number; since: number } | { kind: 'paused'; base: number };
 
 export type CellStatus = 'valid' | 'invalid' | 'isolated' | 'disconnected';
 
@@ -300,14 +271,12 @@ function withPicks(interaction: Interaction, picks: number[]): Interaction {
 }
 
 /**
- * The setup sheet a solo door is waiting on, holding its settings as they
+ * The setup sheet the Solo door is waiting on, holding its settings as they
  * currently stand on screen. They're a draft: the sheet opens on the last
  * game's setup and nothing reaches a game until Play is pressed, so backing
  * out changes nothing and a setting can always be changed back.
  */
-type DoorSetup =
-  | { door: 'blitz'; pace: SoloPace }
-  | { door: 'puzzle'; variant: PuzzleVariant; lock: PuzzleLock; size: PuzzleSize };
+type DoorSetup = { pace: SoloPace };
 
 function shuffleArray<T>(items: T[]): T[] {
   const arr = items.slice();
@@ -352,9 +321,6 @@ export default function App() {
 
   /* ------------------------------ battle state ------------------------------ */
 
-  /** Which multiplayer door the battle screen opens: Endless Battle, Duel,
-   * or the free-for-all Battle. */
-  const [battleIntent, setBattleIntent] = useState<BattleMode>('endless');
   /** The live multiplayer connection, or null outside one. */
   const [battle, setBattle] = useState<BattleHandle | null>(null);
   /** The host's latest broadcast: roster, scores, phase, pauses. */
@@ -386,17 +352,15 @@ export default function App() {
    * while a multiplayer game is being played (or looked back on).
    */
   const battleStream = useRef<TileStream | null>(null);
-  /** Duel: where this player's incoming attack tiles are drawn from. Seeded
-   * off the shared seed and this player's own id, so attacks arrive as a
-   * count and the letters never cross the wire either. */
+  /** Where this player's incoming attack tiles are drawn from. Seeded off
+   * the shared seed and this player's own id, so attacks arrive as a count
+   * and the letters never cross the wire either. */
   const attackStream = useRef<TileStream | null>(null);
   /** The battle connection for callbacks that shouldn't re-bind on renders. */
   const battleRef = useRef<BattleHandle | null>(null);
 
   const inBattle = battle !== null;
   const battlePhase = battleState?.phase ?? null;
-  /** Whether the how-to reference is up, opened from a menu. */
-  const [showHowTo, setShowHowTo] = useState(false);
   /**
    * A door chosen on the home screen that hasn't been walked through yet, and
    * what's holding it up: the tutorial, for a player's very first game, and
@@ -411,36 +375,16 @@ export default function App() {
   /** Whether the tutorial's own card is up, offering the lesson before it
    * starts. Any door waiting behind it is in `pendingDoor`. */
   const [tutorialIntro, setTutorialIntro] = useState(false);
-  /** The clock, in modes that have one. Null in the tutorial, in a duel's
+  /** The clock, in modes that have one. Null in the tutorial, in a battle's
    * final round, and once a game ends. */
   const [countdown, setCountdown] = useState<Countdown | null>(null);
   /** Endless: 'initial' is the opening phase; 'drip' is ever after, when
    * batches arrive on the clock and the loose count is live. */
   const [endlessPhase, setEndlessPhase] = useState<'initial' | 'drip'>('initial');
-  /**
-   * The solo doors open on the setup last played through them, from this visit
-   * or the last one — see src/game/setups.ts. Each setting lives in its own
-   * piece of state from there on, because the game being played reads them one
-   * at a time; the stored setup is only ever the sheet's opening position.
-   */
-  const [storedPuzzle] = useState(loadPuzzleSetup);
-
-  /** Endless: which pace the drip runs at — Blitz's Regular or Fast.
-   * Survival always plays regular, so everyone's shared deal arrives on the
-   * same schedule. */
-  const [soloPace, setSoloPace] = useState<SoloPace>(() => loadBlitzSetup().pace);
-  /** Puzzle: the fixed board being played on, chosen on the way in. */
-  const [puzzleSize, setPuzzleSize] = useState<PuzzleSize>(storedPuzzle.size);
-  /** Puzzle: where the tiles come from, chosen on the way in — Solve, which
-   * refills a cleared pile, or Flow, which refills as you place. */
-  const [puzzleVariant, setPuzzleVariant] = useState<PuzzleVariant>(storedPuzzle.variant);
-  /** Puzzle: whether a confirmed word is still yours to move, chosen on the
-   * way in. Independent of the variant — either style plays either way. */
-  const [puzzleLock, setPuzzleLock] = useState<PuzzleLock>(storedPuzzle.lock);
-  /** Puzzle: the elapsed clock, counting up. Null in every other mode. */
-  const [stopwatch, setStopwatch] = useState<Stopwatch | null>(null);
-  /** Puzzle: whether the Finish button is asking "really?". */
-  const [confirmFinish, setConfirmFinish] = useState(false);
+  /** Endless: which pace the drip runs at — Solo's Regular or Fast, chosen
+   * on the setup sheet. The sheet opens on the pace last played, from this
+   * visit or the last one — see src/game/setups.ts. */
+  const [soloPace, setSoloPace] = useState<SoloPace>(() => loadSoloSetup().pace);
   /** Whether the player has put a solo game on hold. Every clock stops and
    * the board goes behind the pause screen until they come back. */
   const [paused, setPaused] = useState(false);
@@ -449,12 +393,12 @@ export default function App() {
   /** Endless: how many drip intervals have run out (the opening phase isn't
    * one), which sets how big the next batch is. */
   const [dripsElapsed, setDripsElapsed] = useState(0);
-  /** Duel: which round the screw is on — 1, 2, or the endless final 3. */
-  const [duelRound, setDuelRound] = useState(1);
-  /** Duel: the 20-second drip clock, separate from the round clock. */
-  const [duelDrip, setDuelDrip] = useState<Countdown | null>(null);
-  /** Duel: how many drips have landed, which sizes the next one. */
-  const duelDripIndex = useRef(0);
+  /** Battle: which round the screw is on — 1, 2, or the endless final 3. */
+  const [battleRound, setBattleRound] = useState(1);
+  /** Battle: the 20-second drip clock, separate from the round clock. */
+  const [battleDrip, setBattleDrip] = useState<Countdown | null>(null);
+  /** Battle: how many drips have landed, which sizes the next one. */
+  const battleDripIndex = useRef(0);
   /** Tutorial: which step of TUTORIAL_SCRIPT is being worked, counting from 1,
    * and then TUTORIAL_DONE once they're all played. */
   const [tutorialStep, setTutorialStep] = useState(1);
@@ -510,7 +454,7 @@ export default function App() {
   /** The stats being looked at, or null while the stats page is closed. */
   const [statsView, setStatsView] = useState<Stats | null>(null);
   /**
-   * Board-and-pile snapshots, oldest first, for undo. Duels never record —
+   * Board-and-pile snapshots, oldest first, for undo. Battles never record —
    * placed words are permanent there, so there is nothing to take back.
    *
    * `picks` is the word staged above the pile at the time, as pile indices
@@ -570,37 +514,20 @@ export default function App() {
   const expiryHandled = useRef<number | null>(null);
   const dripHandled = useRef<number | null>(null);
 
-  /** Start a fresh game. `pace` sets the Endless drip's schedule and `puzzle`
-   * which Puzzle is played on which board; each is ignored by the other modes
-   * (`puzzle` defaults to the last one played). Multiplayer games hand in the
-   * shared deal's opening letters; solo games draw their own at random. */
+  /** Start a fresh game. `pace` sets the Endless drip's schedule and is
+   * ignored by the other modes. Multiplayer games hand in the shared deal's
+   * opening letters; solo games draw their own at random. */
   const newGame = useCallback(
-    (
-      nextMode: GameMode,
-      pace: SoloPace,
-      dealtLetters?: string[],
-      puzzle?: PuzzleSetup,
-    ) => {
-      const boardSize = puzzle?.size ?? puzzleSize;
-      const variant = puzzle?.variant ?? puzzleVariant;
-      const lock = puzzle?.lock ?? puzzleLock;
+    (nextMode: GameMode, pace: SoloPace, dealtLetters?: string[]) => {
       setMode(nextMode);
       setSoloPace(pace);
-      if (puzzle !== undefined) {
-        setPuzzleSize(puzzle.size);
-        setPuzzleVariant(puzzle.variant);
-        setPuzzleLock(puzzle.lock);
-      }
       const opening =
         dealtLetters ??
         // The tutorial deals its first word spelled out in a row, rather than a
         // shuffle to make sense of — step one is about getting a word down.
         (nextMode === 'tutorial'
           ? [...TUTORIAL_SCRIPT[0].tiles]
-          : nextMode === 'puzzle'
-            ? // Bounded by the board's span, so the deal is known to fit it.
-              generatePuzzle(COMMON_WORDS, PUZZLE_START_TILES, Math.random, boardSize).letters
-            : generatePuzzle(COMMON_WORDS, ENDLESS_START_TILES).letters);
+          : generatePuzzle(COMMON_WORDS, ENDLESS_START_TILES).letters);
       setRack(opening);
       setBoard({});
       setDrag(null);
@@ -608,8 +535,7 @@ export default function App() {
       // Every game opens with the board's middle square already chosen, so
       // typing previews the first word right away — confirming it is still the
       // player's move.
-      const mid =
-        nextMode === 'puzzle' ? Math.floor((boardSize - 1) / 2) : Math.floor(BOARD_SIZE / 2);
+      const mid = Math.floor(BOARD_SIZE / 2);
       setInteraction({ kind: 'place', anchor: keyOf(mid, mid), dir: 'across', picks: [] });
       setLastDir('across');
       setHighlightedWord(null);
@@ -625,54 +551,31 @@ export default function App() {
         nextMode === 'endless'
           ? {
               kind: 'start',
-              // The same Endless game opens several doors; the card names the
-              // one this player walked through.
-              eyebrow: battleRef.current ? 'Survival' : PACE_NAMES[pace],
+              eyebrow: PACE_NAMES[pace],
               title: 'Game on!',
               note: `${opening.length} tiles · ${formatSeconds(endlessInitialSeconds(pace))} to place them`,
             }
-          : nextMode === 'puzzle'
+          : nextMode === 'battle'
             ? {
-                kind: 'start',
-                eyebrow: `${PUZZLE_VARIANT_NAMES[variant]} · ${boardSize}×${boardSize}`,
-                title: 'Game on!',
-                // Both dials get a clause, so the card says what this game's
-                // rules actually are rather than which preset they came from.
-                note: [
-                  `${opening.length} tiles`,
-                  lock === 'locked' ? 'every word locks' : null,
-                  variant === 'flow'
-                    ? `your pile refills to ${PUZZLE_START_TILES}`
-                    : `connect them all for ${PUZZLE_BATCH_TILES} more`,
-                ]
-                  .filter((clause) => clause !== null)
-                  .join(' · '),
+                kind: 'battleRound',
+                round: 1,
+                final: false,
+                multiplier: battleAttackMultiplier(1),
+                dripTiles: battleDripTiles(1),
               }
-            : nextMode === 'duel'
-              ? {
-                  kind: 'duelRound',
-                  // The same duel game opens two doors; the card names the
-                  // one this lobby is playing.
-                  eyebrow: battleRef.current?.snapshot().mode === 'battle' ? 'Battle' : 'Duel',
-                  round: 1,
-                  final: false,
-                  multiplier: duelAttackMultiplier(1),
-                  dripTiles: duelDripTiles(1),
-                }
-              : null,
+            : null,
       );
       setEndReason(null);
       setEndlessPhase('initial');
       setDripsElapsed(0);
-      setDuelRound(1);
-      duelDripIndex.current = 0;
-      setDuelDrip(nextMode === 'duel' ? runningCountdown(DUEL_DRIP_SECONDS) : null);
+      setBattleRound(1);
+      battleDripIndex.current = 0;
+      setBattleDrip(nextMode === 'battle' ? runningCountdown(BATTLE_DRIP_SECONDS) : null);
       setTutorialStep(1);
       tutorialSkips.current = 0;
       setToast(null);
       setTileDrop(null);
       setZoom(1);
-      setConfirmFinish(false);
       // A fresh game is never handed over already on hold.
       setPaused(false);
       finished.current = false;
@@ -681,22 +584,19 @@ export default function App() {
       setCountdown(
         nextMode === 'endless'
           ? runningCountdown(endlessInitialSeconds(pace))
-          : nextMode === 'duel'
-            ? runningCountdown(DUEL_ROUND_SECONDS)
+          : nextMode === 'battle'
+            ? runningCountdown(BATTLE_ROUND_SECONDS)
             : null,
-      );
-      setStopwatch(
-        nextMode === 'puzzle' ? { kind: 'running', base: 0, since: Date.now() } : null,
       );
       setGameId((id) => id + 1);
     },
-    [puzzleSize, puzzleVariant, puzzleLock],
+    [],
   );
 
   /** Start a mode and put its board on screen. */
   const startGame = useCallback(
-    (nextMode: GameMode, pace: SoloPace = 'regular', puzzle?: PuzzleSetup) => {
-      newGame(nextMode, pace, undefined, puzzle);
+    (nextMode: GameMode, pace: SoloPace = 'regular') => {
+      newGame(nextMode, pace);
       setScreen('game');
     },
     [newGame],
@@ -705,10 +605,8 @@ export default function App() {
   const returnHome = useCallback(() => {
     setScreen('home');
     setCountdown(null);
-    setDuelDrip(null);
-    setStopwatch(null);
+    setBattleDrip(null);
     setShowSummary(false);
-    setConfirmFinish(false);
     setPaused(false);
     setSplash(null);
   }, []);
@@ -716,9 +614,8 @@ export default function App() {
   /* ------------------------------ the front door ---------------------------- */
 
   /**
-   * Walk through a door for real: the solo pair to their setup sheet — Blitz's
-   * speed, Puzzle's style and board — and the multiplayer pair to their lobby.
-   * Whatever had to be read first has been read by now.
+   * Walk through a door for real: Solo to its setup sheet — its speed — and
+   * Battle to its lobby. Whatever had to be read first has been read by now.
    *
    * The sheet opens on the last game's setup, which is nearly always the one
    * wanted again, so playing the same thing twice is one tap on Play.
@@ -726,25 +623,15 @@ export default function App() {
   const enterDoor = useCallback(
     (door: GameDoor) => {
       setPendingDoor(null);
-      if (door === 'blitz') {
-        setDoorSetup({ door: 'blitz', pace: soloPace });
-        return;
-      }
-      if (door === 'puzzle') {
-        setDoorSetup({
-          door: 'puzzle',
-          variant: puzzleVariant,
-          lock: puzzleLock,
-          size: puzzleSize,
-        });
+      if (door === 'solo') {
+        setDoorSetup({ pace: soloPace });
         return;
       }
       setBattleNotice(null);
       setBattleError(null);
-      setBattleIntent(door === 'survival' ? 'endless' : door === 'battle' ? 'battle' : 'duel');
       setScreen('battle');
     },
-    [soloPace, puzzleVariant, puzzleLock, puzzleSize],
+    [soloPace],
   );
 
   /**
@@ -755,18 +642,8 @@ export default function App() {
   const playSetup = useCallback(() => {
     if (doorSetup === null) return;
     setDoorSetup(null);
-    if (doorSetup.door === 'blitz') {
-      saveBlitzSetup({ pace: doorSetup.pace });
-      startGame('endless', doorSetup.pace);
-    } else {
-      const puzzle: PuzzleSetup = {
-        variant: doorSetup.variant,
-        lock: doorSetup.lock,
-        size: doorSetup.size,
-      };
-      savePuzzleSetup(puzzle);
-      startGame('puzzle', 'regular', puzzle);
-    }
+    saveSoloSetup({ pace: doorSetup.pace });
+    startGame('endless', doorSetup.pace);
   }, [doorSetup, startGame]);
 
   /**
@@ -863,7 +740,6 @@ export default function App() {
     const code = codeFromHash(window.location.hash);
     if (code === null) return;
     setJoinCodePrefill(code);
-    setBattleIntent('endless');
     setScreen('battle');
     try {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -876,22 +752,14 @@ export default function App() {
   const handleBattleStart = useCallback(
     (seed: string) => {
       const handle = battleRef.current;
-      const lobbyMode = handle?.snapshot().mode ?? 'endless';
-      // A Battle is Duel's game for a room, so both play under GameMode
-      // 'duel': permanent words, attack tiles, the same pile limit.
-      const duelish = lobbyMode === 'duel' || lobbyMode === 'battle';
       const stream = createTileStream(seed);
       battleStream.current = stream;
-      attackStream.current =
-        duelish && handle ? createTileStream(`${seed}/attacks/${handle.selfId}`) : null;
+      attackStream.current = handle
+        ? createTileStream(`${seed}/attacks/${handle.selfId}`)
+        : null;
       setShowBattleResults(false);
       setConfirmBattle(null);
-      // Survival is always the regular pace — one shared deal, one schedule.
-      newGame(
-        duelish ? 'duel' : 'endless',
-        'regular',
-        stream.next(duelish ? DUEL_START_TILES : ENDLESS_START_TILES),
-      );
+      newGame('battle', 'regular', stream.next(BATTLE_START_TILES));
       setScreen('game');
     },
     [newGame],
@@ -903,7 +771,7 @@ export default function App() {
     attackStream.current = null;
     setScreen('battle');
     setCountdown(null);
-    setDuelDrip(null);
+    setBattleDrip(null);
     setShowSummary(false);
     setShowBattleResults(false);
     setSplash(null);
@@ -922,16 +790,16 @@ export default function App() {
     setShowBattleResults(false);
     setConfirmBattle(null);
     setCountdown(null);
-    setDuelDrip(null);
+    setBattleDrip(null);
     setShowSummary(false);
     setSplash(null);
     setScreen('home');
     setBattleNotice(message);
   }, []);
 
-  /** Duel and Battle: someone's word landed — their attack tiles join our
-   * pile. The letters are drawn locally from the attack stream; only the
-   * count crossed the network. */
+  /** Someone's word landed — our share of their attack joins our pile. The
+   * letters are drawn locally from the attack stream; only the count
+   * crossed the network. */
   const handleAttack = useCallback((count: number) => {
     const stream = attackStream.current;
     if (!stream || count <= 0 || finished.current) return;
@@ -942,12 +810,10 @@ export default function App() {
     playSound('attack');
     const serial = ++dropSerial.current;
     setTileDrop({ count: letters.length, serial });
-    // A battle attack arrives as a share of somebody's word, and the wire
-    // doesn't say whose — a duel's can only be the opponent's.
-    const from =
-      battleRef.current?.snapshot().mode === 'battle' ? 'a rival' : 'your opponent';
+    // An attack arrives as a share of somebody's word, and the wire doesn't
+    // say whose.
     setToast({
-      text: `Incoming! +${letters.length} tile${letters.length === 1 ? '' : 's'} from ${from}`,
+      text: `Incoming! +${letters.length} tile${letters.length === 1 ? '' : 's'} from a rival`,
       serial,
     });
   }, []);
@@ -980,7 +846,7 @@ export default function App() {
       setBattleBusy('Opening a lobby…');
       setBattleError(null);
       try {
-        const handle = await hostBattle(name, battleIntent, battleEvents);
+        const handle = await hostBattle(name, battleEvents);
         battleRef.current = handle;
         setBattle(handle);
         setBattleState(handle.snapshot());
@@ -990,7 +856,7 @@ export default function App() {
         setBattleBusy(null);
       }
     },
-    [battleIntent, battleEvents, rememberPlayerName],
+    [battleEvents, rememberPlayerName],
   );
 
   const joinGame = useCallback(
@@ -1025,7 +891,7 @@ export default function App() {
     setShowBattleResults(false);
     setConfirmBattle(null);
     setCountdown(null);
-    setDuelDrip(null);
+    setBattleDrip(null);
     setShowSummary(false);
     setSplash(null);
     setScreen('home');
@@ -1061,12 +927,12 @@ export default function App() {
   /* ------------------------------ locked boards ----------------------------- */
 
   /**
-   * Whether a word, once placed, is there for good — always so in a Duel, and
-   * in a Puzzle set up that way. A locked board takes no edits at all: nothing
-   * is dragged, deleted or taken back, and because a mistake can't be
-   * unpicked, only real words are let down in the first place.
+   * Whether a word, once placed, is there for good — always so in a Battle.
+   * A locked board takes no edits at all: nothing is dragged, deleted or
+   * taken back, and because a mistake can't be unpicked, only real words are
+   * let down in the first place.
    */
-  const boardLocked = mode === 'duel' || (mode === 'puzzle' && puzzleLock === 'locked');
+  const boardLocked = mode === 'battle';
 
   /**
    * Remember the board, pile and staged word as they are, so the change about
@@ -1151,16 +1017,9 @@ export default function App() {
     [board, dictionary],
   );
 
-  /** The cells in play. Puzzle plays on a fixed square with real edges;
-   * everywhere else the board grows whenever tiles come near an edge, so it
-   * can never actually be run out of. */
-  const bounds = useMemo(
-    () =>
-      mode === 'puzzle'
-        ? { minRow: 0, minCol: 0, maxRow: puzzleSize - 1, maxCol: puzzleSize - 1 }
-        : boardBounds(board),
-    [mode, puzzleSize, board],
-  );
+  /** The cells in play. The board grows whenever tiles come near an edge,
+   * so it can never actually be run out of. */
+  const bounds = useMemo(() => boardBounds(board), [board]);
 
   // Growing at the top or left prepends rows and columns, which would shove
   // the tiles the player is looking at down and across the screen. Nudge the
@@ -1501,25 +1360,17 @@ export default function App() {
       // to win, and a battle's is played once the whole field is settled.
       if (reason !== 'won') playSound('lose');
       setCountdown(null);
-      setDuelDrip(null);
-      // The elapsed clock stops where the game did.
-      setStopwatch((prev) =>
-        prev && prev.kind === 'running'
-          ? { kind: 'paused', base: prev.base + Math.max(0, Date.now() - prev.since) }
-          : prev,
-      );
+      setBattleDrip(null);
       recordGame(runningScore, words.length);
       clearFocus();
     },
     [validation, runningScore, clearFocus, inBattle],
   );
 
-  // The splash announces and then gets out of the way. The between-rounds
-  // scoreboard has more to read, so it lingers longer.
+  // The splash announces and then gets out of the way.
   useEffect(() => {
     if (splash === null) return;
-    const ms = splash.kind === 'round' ? ROUND_SPLASH_MS : SPLASH_MS;
-    const timer = window.setTimeout(() => setSplash(null), ms);
+    const timer = window.setTimeout(() => setSplash(null), SPLASH_MS);
     return () => window.clearTimeout(timer);
   }, [splash]);
 
@@ -1536,12 +1387,7 @@ export default function App() {
   const battlePaused = inBattle && ((battleState?.paused ?? false) || selfReconnecting);
   const clockPaused = inBattle
     ? battlePaused
-    : paused ||
-      showHowTo ||
-      splash !== null ||
-      settingsOpen ||
-      statsView !== null ||
-      confirmFinish;
+    : paused || splash !== null || settingsOpen || statsView !== null;
 
   // Flip the clocks between running and paused as overlays come and go.
   // Written as normalization (rather than one effect per transition) so a
@@ -1559,32 +1405,18 @@ export default function App() {
       return prev;
     };
     setCountdown(normalize);
-    setDuelDrip(normalize);
-    // The elapsed clock holds for the same overlays, counting the other way.
-    setStopwatch((prev) => {
-      if (!prev) return prev;
-      if (clockPaused && prev.kind === 'running') {
-        return { kind: 'paused', base: prev.base + Math.max(0, Date.now() - prev.since) };
-      }
-      if (!clockPaused && prev.kind === 'paused') {
-        return { kind: 'running', base: prev.base, since: Date.now() };
-      }
-      return prev;
-    });
-  }, [clockPaused, countdown, duelDrip, stopwatch]);
+    setBattleDrip(normalize);
+  }, [clockPaused, countdown, battleDrip]);
 
   // The clock's own heartbeat: only ticks while genuinely counting.
   const [clockNow, setClockNow] = useState(() => Date.now());
   useEffect(() => {
-    const running =
-      countdown?.kind === 'running' ||
-      duelDrip?.kind === 'running' ||
-      stopwatch?.kind === 'running';
+    const running = countdown?.kind === 'running' || battleDrip?.kind === 'running';
     if (!running || complete) return;
     setClockNow(Date.now());
     const timer = window.setInterval(() => setClockNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, [countdown, duelDrip, stopwatch, complete]);
+  }, [countdown, battleDrip, complete]);
 
   const remainingMs =
     countdown === null
@@ -1593,53 +1425,29 @@ export default function App() {
         ? countdown.remainingMs
         : Math.max(0, countdown.endsAt - clockNow);
 
-  /** Puzzle's elapsed clock, in whole seconds. Null in every other mode. */
-  const elapsedSeconds =
-    stopwatch === null
-      ? null
-      : Math.floor(
-          (stopwatch.kind === 'paused'
-            ? stopwatch.base
-            : stopwatch.base + Math.max(0, clockNow - stopwatch.since)) / 1000,
-        );
 
   /**
    * Deal bonus tiles into the pile — from the shared stream in multiplayer so
    * every player draws the same letters, grown off this player's own board
    * otherwise — with their landing animation and, unless `message` is null, a
    * banner saying what just happened.
-   *
-   * `grownFrom` is the board the letters are grown off, for a caller that has
-   * just changed it and holds a newer one than the render this was made in —
-   * Puzzle Flow's refill, which follows a placement in the same breath.
-   *
-   * `partOfMove` says these tiles arrived because the player placed a word,
-   * not because a clock or a cleared pile brought them, so undoing that move
-   * takes the refill back with it. Everything else is the game's own doing and
-   * survives an undo — see below.
    */
   const dealBonusTiles = useCallback(
-    (
-      count: number,
-      message: string | null,
-      { grownFrom = board, partOfMove = false }: { grownFrom?: TileMap; partOfMove?: boolean } = {},
-    ) => {
+    (count: number, message: string | null) => {
       if (count <= 0) return;
       const letters =
         battleRef.current !== null && battleStream.current !== null
           ? battleStream.current.next(count)
-          : extendPuzzle(grownFrom, bounds, COMMON_WORDS, count).letters;
+          : extendPuzzle(board, bounds, COMMON_WORDS, count).letters;
       setRack((prev) => [...prev, ...letters]);
       // The dealt tiles join every remembered pile too: undoing a move must
       // take back the move alone, never disappear tiles the clock has dealt.
-      if (!partOfMove) {
-        setHistory((past) =>
-          past.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
-        );
-        setFuture((ahead) =>
-          ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
-        );
-      }
+      setHistory((past) =>
+        past.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
+      );
+      setFuture((ahead) =>
+        ahead.map((snap) => ({ ...snap, rack: [...snap.rack, ...letters] })),
+      );
       playSound('deal');
       const serial = ++dropSerial.current;
       setTileDrop({ count: letters.length, serial });
@@ -1665,9 +1473,9 @@ export default function App() {
   /**
    * The round clock ran out. In Endless that's the next batch of tiles
    * arriving — and the first expiry is the end of the opening phase, which
-   * also switches the loose count on. In a Duel it's the next round starting,
-   * with a bigger multiplier and drip. The ref keeps one expiry from being
-   * handled twice while the new countdown state lands.
+   * also switches the loose count on. In a Battle it's the next round
+   * starting, with a bigger multiplier and drip. The ref keeps one expiry
+   * from being handled twice while the new countdown state lands.
    */
   useEffect(() => {
     if (complete || countdown?.kind !== 'running') return;
@@ -1675,19 +1483,18 @@ export default function App() {
     if (expiryHandled.current === countdown.endsAt) return;
     expiryHandled.current = countdown.endsAt;
 
-    if (mode === 'duel') {
-      const next = Math.min(DUEL_ROUNDS, duelRound + 1);
-      setDuelRound(next);
+    if (mode === 'battle') {
+      const next = Math.min(BATTLE_ROUNDS, battleRound + 1);
+      setBattleRound(next);
       setSplash({
-        kind: 'duelRound',
-        eyebrow: battleState?.mode === 'battle' ? 'Battle' : 'Duel',
+        kind: 'battleRound',
         round: next,
-        final: next >= DUEL_ROUNDS,
-        multiplier: duelAttackMultiplier(next),
-        dripTiles: duelDripTiles(next),
+        final: next >= BATTLE_ROUNDS,
+        multiplier: battleAttackMultiplier(next),
+        dripTiles: battleDripTiles(next),
       });
-      // The final round has no clock — it runs until somebody overflows.
-      setCountdown(next < DUEL_ROUNDS ? runningCountdown(DUEL_ROUND_SECONDS) : null);
+      // The final round has no clock — it runs until the game is decided.
+      setCountdown(next < BATTLE_ROUNDS ? runningCountdown(BATTLE_ROUND_SECONDS) : null);
       return;
     }
 
@@ -1705,29 +1512,14 @@ export default function App() {
       const seconds = endlessDripSeconds(elapsed, soloPace);
       const batch = endlessDripTiles(elapsed, soloPace);
       dealBonusTiles(batch, `+${batch} tiles!`);
-      if (inBattle && battle && battleState) {
-        // Between rounds a battle shows the whole field's scores — this
-        // player's own straight from their board, the rest as last reported.
-        const standings = rankPlayers(
-          battleState.players
-            .filter((p) => !p.waiting)
-            .map((p) => (p.id === battle.selfId ? { ...p, score: runningScore } : p)),
-        ).map(({ player, rank }) => ({
-          rank,
-          name: player.name,
-          score: player.score,
-          self: player.id === battle.selfId,
-          buried: player.buried || player.left,
-        }));
-        setSplash({ kind: 'round', standings, seconds, tiles: batch });
-      } else if (
+      if (
         elapsed > 0 &&
         (seconds < endlessDripSeconds(elapsed - 1, soloPace) ||
           batch > endlessDripTiles(elapsed - 1, soloPace))
       ) {
-        // Solo keeps the pressure card: the wait got shorter or the batches
-        // grew, and the splash says so — holding the new clock until it's
-        // been read, the same way the opening splash does.
+        // The pressure card: the wait got shorter or the batches grew, and
+        // the splash says so — holding the new clock until it's been read,
+        // the same way the opening splash does.
         setSplash({ kind: 'speedup', seconds, tiles: batch, pace: soloPace });
       }
       setEndlessPhase('drip');
@@ -1739,15 +1531,11 @@ export default function App() {
     countdown,
     complete,
     mode,
-    duelRound,
+    battleRound,
     endlessPhase,
     dripsElapsed,
     soloPace,
     looseTiles,
-    inBattle,
-    battle,
-    battleState,
-    runningScore,
     finishGame,
     dealBonusTiles,
   ]);
@@ -1790,55 +1578,39 @@ export default function App() {
     if (over) playSound('overflow');
   }, [mode, endlessPhase, complete, looseTiles]);
 
-  /* --------------------------------- duel ----------------------------------- */
+  /* -------------------------------- battle ----------------------------------- */
 
   /**
-   * The Duel drip: every 20 seconds a batch lands in the pile, sized by the
-   * round the game is in. Both players draw drip k from the same stream, so
-   * the letters stay identical however their clocks drift.
+   * The Battle drip: every 20 seconds a batch lands in the pile, sized by
+   * the round the game is in. Every player draws drip k from the same
+   * stream, so the letters stay identical however their clocks drift.
    */
   useEffect(() => {
-    if (mode !== 'duel' || complete || duelDrip?.kind !== 'running') return;
-    if (duelDrip.endsAt - clockNow > 0) return;
-    if (dripHandled.current === duelDrip.endsAt) return;
-    dripHandled.current = duelDrip.endsAt;
+    if (mode !== 'battle' || complete || battleDrip?.kind !== 'running') return;
+    if (battleDrip.endsAt - clockNow > 0) return;
+    if (dripHandled.current === battleDrip.endsAt) return;
+    dripHandled.current = battleDrip.endsAt;
 
-    const index = duelDripIndex.current;
-    duelDripIndex.current = index + 1;
-    const batch = duelDripTilesAt(index);
+    const index = battleDripIndex.current;
+    battleDripIndex.current = index + 1;
+    const batch = battleDripTilesAt(index);
     dealBonusTiles(batch, `+${batch} tile${batch === 1 ? '' : 's'}`);
-    setDuelDrip(runningCountdown(DUEL_DRIP_SECONDS));
-  }, [clockNow, duelDrip, mode, complete, dealBonusTiles]);
+    setBattleDrip(runningCountdown(BATTLE_DRIP_SECONDS));
+  }, [clockNow, battleDrip, mode, complete, dealBonusTiles]);
 
   /**
-   * The Duel's one loss rule: let the pile exceed the limit — for any reason,
-   * at any moment — and the game is over on the spot.
+   * The Battle's one loss rule: let the pile exceed the limit — for any
+   * reason, at any moment — and you're out on the spot.
    */
   useEffect(() => {
-    if (mode !== 'duel' || complete) return;
-    if (rack.length > DUEL_PILE_LIMIT) finishGame('buried');
+    if (mode !== 'battle' || complete) return;
+    if (rack.length > BATTLE_PILE_LIMIT) finishGame('buried');
   }, [mode, complete, rack.length, finishGame]);
 
-  /** Duel: the opponent's side of the header — their pile against the limit.
-   * A Battle has up to seven of these, so it shows the standing count below
-   * instead. */
-  const duelOpponent = useMemo(() => {
-    if (mode !== 'duel' || !battle || !battleState || battleState.mode !== 'duel') return null;
-    const other = battleState.players.find(
-      (p) => p.id !== battle.selfId && !p.waiting && !p.left,
-    );
-    if (!other) return null;
-    return {
-      name: other.name,
-      tiles: other.tiles,
-      limit: DUEL_PILE_LIMIT,
-      out: other.buried,
-    };
-  }, [mode, battle, battleState]);
-
-  /** Battle: how much of the field is still standing, for the header. */
+  /** Battle: how much of the field is still standing, for the header. A
+   * room of rival piles won't fit it, so the count stands in for them. */
   const battleStanding = useMemo(() => {
-    if (mode !== 'duel' || !battleState || battleState.mode !== 'battle') return null;
+    if (mode !== 'battle' || !battleState) return null;
     const contestants = battleState.players.filter((p) => !p.waiting);
     if (contestants.length === 0) return null;
     return {
@@ -1857,7 +1629,7 @@ export default function App() {
    */
   const outSeen = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!battle || !battleState || battleState.mode !== 'battle' || battlePhase !== 'playing') {
+    if (!battle || !battleState || battlePhase !== 'playing') {
       outSeen.current = new Set();
       return;
     }
@@ -1881,19 +1653,15 @@ export default function App() {
   /* -------------------------------- endless --------------------------------- */
 
   /**
-   * Clearing the pile in Endless and Puzzle: the connect bonus banks (the
-   * live bonus swaps for it, so the score holds steady) and a fresh batch
-   * arrives — a timed drop's worth in Endless, a whole new twenty in Puzzle.
-   * The short wait lets the bonus land on the scoreboard before the pile
+   * Clearing the pile in Endless: the connect bonus banks (the live bonus
+   * swaps for it, so the score holds steady) and a fresh batch arrives. The
+   * short wait lets the bonus land on the scoreboard before the pile
    * refills.
-   *
-   * Puzzle Flow tops the pile back up word by word, so it's never empty and
-   * this never fires there — the clear bonus simply isn't one of its rewards.
    */
   useEffect(() => {
-    if ((mode !== 'endless' && mode !== 'puzzle') || complete || !boardScore.bonusEarned) return;
+    if (mode !== 'endless' || complete || !boardScore.bonusEarned) return;
     if (drag !== null || wordDrag !== null) return;
-    const batch = mode === 'puzzle' ? PUZZLE_BATCH_TILES : ENDLESS_CLEAR_TILES;
+    const batch = ENDLESS_CLEAR_TILES;
     const timer = window.setTimeout(() => {
       setBankedBonus((banked) => banked + ENDLESS_CONNECT_BONUS);
       dealBonusTiles(
@@ -1903,31 +1671,6 @@ export default function App() {
     }, 900);
     return () => window.clearTimeout(timer);
   }, [mode, complete, boardScore.bonusEarned, drag, wordDrag, dealBonusTiles]);
-
-  /* -------------------------------- battle ---------------------------------- */
-
-  /**
-   * This player's live place in the field, for the header. Their own score is
-   * read straight off the board — the host's echo of it can lag a beat — and
-   * everyone else's as last reported.
-   */
-  const battleRank = useMemo(() => {
-    if (!inBattle || !battle || !battleState || mode !== 'endless') return null;
-    const contestants = battleState.players
-      .filter((p) => !p.waiting)
-      .map((p) =>
-        p.id === battle.selfId ? { ...p, score: complete ? finalScore : runningScore } : p,
-      );
-    if (contestants.length === 0) return null;
-    const ranked = rankPlayers(contestants);
-    const self = ranked.find((entry) => entry.player.id === battle.selfId);
-    if (!self) return null;
-    return {
-      place: self.rank,
-      of: ranked.length,
-      buried: self.player.buried || (complete && endReason === 'buried'),
-    };
-  }, [inBattle, battle, battleState, mode, complete, finalScore, runningScore, endReason]);
 
   /**
    * Keep the host's standings current: every score or pile change reports in,
@@ -1951,8 +1694,8 @@ export default function App() {
    * the results) from re-raising them, or sounding the fanfare twice.
    *
    * Winning is the only outcome sounded here. A player who went under already
-   * heard it at the moment they did — which in a duel is the same moment this
-   * runs, and the reason `finishGame` bows out on its own guard below.
+   * heard it at the moment they did — the reason `finishGame` bows out on
+   * its own guard below.
    */
   const battleFinishSeen = useRef(false);
   useEffect(() => {
@@ -1969,19 +1712,6 @@ export default function App() {
     }
   }, [battle, battlePhase, battleState, screen, finishGame]);
 
-  // Going under in an Endless Battle isn't the end of the show — say so,
-  // once, while the survivors race on. A buried racer's score still holds
-  // its place there, so their board stays worth looking at; a Battle's
-  // eliminated player gets the spectator view below instead, and a duel
-  // ends the moment anyone goes under, so it never lands here.
-  const battleLobbyMode = battleState?.mode ?? null;
-  useEffect(() => {
-    if (!inBattle || battlePhase !== 'playing' || mode !== 'endless') return;
-    if (!complete || endReason !== 'buried') return;
-    const serial = ++dropSerial.current;
-    setToast({ text: 'You’re buried! The race goes on…', serial });
-  }, [inBattle, mode, battlePhase, complete, endReason]);
-
   /**
    * Battle: this player has been eliminated mid-game. Their board is dead —
    * nothing done on it can count for anything — so a spectator view covers
@@ -1990,11 +1720,7 @@ export default function App() {
    * results. A restart or a trip back to the lobby clears it with `complete`.
    */
   const spectating =
-    inBattle &&
-    battleLobbyMode === 'battle' &&
-    battlePhase === 'playing' &&
-    complete &&
-    endReason === 'buried';
+    inBattle && battlePhase === 'playing' && complete && endReason === 'buried';
 
   // Banners and landing animations clean themselves up.
   useEffect(() => {
@@ -2285,7 +2011,7 @@ export default function App() {
       for (const step of result.steps) next[step.key] = step.letter;
       const placed = new Set(result.steps.map((step) => step.key));
       // The words this placement makes or grows — what a locked board judges
-      // and what a duel's attacks are sized by.
+      // and what a battle's attacks are sized by.
       const newRuns = extractRuns(next).filter((run) =>
         run.cells.some((cell) => placed.has(cell)),
       );
@@ -2343,12 +2069,13 @@ export default function App() {
       // tile, a skipped tutorial step — so this is the one place the click goes.
       playSound('commit');
 
-      // Duel: the word that just landed hits the opponent — one tile per
-      // letter past three, scaled by the round. Only the growth counts: a
-      // word extended (or bridged) from words already on the board is worth
-      // the difference, not the whole word again. The best-paying word the
-      // placement made is the one that counts.
-      if (mode === 'duel' && battleRef.current) {
+      // Battle: the word that just landed hits the field — one tile per
+      // letter past three, scaled by the round, split across the rivals by
+      // the host. Only the growth counts: a word extended (or bridged) from
+      // words already on the board is worth the difference, not the whole
+      // word again. The best-paying word the placement made is the one that
+      // counts.
+      if (mode === 'battle' && battleRef.current) {
         const oldRuns = extractRuns(board);
         const attack = newRuns.reduce((top, run) => {
           const cells = new Set(run.cells);
@@ -2360,35 +2087,18 @@ export default function App() {
                 old.direction === run.direction && old.cells.every((cell) => cells.has(cell)),
             )
             .map((old) => old.word.length);
-          return Math.max(top, duelAttackTiles(run.word.length, duelRound, grewFrom));
+          return Math.max(top, battleAttackTiles(run.word.length, battleRound, grewFrom));
         }, 0);
         if (attack > 0) {
           battleRef.current.sendAttack(attack);
           const serial = ++dropSerial.current;
-          // In a battle the host splits the total across the field; the
-          // sender's banner talks about the whole volley either way.
-          const at =
-            battleRef.current.snapshot().mode === 'battle'
-              ? 'across your rivals'
-              : 'to your opponent';
+          // The host splits the total across the field; the sender's banner
+          // talks about the whole volley.
           setToast({
-            text: `Sent ${attack} tile${attack === 1 ? '' : 's'} ${at}!`,
+            text: `Sent ${attack} tile${attack === 1 ? '' : 's'} across your rivals!`,
             serial,
           });
         }
-      }
-
-      // Puzzle Flow: the pile tops straight back up to twenty, so it stands
-      // there however long the game runs. The letters are grown off the board
-      // as it now stands — the placement included — so each one is known to
-      // have a home on the board it was dealt for.
-      if (mode === 'puzzle' && puzzleVariant === 'flow') {
-        // No banner: the pile refilling in front of the player, tile by tile,
-        // is the whole explanation.
-        dealBonusTiles(puzzleRefillTiles(rack.length - result.steps.length), null, {
-          grownFrom: next,
-          partOfMove: true,
-        });
       }
 
       // The step's word is on the board — deal the next one's tiles.
@@ -2401,17 +2111,13 @@ export default function App() {
     [
       board,
       bounds,
-      // Only the count, which is what Flow's top-up is measured against.
-      rack.length,
       pickList,
       mode,
-      puzzleVariant,
       boardLocked,
-      duelRound,
+      battleRound,
       dictionary,
       tutorialStep,
       advanceTutorial,
-      dealBonusTiles,
       remember,
       clearFocus,
       rejectToast,
@@ -2586,13 +2292,13 @@ export default function App() {
       // The board owns the keyboard only while it's actually being played —
       // a held game hands it back, and Escape means resume there instead.
       // A spectator's board isn't being played at all any more.
-      if (screen !== 'game' || showHowTo || showBattleResults || battlePaused || paused) return;
+      if (screen !== 'game' || showBattleResults || battlePaused || paused) return;
       if (spectating) return;
       // The explainer stands over the tutorial's board on the way to a game.
       if (explainer !== null) return;
       if (settingsOpen || statsView !== null) return;
-      // So do the Finish confirm and a door's setup sheet.
-      if (confirmFinish || doorSetup !== null) return;
+      // So does a door's setup sheet.
+      if (doorSetup !== null) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
@@ -2665,7 +2371,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     screen,
-    showHowTo,
     showBattleResults,
     battlePaused,
     paused,
@@ -2673,7 +2378,6 @@ export default function App() {
     settingsOpen,
     statsView,
     explainer,
-    confirmFinish,
     doorSetup,
     interaction,
     picks,
@@ -2729,8 +2433,8 @@ export default function App() {
       }
 
       // A drop onto a locked board goes through the same commit flow as a typed
-      // word, so the dictionary judging — and a duel's attacks, or a Flow
-      // refill — still apply to a dragged tile.
+      // word, so the dictionary judging — and a battle's attacks — still
+      // apply to a dragged tile.
       if (boardLocked) {
         const lockedTarget = document.elementFromPoint(x, y);
         const lockedCell = lockedTarget?.closest('[data-cell]') as HTMLElement | null;
@@ -3173,34 +2877,34 @@ export default function App() {
   const timerSeconds = remainingMs === null ? null : Math.ceil(remainingMs / 1000);
 
   /**
-   * Duel: the header counts down to the next tile drop — the clock the player
-   * is actually racing — while the round chip says where the match stands.
-   * The round clock still runs underneath to advance the rounds.
+   * Battle: the header counts down to the next tile drop — the clock the
+   * player is actually racing — while the round chip says where the match
+   * stands. The round clock still runs underneath to advance the rounds.
    */
-  const duelDripMs =
-    duelDrip === null
+  const battleDripMs =
+    battleDrip === null
       ? null
-      : duelDrip.kind === 'paused'
-        ? duelDrip.remainingMs
-        : Math.max(0, duelDrip.endsAt - clockNow);
-  const duelDripSeconds = duelDripMs === null ? null : Math.ceil(duelDripMs / 1000);
+      : battleDrip.kind === 'paused'
+        ? battleDrip.remainingMs
+        : Math.max(0, battleDrip.endsAt - clockNow);
+  const battleDripSeconds = battleDripMs === null ? null : Math.ceil(battleDripMs / 1000);
 
   /**
-   * The count that can end this game: loose tiles once Endless starts dripping
-   * — Blitz and Survival both — and the whole pile in a Duel or Battle. Null
-   * in Puzzle, in Endless's opening phase, and once a game is over, none of
-   * which have a limit to run into.
+   * The count that can end this game: loose tiles once Endless starts
+   * dripping, and the whole pile in a Battle. Null in the tutorial, in
+   * Endless's opening phase, and once a game is over, none of which have a
+   * limit to run into.
    */
   const tileGauge: TileGauge | null =
     mode === 'endless' && endlessPhase === 'drip' && !complete
       ? { label: 'Loose tiles', loose: looseTiles, limit: ENDLESS_LOOSE_LIMIT }
-      : mode === 'duel' && !complete
+      : mode === 'battle' && !complete
         ? {
             label: 'Pile',
             loose: rack.length,
-            limit: DUEL_PILE_LIMIT,
-            warnAt: DUEL_PILE_WARN,
-            urgentAt: DUEL_PILE_URGENT,
+            limit: BATTLE_PILE_LIMIT,
+            warnAt: BATTLE_PILE_WARN,
+            urgentAt: BATTLE_PILE_URGENT,
           }
         : null;
 
@@ -3223,51 +2927,20 @@ export default function App() {
   /* --------------------------------- screens -------------------------------- */
 
   /**
-   * A just-opened door's setup sheet: every setting the mode has, asked
-   * together. Blitz has only its speed so far; Puzzle has the style it's
-   * played in, whether its tiles stay movable, and the board it's played on.
-   * Shared by the home screen and — after the tutorial's handoff — the game
-   * screen.
+   * The Solo door's setup sheet: every setting the mode has, asked together —
+   * its speed, so far. Shared by the home screen and — after the tutorial's
+   * handoff — the game screen.
    */
   const doorSetupSheet =
-    doorSetup === null ? null : doorSetup.door === 'blitz' ? (
+    doorSetup === null ? null : (
       <SetupDialog
-        title="Blitz"
+        title="Solo"
         settings={[
           {
             label: 'Speed',
             options: PACE_OPTIONS.map(({ name }) => name),
             chosen: PACE_OPTIONS.findIndex((option) => option.pace === doorSetup.pace),
-            onChoose: (i) => setDoorSetup({ door: 'blitz', pace: PACE_OPTIONS[i].pace }),
-          },
-        ]}
-        onPlay={playSetup}
-        onDismiss={dismissSetup}
-      />
-    ) : (
-      <SetupDialog
-        title="Puzzle"
-        settings={[
-          {
-            label: 'Game style',
-            options: PUZZLE_VARIANT_OPTIONS.map(({ name }) => name),
-            chosen: PUZZLE_VARIANT_OPTIONS.findIndex(
-              (option) => option.variant === doorSetup.variant,
-            ),
-            onChoose: (i) =>
-              setDoorSetup({ ...doorSetup, variant: PUZZLE_VARIANT_OPTIONS[i].variant }),
-          },
-          {
-            label: 'Tile placement',
-            options: PUZZLE_LOCK_OPTIONS.map(({ name }) => name),
-            chosen: PUZZLE_LOCK_OPTIONS.findIndex((option) => option.lock === doorSetup.lock),
-            onChoose: (i) => setDoorSetup({ ...doorSetup, lock: PUZZLE_LOCK_OPTIONS[i].lock }),
-          },
-          {
-            label: 'Grid size',
-            options: PUZZLE_SIZE_OPTIONS.map(({ name }) => name),
-            chosen: PUZZLE_SIZE_OPTIONS.findIndex((option) => option.size === doorSetup.size),
-            onChoose: (i) => setDoorSetup({ ...doorSetup, size: PUZZLE_SIZE_OPTIONS[i].size }),
+            onChoose: (i) => setDoorSetup({ pace: PACE_OPTIONS[i].pace }),
           },
         ]}
         onPlay={playSetup}
@@ -3281,7 +2954,6 @@ export default function App() {
         <HomeScreen
           onPlay={chooseDoor}
           onTutorial={openTutorial}
-          onShowHowTo={() => setShowHowTo(true)}
           onShowStats={() => setStatsView(loadStats())}
           onShowSettings={() => setSettingsOpen(true)}
         />
@@ -3307,7 +2979,6 @@ export default function App() {
           onConfirm={playPendingDoor}
         />
         {doorSetupSheet}
-        {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
         <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
         <SettingsPage
           open={settingsOpen}
@@ -3335,7 +3006,6 @@ export default function App() {
           />
         ) : (
           <BattleMenu
-            mode={battleIntent}
             initialName={playerName}
             initialCode={joinCodePrefill}
             busy={battleBusy}
@@ -3389,61 +3059,42 @@ export default function App() {
               : null
           }
           bonusEarned={
-            boardScore.bonusEarned && !complete && mode !== 'duel' && mode !== 'tutorial'
+            boardScore.bonusEarned && !complete && mode !== 'battle' && mode !== 'tutorial'
           }
           bonusAmount={allTilesBonus}
           complete={complete}
           timer={
-            mode === 'duel'
-              ? duelDripSeconds !== null && !complete
-                ? { label: 'Next tiles', seconds: duelDripSeconds, urgent: false }
+            mode === 'battle'
+              ? battleDripSeconds !== null && !complete
+                ? { label: 'Next tiles', seconds: battleDripSeconds, urgent: false }
                 : null
-              : mode === 'puzzle'
-                ? // Puzzle has no deadline — the clock counts the time spent.
-                  elapsedSeconds !== null && !complete
-                  ? { label: 'Time', seconds: elapsedSeconds, urgent: false }
-                  : null
-                : timerSeconds !== null && !complete
-                  ? {
-                      label:
-                        mode === 'endless' && endlessPhase === 'drip' ? 'Next tiles' : 'Time',
-                      seconds: timerSeconds,
-                      // Over the loose limit, the round clock is the deadline to
-                      // dig back under — it pleads as hard as a dying timer.
-                      urgent:
-                        mode === 'endless' &&
-                        endlessPhase === 'drip' &&
-                        looseTiles > ENDLESS_LOOSE_LIMIT,
-                    }
-                  : null
+              : timerSeconds !== null && !complete
+                ? {
+                    label:
+                      mode === 'endless' && endlessPhase === 'drip' ? 'Next tiles' : 'Time',
+                    seconds: timerSeconds,
+                    // Over the loose limit, the round clock is the deadline to
+                    // dig back under — it pleads as hard as a dying timer.
+                    urgent:
+                      mode === 'endless' &&
+                      endlessPhase === 'drip' &&
+                      looseTiles > ENDLESS_LOOSE_LIMIT,
+                  }
+                : null
           }
           round={
-            mode === 'duel' && !complete
-              ? duelRound < DUEL_ROUNDS
-                ? `${duelRound}/${DUEL_ROUNDS}`
+            mode === 'battle' && !complete
+              ? battleRound < BATTLE_ROUNDS
+                ? `${battleRound}/${BATTLE_ROUNDS}`
                 : 'Final'
               : null
           }
           tiles={tileGauge}
-          opponent={duelOpponent}
           standing={battleStanding}
-          rank={battleRank}
           pops={scorePops}
           onPopEnd={endScorePop}
         />
         <div className="header-actions">
-          {mode === 'puzzle' && !complete ? (
-            // Puzzle only ends when the player says so.
-            <button
-              className="btn btn-primary"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                setConfirmFinish(true);
-              }}
-            >
-              Finish
-            </button>
-          ) : null}
           {complete && !inBattle ? (
             // In a multiplayer game the next round is the host's call, made
             // from the standings screen — a lone "Play again" here would fork
@@ -3496,7 +3147,6 @@ export default function App() {
               // finished one has stopped of its own accord.
               onPause={inBattle || complete ? null : () => setPaused(true)}
               onResetGame={inBattle ? null : () => newGame(mode, soloPace)}
-              onShowHowTo={() => setShowHowTo(true)}
               onShowSettings={() => setSettingsOpen(true)}
               onShowSummary={
                 inBattle
@@ -3529,7 +3179,11 @@ export default function App() {
           {tutorialStep === 1 ? (
             <p className="tutorial-text">
               Your pile spells <strong>SOLAR</strong>. Type it out — the middle square is already
-              chosen — then press <kbd>Enter</kbd>, or the ✓, to place it.
+              chosen — then press <kbd>Enter</kbd>, or the{' '}
+              <kbd className="tutorial-gap tutorial-confirm">
+                <CheckIcon size={15} />
+              </kbd>{' '}
+              button, to place it.
             </p>
           ) : tutorialStep === 2 ? (
             <p className="tutorial-text">
@@ -3711,41 +3365,19 @@ export default function App() {
       {/* The held game, behind a whole window. Only ever solo — see the menu's
           Pause — so the eyebrow names one of the two solo modes, in the same
           words the start splash used. */}
-      <PauseScreen
-        open={paused}
-        eyebrow={
-          mode === 'puzzle'
-            ? `${PUZZLE_VARIANT_NAMES[puzzleVariant]} · ${puzzleSize}×${puzzleSize}`
-            : PACE_NAMES[soloPace]
-        }
-        onResume={() => setPaused(false)}
-      />
+      <PauseScreen open={paused} eyebrow={PACE_NAMES[soloPace]} onResume={() => setPaused(false)} />
 
       {showSummary && !inBattle && (
         <GameSummary
           words={finalWords}
           score={totalScore}
-          eyebrow={
-            endReason === 'timeout'
-              ? 'Time’s up'
-              : endReason === 'buried'
-                ? 'Game over'
-                : 'Game finished'
-          }
-          title={
-            endReason === 'timeout'
-              ? 'Out of time!'
-              : endReason === 'buried'
-                ? 'Buried in tiles!'
-                : 'Well played!'
-          }
+          eyebrow={endReason === 'buried' ? 'Game over' : 'Game finished'}
+          title={endReason === 'buried' ? 'Buried in tiles!' : 'Well played!'}
           onPlayAgain={() => newGame(mode, soloPace)}
           onClose={() => setShowSummary(false)}
           onReturnHome={returnHome}
         />
       )}
-
-      {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
 
       <StatsPage stats={statsView} onClose={() => setStatsView(null)} />
 
@@ -3756,20 +3388,6 @@ export default function App() {
         sound={soundOn}
         onSound={chooseSound}
         onClose={() => setSettingsOpen(false)}
-      />
-
-      {/* Puzzle's Finish button gets a second thought — it ends the game. */}
-      <ConfirmDialog
-        message={
-          confirmFinish ? 'Finish this puzzle? The board is scored as it stands.' : null
-        }
-        confirmLabel="Finish"
-        cancelLabel="Keep building"
-        onConfirm={() => {
-          setConfirmFinish(false);
-          finishGame('won');
-        }}
-        onCancel={() => setConfirmFinish(false)}
       />
 
       {/* Straight after the tutorial: what the game waiting behind this is. */}

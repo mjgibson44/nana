@@ -1,34 +1,20 @@
 import { DOOR_INFO, type GameDoor } from '../game/modes';
-import {
-  BlitzIcon,
-  CrownIcon,
-  DuelIcon,
-  HelpIcon,
-  PlayersIcon,
-  PuzzleIcon,
-  SettingsIcon,
-  StatsIcon,
-  TutorialIcon,
-} from './icons';
+import { CrownIcon, InfoIcon, SettingsIcon, SoloIcon, StatsIcon } from './icons';
 
 interface HomeScreenProps {
   /** Head through one of the game doors. What happens next is the door's
-   * business: a solo pace starts a game, the multiplayer pair open a lobby,
-   * and a first-timer gets the tutorial before any of it. */
+   * business: Solo raises its setup sheet, Battle opens a lobby, and a
+   * first-timer gets the tutorial before either. */
   onPlay: (door: GameDoor) => void;
   /** Start the guided tutorial. */
   onTutorial: () => void;
-  onShowHowTo: () => void;
   onShowStats: () => void;
   onShowSettings: () => void;
 }
 
 /** The doors, in the order they're offered. */
 const DOORS: Array<{ door: GameDoor; icon: React.ReactNode }> = [
-  { door: 'blitz', icon: <BlitzIcon /> },
-  { door: 'puzzle', icon: <PuzzleIcon /> },
-  { door: 'survival', icon: <PlayersIcon /> },
-  { door: 'duel', icon: <DuelIcon /> },
+  { door: 'solo', icon: <SoloIcon /> },
   { door: 'battle', icon: <CrownIcon /> },
 ];
 
@@ -51,23 +37,14 @@ function HomeAction({
 }
 
 /**
- * The splash screen the app opens on: the game's name up top, then one column
- * of buttons — the modes, then the things that aren't a game. A mode button
- * says only what the mode is called; what it *is* gets explained once, in the
+ * The splash screen the app opens on: the game's name up top, then the two
+ * mode cards side by side — alone with friends, in one glance — and, set a
+ * little apart below, the three things that aren't a game. A mode button says
+ * only what the mode is called; what it *is* gets explained once, in the
  * popover that fronts its first game, rather than sitting behind an ⓘ nobody
  * presses.
- *
- * The column stays a single column at every width: it keeps the buttons under
- * one another wherever the thumb already is, and a four-across row of huge
- * targets on a desktop looked like a toolbar rather than a choice.
  */
-export function HomeScreen({
-  onPlay,
-  onTutorial,
-  onShowHowTo,
-  onShowStats,
-  onShowSettings,
-}: HomeScreenProps) {
+export function HomeScreen({ onPlay, onTutorial, onShowStats, onShowSettings }: HomeScreenProps) {
   return (
     <div className="home">
       <div className="home-inner">
@@ -86,8 +63,7 @@ export function HomeScreen({
         </div>
 
         <div className="home-actions">
-          <HomeAction icon={<TutorialIcon />} label="Tutorial" onClick={onTutorial} />
-          <HomeAction icon={<HelpIcon />} label="How to play" onClick={onShowHowTo} />
+          <HomeAction icon={<InfoIcon />} label="Tutorial" onClick={onTutorial} />
           <HomeAction icon={<StatsIcon />} label="Stats" onClick={onShowStats} />
           <HomeAction icon={<SettingsIcon />} label="Settings" onClick={onShowSettings} />
         </div>

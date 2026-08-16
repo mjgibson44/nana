@@ -13,7 +13,7 @@ export interface SetupSetting {
 }
 
 interface SetupDialogProps {
-  /** The mode being set up ("Blitz", "Puzzle"). */
+  /** The mode being set up ("Solo"). */
   title: string;
   /** One row per setting, in the order they're asked. */
   settings: readonly SetupSetting[];

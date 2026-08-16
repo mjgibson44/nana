@@ -1,40 +1,30 @@
 /**
  * Game modes.
  *
- * One board and one set of rules for building words, played four ways:
+ * One board and one set of rules for building words, played three ways:
  *
  *  - Endless: no levels. New tiles keep arriving on a clock; let too many
- *    pile up loose and the game ends. Played solo as Blitz — at either of
- *    two paces, see SoloPace — or as Endless Battle, the same game raced by
- *    several players on one shared deal.
- *  - Puzzle: no clock and no losing. A fixed board with real edges, twenty
- *    tiles at a time, until the player presses Finish. Set up on two dials that
- *    don't touch each other: where the tiles come from (see PuzzleVariant —
- *    Solve refills a cleared pile, Flow refills as you place) and whether a
- *    placed word can still be moved (see PuzzleLock).
- *  - Duel: head-to-head for exactly two players. Placed words are permanent,
- *    and every word you place sends tiles to your opponent. First player to
- *    overflow their pile loses. Battle is the same game thrown open to a
- *    room of up to eight — attacks are split across the field, and the last
- *    player standing wins — so it plays under GameMode 'duel' too.
+ *    pile up loose and the game ends. Played solo — the Solo door — at
+ *    either of two paces, see SoloPace.
+ *  - Battle: a room of two to eight players on one shared deal. Placed
+ *    words are permanent, and every word you place scatters tiles across
+ *    your rivals. Overflow your pile and you're out; the last player
+ *    standing wins.
  *  - Tutorial: a guided walk through placing words, at your own pace.
  */
 
-export type GameMode = 'endless' | 'puzzle' | 'duel' | 'tutorial';
+export type GameMode = 'endless' | 'battle' | 'tutorial';
 
 /**
- * How hard Blitz leans on a solo player. Both paces are the same game —
- * same board, same loose limit, same clear bonus — and differ only in how
- * long the opening phase runs, how long a round is, and how many tiles a
- * round deals:
+ * How hard Solo leans on the player. Both paces are the same game — same
+ * board, same loose limit, same clear bonus — and differ only in how long
+ * the opening phase runs, how long a round is, and how many tiles a round
+ * deals:
  *
  *  - `regular`: two minutes to open, then five-tile rounds of 45 seconds
  *    tightening to 30, and batches that grow to seven.
  *  - `fast`: one minute to open, then a 15-second round forever, starting at
  *    three tiles and growing by one every eight rounds up to ten.
- *
- * Survival always runs at the regular pace: every player works one shared
- * deal, so the pacing has to be the same for everybody.
  */
 export type SoloPace = 'regular' | 'fast';
 
@@ -46,17 +36,14 @@ export interface ModeInfo {
 }
 
 /**
- * The doors out of the home screen — the five buttons that lead to a game.
- * Not the same list as GameMode: the solo pair each raise a setup sheet on the
- * way in — Blitz for its pace, Puzzle for its style and board — while
- * Survival, Duel and Battle lead to a lobby before any game starts. Survival
- * is Endless played against other people; Battle is Duel thrown open to a
- * room.
+ * The doors out of the home screen — the two buttons that lead to a game.
+ * Not the same list as GameMode: Solo raises a setup sheet for its pace on
+ * the way in, while Battle leads to a lobby before any game starts.
  */
-export type GameDoor = 'blitz' | 'puzzle' | 'survival' | 'duel' | 'battle';
+export type GameDoor = 'solo' | 'battle';
 
-export const BLITZ_INFO: ModeInfo = {
-  name: 'Blitz',
+export const SOLO_INFO: ModeInfo = {
+  name: 'Solo',
   tagline: 'Survive the ever-growing pile.',
   details: [
     'Tiles keep arriving on a clock — weave them in as they land',
@@ -65,71 +52,31 @@ export const BLITZ_INFO: ModeInfo = {
   ],
 };
 
-/** What the splash cards call each Blitz pace. */
+/** What the splash cards call each Solo pace. */
 export const PACE_NAMES: Record<SoloPace, string> = {
-  regular: 'Blitz · Regular',
-  fast: 'Blitz · Fast',
+  regular: 'Solo · Regular',
+  fast: 'Solo · Fast',
 };
 
 /** The Speed setting's tabs, in the order they're offered. What each pace
- * actually costs you is BLITZ_INFO's business, on the card that fronts the
+ * actually costs you is SOLO_INFO's business, on the card that fronts the
  * mode; here it's a two-way switch. */
 export const PACE_OPTIONS: ReadonlyArray<{ pace: SoloPace; name: string }> = [
   { pace: 'regular', name: 'Regular' },
   { pace: 'fast', name: 'Fast' },
 ];
 
-export const PUZZLE_INFO: ModeInfo = {
-  name: 'Puzzle',
-  tagline: 'One board, no clock. Build at your own pace.',
-  details: [
-    '20 tiles to weave into one crossword',
-    'Solve: weave in every last tile and 20 more arrive',
-    'Flow: your pile refills to 20 as you place',
-    'Tiles flexible to move and turn, or locked once you confirm',
-    'Pick your board: 9×9, 13×13 or 19×19',
-    'Press Finish whenever you’re done',
-  ],
-};
-
 /**
- * Survival's home-screen card — Endless raced by several players. Each
- * player's game runs as Endless at the regular pace, and the multiplayer
- * wrapping (lobby, shared deal, standings) lives in src/game/battle.ts.
- */
-export const SURVIVAL_INFO: ModeInfo = {
-  name: 'Survival',
-  tagline: 'Outlive your friends (2+ players)',
-  details: [
-    'Every player gets the same tiles',
-    'Host a lobby, or join with a code',
-    'Outlast the rest — top score wins',
-  ],
-};
-
-export const DUEL_INFO: ModeInfo = {
-  name: 'Duel',
-  tagline: 'Head-to-head. Bury your opponent.',
-  details: [
-    'Two players, same tiles',
-    'Placed words are permanent — and send tiles to your opponent',
-    'Overflow 25 tiles in your pile and you lose',
-  ],
-};
-
-/**
- * Battle's home-screen card — Duel's game thrown open to a room. The rules
- * are Duel's to the letter (permanent words, attack tiles, the same pile
- * limit and rounds); what changes is the field, so every attack is split
- * across the rivals still standing and the game runs until one player is
- * left. See splitAttackTiles for the split, and src/game/battle.ts for the
- * elimination bookkeeping.
+ * Battle's home-screen card. The rules in one breath: permanent words,
+ * attack tiles split across the field, a hard pile limit, and the game runs
+ * until one player is left. See splitAttackTiles for the split, and
+ * src/game/battle.ts for the elimination bookkeeping.
  */
 export const BATTLE_ROYALE_INFO: ModeInfo = {
   name: 'Battle',
   tagline: 'Free-for-all. Last one standing wins (2–8 players).',
   details: [
-    'Up to eight players, same tiles',
+    'Two to eight players, same tiles',
     'Words are permanent — attack tiles are split across your rivals',
     'Overflow 25 tiles and you’re out; outlast everyone to win',
   ],
@@ -152,10 +99,7 @@ export const TUTORIAL_INFO: ModeInfo = {
 
 /** Which explainer each door raises the first time it's opened. */
 export const DOOR_INFO: Record<GameDoor, ModeInfo> = {
-  blitz: BLITZ_INFO,
-  puzzle: PUZZLE_INFO,
-  survival: SURVIVAL_INFO,
-  duel: DUEL_INFO,
+  solo: SOLO_INFO,
   battle: BATTLE_ROYALE_INFO,
 };
 
@@ -242,145 +186,76 @@ export const ENDLESS_CONNECT_BONUS = 25;
  * over it when a drip round ends is what ends the game. */
 export const ENDLESS_LOOSE_LIMIT = 20;
 
-/* --------------------------------- Puzzle ---------------------------------- */
-
-/** The boards Puzzle is played on — square, with real edges words can't cross. */
-export type PuzzleSize = 9 | 13 | 19;
+/* --------------------------------- Battle ---------------------------------- */
 
 /**
- * Where a Puzzle's tiles come from. Both variants are the same untimed,
- * unlosable board — same sizes, same twenty tiles, same Finish button — and
- * differ only in what refills the pile:
- *
- *  - `solve`: the pile only refills once every last tile is woven in, which
- *    pays the clear bonus and deals PUZZLE_BATCH_TILES more.
- *  - `flow`: the pile tops back up to PUZZLE_START_TILES after every word, so
- *    it stands at twenty for as long as the board has room. There's no
- *    clearing a pile that always refills, so the clear bonus never comes up.
- *
- * Whether a placed word can still be moved is the other dial — see PuzzleLock.
+ * How many players a Battle seats. Two is the head-to-head floor; eight is
+ * where a phone's header, the lobby roster and the attack arithmetic all
+ * still breathe.
  */
-export type PuzzleVariant = 'solve' | 'flow';
+export const BATTLE_MIN_PLAYERS = 2;
+export const BATTLE_MAX_PLAYERS = 8;
 
-/**
- * Whether a Puzzle's tiles stay yours after they land:
- *
- *  - `flexible`: nothing is settled. Tiles drag, words turn and come apart,
- *    and undo reaches back through the lot.
- *  - `locked`: confirming a word is final — it can't be moved, turned or taken
- *    back, and because a mistake can't be unpicked, only real words are let
- *    down in the first place. The same deal a Duel plays under.
- */
-export type PuzzleLock = 'flexible' | 'locked';
+/** Tiles in each player's opening Battle deal. */
+export const BATTLE_START_TILES = 15;
 
-/** What the splash cards call each Puzzle variant. */
-export const PUZZLE_VARIANT_NAMES: Record<PuzzleVariant, string> = {
-  solve: 'Puzzle Solve',
-  flow: 'Puzzle Flow',
-};
-
-/** The Game style setting's tabs, in the order they're offered. What the two
- * styles are is PUZZLE_INFO's business, on the card that fronts the mode, and
- * the start splash names the one being played. */
-export const PUZZLE_VARIANT_OPTIONS: ReadonlyArray<{ variant: PuzzleVariant; name: string }> = [
-  { variant: 'solve', name: 'Solve' },
-  { variant: 'flow', name: 'Flow' },
-];
-
-/** The Tile placement setting's tabs, in the order they're offered. Flexible
- * leads: it's the gentler of the two, and the one a new player wants. */
-export const PUZZLE_LOCK_OPTIONS: ReadonlyArray<{ lock: PuzzleLock; name: string }> = [
-  { lock: 'flexible', name: 'Flexible' },
-  { lock: 'locked', name: 'Locked' },
-];
-
-/** The Grid size setting's tabs, in the order they're offered. */
-export const PUZZLE_SIZE_OPTIONS: ReadonlyArray<{ size: PuzzleSize; name: string }> = [
-  { size: 9, name: '9 × 9' },
-  { size: 13, name: '13 × 13' },
-  { size: 19, name: '19 × 19' },
-];
-
-/** Tiles in the opening Puzzle deal, however it's set up — and, in Solve, in
- * every batch that follows a fully connected board. Flow holds the pile here
- * instead, topping it back up after every word. */
-export const PUZZLE_START_TILES = 20;
-export const PUZZLE_BATCH_TILES = 20;
-
-/**
- * Flow's refill: how many tiles to deal to bring a pile of `pileSize` back to
- * the opening twenty. A top-up rather than a hand-back of exactly what the
- * word spent, because with flexible tiles the two aren't the same thing — a
- * word taken off the board puts its letters back in the pile, and paying that
- * pile out again would grow it without end. Never negative: a pile already at
- * twenty or over is dealt nothing.
- */
-export function puzzleRefillTiles(pileSize: number): number {
-  return Math.max(0, PUZZLE_START_TILES - pileSize);
-}
-
-/* ---------------------------------- Duel ----------------------------------- */
-
-/** Tiles in each player's opening Duel deal. */
-export const DUEL_START_TILES = 15;
-
-/** A Duel pile may never exceed this many tiles — one over and you lose. */
-export const DUEL_PILE_LIMIT = 25;
+/** A Battle pile may never exceed this many tiles — one over and you're out. */
+export const BATTLE_PILE_LIMIT = 25;
 
 /** The pile counter starts pleading before the limit: flashing orange at a
  * medium blink from this many tiles… */
-export const DUEL_PILE_WARN = 15;
+export const BATTLE_PILE_WARN = 15;
 
 /** …and flashing red, faster, from this many. */
-export const DUEL_PILE_URGENT = 20;
+export const BATTLE_PILE_URGENT = 20;
 
-/** How many rounds a duel has. The last one runs until somebody loses. */
-export const DUEL_ROUNDS = 3;
+/** How many rounds a battle has. The last one runs until it's decided. */
+export const BATTLE_ROUNDS = 3;
 
 /** Rounds one and two are this long; the final round has no clock. */
-export const DUEL_ROUND_SECONDS = 180;
+export const BATTLE_ROUND_SECONDS = 180;
 
 /** How often the drip lands a tile (or several) in each player's pile. */
-export const DUEL_DRIP_SECONDS = 20;
+export const BATTLE_DRIP_SECONDS = 20;
 
 /** How many tiles the drip brings per round: 1, then 2, then 4. */
-const DUEL_DRIP_TILES = [1, 2, 4];
+const BATTLE_DRIP_TILES = [1, 2, 4];
 
 /** How hard words hit per round: attacks are ×1, then ×1.5, then ×2. */
-const DUEL_ATTACK_MULTIPLIERS = [1, 1.5, 2];
+const BATTLE_ATTACK_MULTIPLIERS = [1, 1.5, 2];
 
 function clampRound(round: number): number {
-  return Math.max(1, Math.min(DUEL_ROUNDS, Math.floor(round)));
+  return Math.max(1, Math.min(BATTLE_ROUNDS, Math.floor(round)));
 }
 
-export function duelDripTiles(round: number): number {
-  return DUEL_DRIP_TILES[clampRound(round) - 1];
+export function battleDripTiles(round: number): number {
+  return BATTLE_DRIP_TILES[clampRound(round) - 1];
 }
 
-export function duelAttackMultiplier(round: number): number {
-  return DUEL_ATTACK_MULTIPLIERS[clampRound(round) - 1];
+export function battleAttackMultiplier(round: number): number {
+  return BATTLE_ATTACK_MULTIPLIERS[clampRound(round) - 1];
 }
 
 /**
- * Which round the duel is in `seconds` into the game: rounds one and two are
- * DUEL_ROUND_SECONDS each, and the final round runs forever.
+ * Which round a battle is in `seconds` into the game: rounds one and two are
+ * BATTLE_ROUND_SECONDS each, and the final round runs forever.
  */
-export function duelRoundAt(seconds: number): number {
-  return clampRound(Math.floor(seconds / DUEL_ROUND_SECONDS) + 1);
+export function battleRoundAt(seconds: number): number {
+  return clampRound(Math.floor(seconds / BATTLE_ROUND_SECONDS) + 1);
 }
 
 /**
  * How many tiles the drip numbered `dripIndex` (0-based) deals. Pure in the
- * index so both duellists — whose clocks may drift — draw identical batches
- * from the shared stream: drip k is drip k on both screens.
+ * index so every player — whose clocks may drift — draws identical batches
+ * from the shared stream: drip k is drip k on every screen.
  */
-export function duelDripTilesAt(dripIndex: number): number {
-  const at = (dripIndex + 1) * DUEL_DRIP_SECONDS;
-  return duelDripTiles(duelRoundAt(at));
+export function battleDripTilesAt(dripIndex: number): number {
+  const at = (dripIndex + 1) * BATTLE_DRIP_SECONDS;
+  return battleDripTiles(battleRoundAt(at));
 }
 
 /**
- * How many tiles placing a word sends to the opponent: nothing under four
+ * How many tiles placing a word sends across the field: nothing under four
  * letters, then one per letter past three — 4→1, 5→2, 6→3 — scaled up by the
  * round's multiplier and rounded to the nearest whole tile.
  *
@@ -390,7 +265,7 @@ export function duelDripTilesAt(dripIndex: number): number {
  * worth, so stretching HEART to HEARTS earns the S, not the whole word again.
  * A word built from nothing (an empty list) earns its full value.
  */
-export function duelAttackTiles(
+export function battleAttackTiles(
   wordLength: number,
   round: number,
   grewFrom: number[] = [],
@@ -398,33 +273,22 @@ export function duelAttackTiles(
   const base = (length: number) => Math.max(0, Math.floor(length) - 3);
   const absorbed = grewFrom.reduce((sum, length) => sum + base(length), 0);
   const growth = Math.max(0, base(wordLength) - absorbed);
-  return Math.round(growth * duelAttackMultiplier(round));
+  return Math.round(growth * battleAttackMultiplier(round));
 }
 
-/* --------------------------------- Battle ---------------------------------- */
-
 /**
- * How many players a Battle seats. Two is a Duel in all but name; eight is
- * where a phone's header, the lobby roster and the attack arithmetic all
- * still breathe.
- */
-export const BATTLE_MIN_PLAYERS = 2;
-export const BATTLE_MAX_PLAYERS = 8;
-
-/**
- * Split one attack across the rivals still standing. A Battle word earns
- * exactly what a Duel word does (duelAttackTiles) — but with up to seven
- * targets, sending the whole attack to each of them would multiply the
- * pressure by the size of the room. So the attack's total is what a duel
- * would send, divided across the field: everyone takes the fair floor, and
- * the remainder lands one tile each on the targets starting at `from`
- * (wrapping round), so the caller can rotate who takes the odd tile rather
- * than always the same seat.
+ * Split one attack across the rivals still standing. A word earns its
+ * battleAttackTiles total once — but with up to seven targets, sending the
+ * whole attack to each of them would multiply the pressure by the size of
+ * the room. So the total is divided across the field: everyone takes the
+ * fair floor, and the remainder lands one tile each on the targets starting
+ * at `from` (wrapping round), so the caller can rotate who takes the odd
+ * tile rather than always the same seat.
  *
  * The shares always sum to the attack, so a 1-tile attack still lands
  * somewhere instead of rounding away to nothing — and as players fall, the
  * same words hit the survivors harder, which is the endgame tightening by
- * itself.
+ * itself. With one rival left the whole attack lands on them, head-to-head.
  */
 export function splitAttackTiles(count: number, targets: number, from = 0): number[] {
   if (!Number.isFinite(count) || targets <= 0) return [];

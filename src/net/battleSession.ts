@@ -2,10 +2,8 @@ import { Peer } from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import {
   battleOver,
-  duelOver,
-  duelWinner,
+  battleWinner,
   newBattleCode,
-  type BattleMode,
   type BattlePlayer,
   type BattleState,
 } from '../game/battle';
@@ -23,9 +21,9 @@ import { randomSeed } from '../game/rng';
  *
  * Tiles never travel over these connections. The host shares one seed per
  * game and every client grows the identical deal from it — see
- * src/game/battle.ts. (Duel attack batches are the one exception in spirit:
- * even they travel as a count, not letters — the receiver draws the letters
- * from a stream seeded off the shared seed.)
+ * src/game/battle.ts. (Attack batches are the one exception in spirit: even
+ * they travel as a count, not letters — the receiver draws the letters from
+ * a stream seeded off the shared seed.)
  *
  * Connection failsafes, in three layers:
  *
@@ -42,7 +40,7 @@ import { randomSeed } from '../game/rng';
  */
 
 /** Bumped when messages change shape, so a stale tab fails loud, not weird. */
-const PROTOCOL = 3;
+const PROTOCOL = 4;
 
 /** How long connecting may take before it's called a failure. */
 const CONNECT_TIMEOUT_MS = 20_000;
@@ -159,7 +157,7 @@ export interface BattleEvents {
   /** The battle is gone for good — connection lost past saving, or the
    * lobby closed. */
   onEnded(message: string): void;
-  /** Duel: the opponent's word just sent this many tiles our way. */
+  /** A rival's word just sent this many tiles our way. */
   onAttack(count: number): void;
   /** This client's own link dropped; it's redialing in the background. */
   onReconnecting(): void;
@@ -182,7 +180,7 @@ export interface BattleHandle {
   stop(): void;
   /** Report this player's own game as it moves. No-op outside a game. */
   reportProgress(score: number, buried: boolean, tiles: number): void;
-  /** Duel: send an attack of `count` tiles to the opponent. */
+  /** Send an attack of `count` tiles, split across the rivals standing. */
   sendAttack(count: number): void;
   /** Leave for good. Hosts take the whole lobby down with them. */
   leave(): void;
@@ -242,12 +240,10 @@ class HostSession implements BattleHandle {
     private readonly peer: Peer,
     readonly code: string,
     hostName: string,
-    mode: BattleMode,
     private readonly events: BattleEvents,
   ) {
     this.selfId = playerKey();
     this.state = {
-      mode,
       phase: 'lobby',
       game: 0,
       paused: false,
@@ -352,22 +348,13 @@ class HostSession implements BattleHandle {
       const existing = this.state.players.find((p) => p.id === key);
 
       if (!existing) {
-        // A duel seats exactly two, a battle up to eight. Anyone past the
-        // limit is politely turned away.
+        // A battle seats up to eight. Anyone past the limit is politely
+        // turned away.
         const seated = this.state.players.filter((p) => !p.left).length;
-        const full =
-          this.state.mode === 'duel'
-            ? seated >= 2
-            : this.state.mode === 'battle'
-              ? seated >= BATTLE_MAX_PLAYERS
-              : false;
-        if (full) {
+        if (seated >= BATTLE_MAX_PLAYERS) {
           const reject: HostMessage = {
             t: 'reject',
-            reason:
-              this.state.mode === 'duel'
-                ? 'This duel already has two players.'
-                : `This battle is full — ${BATTLE_MAX_PLAYERS} players are already in.`,
+            reason: `This battle is full — ${BATTLE_MAX_PLAYERS} players are already in.`,
           };
           conn.send(reject);
           window.setTimeout(() => conn.close(), 250);
@@ -453,16 +440,14 @@ class HostSession implements BattleHandle {
   }
 
   /**
-   * Fan an attack out from `fromId` — or take our share ourselves. A duel's
-   * one opponent takes the lot; a battle splits the same total across every
-   * rival still standing (splitAttackTiles), with the remainder rotating
-   * round the field so no seat is always the one taking the odd tile. Each
-   * target still only ever hears a count — the letters come from their own
-   * attack stream.
+   * Fan an attack out from `fromId` — or take our share ourselves. The total
+   * is split across every rival still standing (splitAttackTiles), with the
+   * remainder rotating round the field so no seat is always the one taking
+   * the odd tile; one rival left takes the lot. Each target still only ever
+   * hears a count — the letters come from their own attack stream.
    */
   private relayAttack(fromId: string, count: number): void {
-    const { mode, phase } = this.state;
-    if ((mode !== 'duel' && mode !== 'battle') || phase !== 'playing') return;
+    if (this.state.phase !== 'playing') return;
     if (!Number.isFinite(count) || count <= 0) return;
     const sender = this.state.players.find((p) => p.id === fromId);
     if (!sender || sender.waiting || sender.buried || sender.left) return;
@@ -567,17 +552,10 @@ class HostSession implements BattleHandle {
 
   private checkOver(): void {
     if (this.state.phase !== 'playing') return;
-    if (this.state.mode === 'duel' || this.state.mode === 'battle') {
-      // Both are survival games: over on the last player standing, whatever
-      // the size of the field.
-      if (duelOver(this.state.players)) {
-        this.state.winnerId = duelWinner(this.state.players)?.id ?? null;
-        this.state.phase = 'finished';
-        this.state.paused = false;
-      }
-      return;
-    }
+    // A survival game: over on the last player standing, whatever the size
+    // of the field.
     if (battleOver(this.state.players)) {
+      this.state.winnerId = battleWinner(this.state.players)?.id ?? null;
       this.state.phase = 'finished';
       this.state.paused = false;
     }
@@ -686,11 +664,7 @@ class HostSession implements BattleHandle {
  * Open a lobby. Resolves once the join code is claimed with the broker and
  * other players could dial it; rejects with a human-readable Error otherwise.
  */
-export function hostBattle(
-  name: string,
-  mode: BattleMode,
-  events: BattleEvents,
-): Promise<BattleHandle> {
+export function hostBattle(name: string, events: BattleEvents): Promise<BattleHandle> {
   return new Promise((resolve, reject) => {
     let attempts = 0;
 
@@ -710,7 +684,7 @@ export function hostBattle(
         if (settled) return;
         settled = true;
         window.clearTimeout(timeout);
-        resolve(new HostSession(peer, code, name, mode, events));
+        resolve(new HostSession(peer, code, name, events));
       });
 
       peer.on('error', (err) => {

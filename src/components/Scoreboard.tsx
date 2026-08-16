@@ -1,4 +1,3 @@
-import { ordinal } from '../game/battle';
 import { formatSeconds } from '../game/modes';
 
 /** How close to the tile limit counts as "getting close" — the orange zone. */
@@ -13,7 +12,7 @@ export interface ScorePop {
 
 /**
  * Tiles against the limit that ends the game. `label` says which count it is —
- * loose tiles in Endless, the whole pile in a Duel. `warnAt`/`urgentAt` are
+ * loose tiles in Endless, the whole pile in a Battle. `warnAt`/`urgentAt` are
  * explicit alarm thresholds: from `warnAt` the count flashes orange, from
  * `urgentAt` red and faster. Without them the count falls back to a steady
  * orange near the limit.
@@ -67,17 +66,13 @@ interface ScoreboardProps {
   complete: boolean;
   /** The header clock, or null in modes without one. */
   timer: { label: string; seconds: number; urgent: boolean } | null;
-  /** Duel: which round the game is in ("1/3", "Final"). Null elsewhere. */
+  /** Battle: which round the game is in ("1/3", "Final"). Null elsewhere. */
   round: string | null;
   /** Tiles against the limit that ends the game. Null while not in play. */
   tiles: TileGauge | null;
-  /** Duel: the other player's pile, to watch them drown (or not). */
-  opponent: { name: string; tiles: number; limit: number; out: boolean } | null;
   /** Battle: how much of the field is still standing. A room of piles won't
    * fit the header, so the count stands in for them. Null elsewhere. */
   standing: { alive: number; of: number } | null;
-  /** This player's place in a battle, or null outside one. */
-  rank: { place: number; of: number; buried: boolean } | null;
   /** Score changes still floating up beside the total. */
   pops: ScorePop[];
   /** A pop's animation finished; it can be dropped. */
@@ -93,9 +88,7 @@ export function Scoreboard({
   timer,
   round,
   tiles,
-  opponent,
   standing,
-  rank,
   pops,
   onPopEnd,
 }: ScoreboardProps) {
@@ -150,16 +143,6 @@ export function Scoreboard({
           </span>
         </div>
       )}
-      {rank && (
-        <div className="score-block" title={`Your place among ${rank.of} players`}>
-          <span className="score-label">Position</span>
-          <span className="score-value">
-            {rank.buried && '💀 '}
-            {ordinal(rank.place)}
-            <span className="score-of"> of {rank.of}</span>
-          </span>
-        </div>
-      )}
       {tiles && (
         <div
           className="score-block"
@@ -191,24 +174,6 @@ export function Scoreboard({
           <span className="score-value">
             {standing.alive}
             <span className="score-of"> of {standing.of}</span>
-          </span>
-        </div>
-      )}
-      {opponent && (
-        <div
-          className="score-block"
-          title={`${opponent.name}’s pile: ${opponent.tiles} of ${opponent.limit} tiles`}
-        >
-          <span className="score-label">{opponent.name}</span>
-          <span className="score-value">
-            {opponent.out ? (
-              '💀'
-            ) : (
-              <>
-                {opponent.tiles}
-                <span className="score-of">/{opponent.limit}</span>
-              </>
-            )}
           </span>
         </div>
       )}

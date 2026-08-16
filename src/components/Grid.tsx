@@ -32,7 +32,7 @@ interface GridProps {
   highlighted: Set<CellKey>;
   /** The placed tile picked out for deletion, if any. */
   selectedKey: CellKey | null;
-  /** Duel and Puzzle Flow: placed tiles are permanent — no grab affordance,
+  /** Battle: placed tiles are permanent — no grab affordance,
    * no controls. */
   boardLocked: boolean;
   canRotate: (word: BoardWord) => boolean;

@@ -9,7 +9,7 @@
  *
  *  - `tick`     — the last few seconds before an Endless round deals its tiles.
  *  - `deal`     — tiles arriving in your own pile, in any mode.
- *  - `attack`   — the same thing, but sent by the opponent in a Duel: lower and
+ *  - `attack`   — the same thing, but sent by a Battle rival: lower and
  *                 falling, so incoming trouble never sounds like a gift.
  *  - `commit`   — a word going down on the board.
  *  - `overflow` — the loose pile has just gone over the limit. A warning, not a

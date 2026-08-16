@@ -50,8 +50,8 @@ src/
     types.ts            #   board = plain serializable Record<"row,col", letter>
     board.ts            #   word extraction, dictionary + connectivity validation
     generator.ts        #   crossword-construction letter dealing
-    modes.ts            #   the rules: Blitz pacing (regular/fast), Puzzle boards and dials, Duel rounds, Battle's attack split
-    setups.ts           #   the solo doors' last-played settings, kept between visits
+    modes.ts            #   the rules: Solo pacing (regular/fast), Battle rounds and its attack split
+    setups.ts           #   the Solo door's last-played settings, kept between visits
     battle.ts           #   multiplayer brain: codes, shared deal, referees
     dictionary.ts       #   word list loading/parsing
     commonWords.ts      #   generation word pool (subset of the dictionary)
@@ -72,17 +72,16 @@ plain serializable data — which is exactly what lets multiplayer run with
 Picked from the home screen (`src/components/HomeScreen.tsx`); the rules live
 in `src/game/modes.ts`.
 
-The two solo doors raise a setup sheet on the way in
+The two doors sit side by side on the home screen: **Solo** on the left,
+**Battle** on the right. Solo raises a setup sheet on the way in
 (`src/components/SetupDialog.tsx`): one labelled row of tabs per setting the
-mode has — Blitz's **Speed**, Puzzle's **Game style**, **Tile placement** and
-**Grid size** — and a Play button under the lot. It opens on the last game's
-setup, kept between visits in `src/game/setups.ts`, so playing the same thing
-again is one tap; nothing is decided until Play, so backing out of the sheet
-changes nothing, and only Play writes the setup down. (A Survival game runs at
-the regular pace whatever you prefer for Blitz, and mustn't quietly rewrite
-that preference.)
+mode has — its **Speed**, so far — and a Play button under it. The sheet
+opens on the last game's setup, kept between visits in `src/game/setups.ts`,
+so playing the same thing again is one tap; nothing is decided until Play, so
+backing out of the sheet changes nothing, and only Play writes the setup
+down.
 
-- **Blitz** (Endless) — no levels, at a pace picked on the way in. **Regular**:
+- **Solo** (Endless) — no levels, at a pace picked on the way in. **Regular**:
   2:00 to work the starting 20 tiles, then batches land on a tightening clock —
   five rounds of 5 tiles every 45 seconds, five rounds of 5 tiles every 30
   seconds, then 7 tiles every 30 seconds forever after. **Fast**: the same game
@@ -94,78 +93,34 @@ that preference.)
   comfortable, orange near the limit, red once you're over. Going over doesn't
   end the game by itself; still being over when the round's clock runs out is
   what buries you.
-- **Puzzle** — no clock and no losing. Played on a fixed board with real edges,
-  chosen on the way in: 9×9, 13×13 or 19×19. You get 20 tiles, the header keeps
-  score and counts the time elapsed, and the **Finish** button in the top right
-  ends the game whenever you decide you're done. Two dials on the setup sheet,
-  and they don't touch each other — any of the four combinations plays.
-
-  **Game style** — where the tiles come from:
-  - **Puzzle Solve** — the pile only refills once it's empty. Weaving every
-    last tile into one connected crossword pays the 25-point clear bonus and
-    deals 20 more, for as long as you like.
-  - **Puzzle Flow** — the pile tops straight back up to 20 after every word,
-    for as long as the board has room. The new letters are grown off the board
-    as it now stands (`extendPuzzle`), so each one is known to have a home on
-    the board it was dealt for; once the board is too congested to grow off,
-    they fall back to a plain draw. It's a top-up rather than a hand-back of
-    exactly what the word spent, because with flexible tiles those aren't the
-    same thing — a word taken back off the board puts its letters in the pile,
-    and paying that pile out again would grow it without end. A pile that
-    always refills is never cleared, so the clear bonus simply isn't one of
-    Flow's rewards — the score is the words on the board when you press Finish.
-
-  **Tile placement** — what happens to a word once it's down:
-  - **Flexible** — nothing is settled. Tiles drag, words turn and come apart,
-    and undo reaches back through the lot. A Flow refill is part of the move
-    that earned it, so undo takes it back too.
-  - **Locked** — confirming a word is final. Exactly as in a Duel, only real
-    words are allowed down, there's no undo, and nothing can be dragged,
-    turned or taken back.
-
-  A new player gets **Flow, Flexible, 13×13** — the most forgiving corner of
-  the mode. Whatever you press Play on is kept for next time, this visit or the
-  next (`src/game/setups.ts`), as is Blitz's speed.
-- **Survival** (Endless Battle) — Blitz Regular, against your friends. Every
-  player shares one deal, so Survival always runs at the regular pace. One player hosts a
-  lobby and shares a 5-letter code (or an invite link that carries it);
-  everyone enters a name to join. Every player fights the identical game:
-  the same starting tiles, and the same letters in every batch after —
-  however they earn them. Your live position sits in the header beside the
-  clock, and between rounds a five-second scoreboard shows the whole field.
-  Being buried knocks you out but the race runs on; the battle ends when
-  everyone is buried — or the moment the last player standing is already
-  strictly ahead. Highest score wins.
-- **Duel** — head-to-head for exactly two players, through the same
-  host/join lobby flow. Both duellists draw the identical letters. A placed
-  word is **permanent** — no moving, no taking back — and only real words
-  are allowed down. Every word you place sends tiles to your opponent: one
-  per letter past three (4 letters → 1 tile, 5 → 2, …). Extending a word
-  already on the board sends only the difference — what the longer word is
-  worth minus what the old one already was. Three rounds turn
-  the screw: rounds one and two last 3:00, with attacks at ×1 then ×1.5 and
-  a drip of 1 then 2 tiles every 20 seconds; the final round has no clock,
-  ×2 attacks, and 4 tiles every 20 seconds. Let your pile exceed 25 tiles —
-  for any reason, at any moment — and you lose. Last one standing wins.
-- **Battle** — Duel's game thrown open to a free-for-all of **2–8 players**,
-  rule for rule: the same permanent words, the same rounds and drip, the
-  same 25-tile pile limit. What changes is the field, so each attack is
-  **split across every rival still standing** rather than multiplied by
-  them: a word earns exactly what it would in a duel, everyone takes the
-  fair floor of that total, and the remainder rotates round the seats so no
-  one is always the unlucky one (`splitAttackTiles` in
-  `src/game/modes.ts`). The pressure on any one player stays at duel level
-  however big the room is — and as players fall, the same words hit the
-  survivors harder by themselves. A toast calls out each elimination, the
-  header counts the field still standing, and the game runs until one
-  player is left. Falling knocks you out for good: a spectator view covers
-  your dead board — no more playing or touching it — and follows the field
-  live (who's still standing, how deep each pile is, your own final place,
-  already decided by when you fell) until the winner is revealed. The host
-  keeps their controls on it; anyone can still leave. The results screen
-  then ranks everyone by how long they lasted
-  — the host notes the order players fall (`outOrder`), and
-  `rankByElimination` reads the standings straight off it.
+- **Battle** — a free-for-all of **2–8 players**, through a host/join lobby
+  flow: one player hosts and shares a 5-letter code (or an invite link that
+  carries it); everyone enters a name to join, and every player draws the
+  identical letters. A placed word is **permanent** — no moving, no taking
+  back — and only real words are allowed down. Every word you place sends
+  attack tiles across your rivals: one per letter past three (4 letters →
+  1 tile, 5 → 2, …). Extending a word already on the board sends only the
+  difference — what the longer word is worth minus what the old one already
+  was. Three rounds turn the screw: rounds one and two last 3:00, with
+  attacks at ×1 then ×1.5 and a drip of 1 then 2 tiles every 20 seconds; the
+  final round has no clock, ×2 attacks, and 4 tiles every 20 seconds. Each
+  attack's total is **split across every rival still standing** rather than
+  multiplied by them: everyone takes the fair floor, and the remainder
+  rotates round the seats so no one is always the unlucky one
+  (`splitAttackTiles` in `src/game/modes.ts`). The pressure on any one
+  player stays head-to-head-sized however big the room is — with one rival
+  left the whole attack lands on them — and as players fall, the same words
+  hit the survivors harder by themselves. Let your pile exceed 25 tiles —
+  for any reason, at any moment — and you're out. A toast calls out each
+  elimination, the header counts the field still standing, and the game runs
+  until one player is left. Falling knocks you out for good: a spectator
+  view covers your dead board — no more playing or touching it — and follows
+  the field live (who's still standing, how deep each pile is, your own
+  final place, already decided by when you fell) until the winner is
+  revealed. The host keeps their controls on it; anyone can still leave. The
+  results screen then ranks everyone by how long they lasted — the host
+  notes the order players fall (`outOrder`), and `rankByElimination` reads
+  the standings straight off it.
 - **Tutorial** — a guided three-step walkthrough, scripted in
   `src/game/tutorial.ts`: SOLAR spelled out in the pile to place, then ORBIT
   dealt an R short so it has to cross the one already down, then POLE dealt two
@@ -197,8 +152,7 @@ Two things front a first game, each shown once and never again (remembered in
   choice and the game, which is why there's no ⓘ on the mode buttons: the
   details arrive when they're wanted, unasked.
 
-The fuller "How to play" reference never interrupts; it waits on the home screen
-and in the in-game menu.
+The tutorial can always be retaken from the home screen's ⓘ button.
 
 ### Sound
 
@@ -215,54 +169,51 @@ hears one land on top of the last:
   goes quiet.
 - A rising **three-note chime** whenever tiles land in your own pile, in any
   mode — a timed batch, a board-clear reward, a tutorial step's letters.
-- A low, **falling growl** for tiles a Duel opponent or a Battle rival sends
-  you: incoming trouble should never sound like the arrival of tiles you
-  earned.
+- A low, **falling growl** for tiles a Battle rival sends you: incoming
+  trouble should never sound like the arrival of tiles you earned.
 - A two-note **click** as a word goes down on the board. Every road to a landing
   runs through `commit`, so a dragged tile and a typed word sound alike.
 - A two-tone **alarm** the moment the loose pile goes over the limit, along with
   the header's gauge turning red. It's a warning rather than a verdict — the
   round's remaining seconds are the deadline to dig back under — and digging
   under re-arms it, so a player riding the limit is warned every time they cross
-  it. (A Duel pile over *its* limit isn't a warning at all: it's the loss, and it
-  sounds like one.)
+  it. (A Battle pile over *its* limit isn't a warning at all: it's the loss, and
+  it sounds like one.)
 
 Two end a game, and may take their time since nothing follows them:
 
 - Four notes **falling away** whenever a game ends against you — buried, or out
   of time. It lives in `finishGame`, the one way any game ends, so every road to
   a loss sounds the same.
-- The same shape **climbing** for the player who takes a multiplayer game.
-  `battleWinners` in `src/game/battle.ts` decides who that is — top score in a
-  Survival (all of them, on a tie), the last one standing in a Duel or a
-  Battle — and the results screen names the winner from the same function, so
-  the fanfare and the headline can never disagree.
+- The same shape **climbing** for the player who takes a battle. `battleWinners`
+  in `src/game/battle.ts` decides who that is — the last one standing — and the
+  results screen names the winner from the same function, so the fanfare and
+  the headline can never disagree.
 
 **Game sound** on the Settings screen silences the lot, remembered in
 `localStorage`. While it's off no audio context is ever built at all; switching
 it on plays a sound, both to demonstrate the switch and because that click is
 the user gesture browsers want before they will let audio start.
 
-## Multiplayer (Survival, Duel & Battle)
+## Multiplayer (Battle)
 
 - `src/game/rng.ts` — a tiny seeded PRNG (xmur3 + mulberry32) that slots into
   the generator's injectable `rng` parameter.
 - `src/game/battle.ts` — the pure multiplayer brain: join codes, the shared
-  tile stream, rankings, and the referees that decide when a battle or duel
-  is over.
+  tile stream, rankings, and the referee that decides when a battle is over.
 - `src/net/battleSession.ts` — WebRTC plumbing via PeerJS. The host's browser
   is the authority: it owns the roster, starts/stops games, aggregates
-  scores, relays duel attacks, and broadcasts state. The join code doubles as
+  scores, relays attacks, and broadcasts state. The join code doubles as
   the host's peer id, so joining is just dialing it.
 
 Tiles are never sent over the wire. The host shares one random seed per game
 and every client grows the identical deal from it: the generator builds the
 same hidden crossword batch by batch because its RNG, word pool, and call
-sequence match everywhere. Even duel and battle attacks travel as a count —
-the receiver draws the letters from a stream seeded off the shared seed and
-their own id. In a Battle the host is also the one who splits each attack
-across the field before relaying the shares, and the one who stamps the
-elimination order the final standings are ranked by.
+sequence match everywhere. Even attacks travel as a count — the receiver
+draws the letters from a stream seeded off the shared seed and their own id.
+The host is also the one who splits each attack across the field before
+relaying the shares, and the one who stamps the elimination order the final
+standings are ranked by.
 
 ### Connection failsafes
 
@@ -287,16 +238,11 @@ through it — gameplay flows peer to peer. To use your own broker (e.g.
 ## Roadmap
 
 - [x] Single-player: solvable deals, drag & drop, live validation
-- [x] Blitz — endless ("peel"-style) play at a regular and a fast pace
-- [x] Puzzle — untimed play on a fixed 9×9/13×13/19×19 board, on two
-      independent dials: Solve (+20 tiles per clear) or Flow (pile topped back
-      up to 20), with tiles flexible or locked once confirmed
-- [x] Multiplayer: Survival (Endless Battle) — shared deal from one seed, lobbies with
-      codes/invite links, live standings, host controls, final rankings
-- [x] Duel mode: permanent words, attack tiles, escalating rounds
-- [x] Battle mode: Duel for 2–8 players — attacks split across the field,
-      elimination toasts, last one standing wins, standings by how long
-      each player lasted
+- [x] Solo — endless ("peel"-style) play at a regular and a fast pace
+- [x] Battle mode for 2–8 players — shared deal from one seed, lobbies with
+      codes/invite links, permanent words, attack tiles split across the
+      field, escalating rounds, a spectator view for the eliminated, last
+      one standing wins, standings by how long each player lasted
 - [x] Light/dark/system theme and a settings screen
 - [x] Game sounds — synthesized cues for ticks, tiles, attacks, words and endings
 - [x] Reconnection grace, auto-redial, and pause-on-disconnect
