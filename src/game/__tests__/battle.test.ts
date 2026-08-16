@@ -209,7 +209,7 @@ describe('battleWinners', () => {
   }
 
   function state(players: BattlePlayer[], winnerId: string | null = null) {
-    return { phase: 'finished' as const, players, game: 1, paused: false, winnerId };
+    return { phase: 'finished' as const, players, game: 1, winnerId };
   }
 
   it('gives the battle to the last one standing, whatever the scores say', () => {

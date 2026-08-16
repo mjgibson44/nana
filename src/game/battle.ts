@@ -34,9 +34,10 @@ export interface BattlePlayer {
   /** Buried under loose tiles — out of the current game. */
   buried: boolean;
   /**
-   * False while the player's connection is down. A disconnected player isn't
-   * out — the game pauses and waits for them to reconnect; only once the
-   * grace period runs out (or they leave on purpose) do they become `left`.
+   * False while the player's connection is down. The game plays on without
+   * them — the host just holds their seat for a short grace so a quick
+   * redial slots them straight back in; only once the grace runs out (or
+   * they leave on purpose) do they become `left`.
    */
   connected: boolean;
   /** Gone for good — left by choice, or never came back from a drop. */
@@ -60,8 +61,6 @@ export interface BattleState {
   players: BattlePlayer[];
   /** Counts the games started in this lobby, so clients can tell restarts apart. */
   game: number;
-  /** True while the game is held for a player who lost their connection. */
-  paused: boolean;
   /** Who won, once the phase is 'finished'. Null for a draw. */
   winnerId: string | null;
 }
@@ -176,7 +175,7 @@ export interface Contestant {
   score: number;
   buried: boolean;
   /** Permanently out — left by choice or never reconnected. A merely
-   * disconnected player is NOT left: the game pauses and waits for them. */
+   * disconnected player is NOT left: their seat is held while they redial. */
   left: boolean;
   waiting: boolean;
 }

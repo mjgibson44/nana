@@ -2367,29 +2367,7 @@ body {
   line-height: 1.45;
 }
 
-.net-players {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-self: stretch;
-}
-
-.net-player {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: 14px;
-  font-weight: 700;
-  background: var(--surface-alt);
-  border-radius: 8px;
-}
-
-/* The little "still trying" heartbeat beside a reconnecting name. */
+/* The little "still trying" heartbeat on the reconnecting card. */
 .net-dot {
   width: 8px;
   height: 8px;

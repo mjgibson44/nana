@@ -221,14 +221,16 @@ Multiplayer assumes phones will be phones:
 
 - Every player carries a **stable identity** (a per-tab key), so a dropped
   WebRTC link can be re-attached to the same seat — score, board and all.
-- The **host forgives drops**: a player who vanishes mid-game is
-  "reconnecting" for a two-minute grace period while the game **pauses for
-  everyone**, with an overlay naming who it's waiting for. Only when the
-  grace runs out (or they deliberately left) does the game move on.
+- **The game never waits**: a player who vanishes mid-game doesn't pause
+  anyone. The battle plays on while the host holds their seat for a short
+  grace; redial inside it and they're back on their own board, miss it and
+  they're counted out (that's their place in the standings) and the game
+  continues without them. Coming back even later still works — they rejoin
+  as a spectator and deal into the next game.
 - **Clients heal themselves**: on any loss — or on returning from an app
-  switch to find the link stale — the client redials with backoff until the
-  grace period is spent. A heartbeat tells live links from dead ones, so a
-  quick app switch doesn't disconnect you at all.
+  switch to find the link stale — the client redials with backoff until its
+  budget is spent. A heartbeat tells live links from dead ones, so a quick
+  app switch doesn't disconnect you at all.
 
 Signaling defaults to PeerJS's free public cloud; only introductions run
 through it — gameplay flows peer to peer. To use your own broker (e.g.
@@ -245,6 +247,19 @@ and `VITE_TURN_CREDENTIAL` at build time. A self-hosted
 have free tiers) both work; only relayed traffic flows through it, and only
 when a direct path fails.
 
+**Ready-made setup**: the [`infra/`](infra/) directory runs both — the broker
+behind automatic HTTPS and a locked-down coturn — on one small VPS with a
+single `docker compose up`, and [`.env.example`](.env.example) lists the build
+variables that point the game at them. `infra/README.md` walks through it,
+including a zero-cost variant (a managed relay's free tier, no server). A
+configured relay always joins the default server list rather than replacing
+it, so it can only make connections better, never newly fragile.
+
+This repo's production builds already do the zero-cost variant:
+[`.env.production`](.env.production) points them at a Metered free-tier
+relay (committed deliberately — the values ship in the bundle anyway, and
+its comment header explains the rotation story).
+
 ## Roadmap
 
 - [x] Single-player: solvable deals, drag & drop, live validation
@@ -255,6 +270,7 @@ when a direct path fails.
       one standing wins, standings by how long each player lasted
 - [x] Light/dark/system theme and a settings screen
 - [x] Game sounds — synthesized cues for ticks, tiles, attacks, words and endings
-- [x] Reconnection grace, auto-redial, and pause-on-disconnect
+- [x] Reconnection grace and auto-redial — the game plays on through drops,
+      counting out players who don't make it back
 - [ ] Hints powered by the generator's known solution
 - [ ] Live opponent boards (spectate other players' crosswords mid-battle)
