@@ -1,5 +1,5 @@
 import { Peer } from 'peerjs';
-import type { DataConnection } from 'peerjs';
+import type { DataConnection, PeerJSOption } from 'peerjs';
 import {
   battleOver,
   battleWinner,
@@ -37,6 +37,10 @@ import { randomSeed } from '../game/rng';
  *  - Clients heal themselves. On any loss — or on waking from a phone's app
  *    switch to find the link stale — the client quietly redials with backoff
  *    until the grace period is spent, and only then gives up.
+ *  - Joining retries itself. A first dial that silently stalls (a flaky
+ *    broker, a jammed negotiation) isn't the answer — joinBattle keeps
+ *    dialing with fresh connections until its budget runs out, and only a
+ *    definitive no (wrong code, host said no) fails right away.
  */
 
 /** Bumped when messages change shape, so a stale tab fails loud, not weird. */
@@ -44,6 +48,12 @@ const PROTOCOL = 4;
 
 /** How long connecting may take before it's called a failure. */
 const CONNECT_TIMEOUT_MS = 20_000;
+
+/** Each join attempt gets this long before a fresh dial replaces it. */
+const JOIN_ATTEMPT_MS = 12_000;
+
+/** Total time joining may spend across attempts before giving up. */
+const JOIN_BUDGET_MS = 30_000;
 
 /** How long the host holds a dropped player's seat before they're out. */
 export const RECONNECT_GRACE_MS = 120_000;
@@ -124,10 +134,42 @@ function brokerOptions(): { host: string; port: number; path: string; secure: bo
   };
 }
 
+/**
+ * Which servers help the browsers find a path to each other. WebRTC needs a
+ * TURN relay when a player's network refuses direct connections (symmetric
+ * NAT, strict firewalls). PeerJS's defaults include its free shared relay —
+ * best-effort infrastructure that's often the reason joining feels flaky —
+ * so a deployment that wants dependable joins brings its own: set
+ * VITE_TURN_URL (comma-separated turn:/turns: urls) plus VITE_TURN_USERNAME
+ * and VITE_TURN_CREDENTIAL at build time, and every connection gets that
+ * relay as the fallback path.
+ */
+function iceConfig(): RTCConfiguration | null {
+  const raw = import.meta.env.VITE_TURN_URL as string | undefined;
+  if (!raw) return null;
+  const urls = raw
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+  if (urls.length === 0) return null;
+  return {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      {
+        urls,
+        username: (import.meta.env.VITE_TURN_USERNAME as string | undefined) ?? '',
+        credential: (import.meta.env.VITE_TURN_CREDENTIAL as string | undefined) ?? '',
+      },
+    ],
+  };
+}
+
 function newPeer(id?: string): Peer {
   const broker = brokerOptions();
-  if (id !== undefined) return broker ? new Peer(id, broker) : new Peer(id);
-  return broker ? new Peer(broker) : new Peer();
+  const config = iceConfig();
+  if (!broker && !config) return id !== undefined ? new Peer(id) : new Peer();
+  const options: PeerJSOption = { ...(broker ?? {}), ...(config ? { config } : {}) };
+  return id !== undefined ? new Peer(id, options) : new Peer(options);
 }
 
 type ClientMessage =
@@ -204,6 +246,23 @@ function connectionFailureMessage(err: unknown): string {
     default:
       return 'Couldn’t reach the connection service. Check your network and try again.';
   }
+}
+
+/** A failed dial, marked with whether a fresh dial stands a chance. */
+class DialError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+  }
+}
+
+function retryableFailure(err: unknown): boolean {
+  const type = (err as { type?: string } | null)?.type;
+  // A missing code or an incapable browser won't improve on a redial;
+  // anything else is the broker or the network having a moment.
+  return type !== 'peer-unavailable' && type !== 'browser-incompatible';
 }
 
 function clone(state: BattleState): BattleState {
@@ -923,42 +982,61 @@ function dial(
   return new Promise((resolve, reject) => {
     const peer = newPeer();
     let settled = false;
+    let iceWatch: number | undefined;
 
-    const fail = (message: string) => {
-      if (settled) return;
+    const settle = () => {
       settled = true;
       window.clearTimeout(timeout);
+      window.clearInterval(iceWatch);
+    };
+
+    const fail = (message: string, retryable: boolean) => {
+      if (settled) return;
+      settle();
       peer.destroy();
-      reject(new Error(message));
+      reject(new DialError(message, retryable));
     };
 
     const timeout = window.setTimeout(
-      () => fail('Couldn’t reach that game. Check the code and your network, then try again.'),
+      () =>
+        fail('Couldn’t reach that game. Check the code and your network, then try again.', true),
       timeoutMs,
     );
 
-    peer.on('error', (err) => fail(connectionFailureMessage(err)));
+    peer.on('error', (err) => fail(connectionFailureMessage(err), retryableFailure(err)));
 
     peer.on('open', () => {
       const conn = peer.connect(peerIdFor(code), { reliable: true, serialization: 'json' });
+
+      // The transport's own verdict beats waiting out the timeout: ICE
+      // landing on failed means this network refuses the direct connection.
+      // (Polled, not listened for — the RTCPeerConnection appears mid-dial.)
+      iceWatch = window.setInterval(() => {
+        const pc = (conn as unknown as { peerConnection?: RTCPeerConnection }).peerConnection;
+        if (pc?.iceConnectionState === 'failed') {
+          fail(
+            'This network won’t allow the player-to-player connection. Try another network — a phone hotspot usually works.',
+            true,
+          );
+        }
+      }, 1_000);
 
       conn.on('open', () => {
         const hello: ClientMessage = { t: 'hello', name: sanitizeName(name), key, proto: PROTOCOL };
         conn.send(hello);
       });
 
-      conn.on('close', () => fail('The host closed the connection.'));
+      conn.on('close', () => fail('The host closed the connection.', false));
 
       conn.on('data', (raw) => {
         const msg = raw as HostMessage | null;
         if (!msg || typeof msg !== 'object' || settled) return;
         if (msg.t === 'reject') {
-          fail(String(msg.reason));
+          fail(String(msg.reason), false);
           return;
         }
         if (msg.t === 'state') {
-          settled = true;
-          window.clearTimeout(timeout);
+          settle();
           // The session re-registers 'data'; both handlers run, so hand it
           // the state we consumed and let it take over from the next message.
           resolve({ peer, conn, state: msg.state });
@@ -972,7 +1050,9 @@ function dial(
  * Join a lobby by its code. Resolves once the host has answered with the
  * current state — so the lobby renders complete on arrival — and rejects
  * with a human-readable Error if the code finds nothing or the network
- * won't cooperate.
+ * won't cooperate. A dial that merely stalls isn't taken as the answer:
+ * fresh dials replace it until the budget runs out, because a new broker
+ * socket and a new negotiation often succeed where a jammed one never will.
  */
 export async function joinBattle(
   code: string,
@@ -980,6 +1060,20 @@ export async function joinBattle(
   events: BattleEvents,
 ): Promise<BattleHandle> {
   const key = playerKey();
-  const { peer, conn, state } = await dial(code, name, key, CONNECT_TIMEOUT_MS);
-  return new ClientSession(peer, conn, code, name, key, state, events);
+  const deadline = Date.now() + JOIN_BUDGET_MS;
+
+  for (;;) {
+    const remaining = deadline - Date.now();
+    const attempt = Math.min(JOIN_ATTEMPT_MS, Math.max(remaining, 4_000));
+    try {
+      const { peer, conn, state } = await dial(code, name, key, attempt);
+      return new ClientSession(peer, conn, code, name, key, state, events);
+    } catch (err) {
+      const definitive = !(err instanceof DialError) || !err.retryable;
+      // A real answer, or out of time: the last failure is the verdict.
+      if (definitive || Date.now() + 4_000 > deadline) throw err;
+      // A beat between dials, so a broker mid-hiccup isn't hammered.
+      await new Promise((tick) => window.setTimeout(tick, 500));
+    }
+  }
 }
