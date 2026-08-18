@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  web:
+    name: Web tests + fixture drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      # The Swift package's golden fixtures are generated from this TS core.
+      # If the TS core changes behavior, the fixtures must be regenerated in
+      # the same change — a dirty diff here means web and Swift have drifted.
+      - name: Fixture drift check
+        run: |
+          npm run gen:fixtures
+          git diff --exit-code -- apple/Packages/WordCore/Tests/WordCoreTests/Fixtures
+      # The bundled word pool must stay byte-identical to the web's: its file
+      # order fixes the generator's bucket order (determinism-critical).
+      - name: Resource sync check
+        run: cmp src/assets/common-words.txt apple/Packages/WordCore/Sources/WordCore/Resources/common-words.txt
+
+  wordcore:
+    name: WordCore swift test (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.0-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: apple/Packages/WordCore
+        run: swift test
