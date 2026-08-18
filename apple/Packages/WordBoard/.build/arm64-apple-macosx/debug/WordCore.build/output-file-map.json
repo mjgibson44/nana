@@ -1,0 +1,103 @@
+{
+  "": {
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/primary.swiftdeps"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Battle.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Battle.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Battle.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Battle~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Battle.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Battle.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Board.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Board.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Board.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Board~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Board.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Board.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Dictionary.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Dictionary.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Dictionary.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Dictionary~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Dictionary.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Dictionary.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Generator.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Generator.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Generator.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Generator~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Generator.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Generator.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Levels.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Levels.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Levels.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Levels~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Levels.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Levels.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Modes.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Modes.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Modes.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Modes~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Modes.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Modes.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Persistence.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Persistence.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Persistence.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Persistence~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Persistence.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Persistence.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Placement.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Placement.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Placement.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Placement~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Placement.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Placement.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Rng.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Rng.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Rng.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Rng~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Rng.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Rng.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/SoundSpec.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/SoundSpec.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/SoundSpec.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/SoundSpec~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/SoundSpec.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/SoundSpec.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/TileMap.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/TileMap.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/TileMap.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/TileMap~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/TileMap.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/TileMap.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Tutorial.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Tutorial.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Tutorial.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Tutorial~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Tutorial.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Tutorial.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordCore/Sources/WordCore/Types.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Types.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Types.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Types~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Types.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/Types.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/DerivedSources/resource_bundle_accessor.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/resource_bundle_accessor.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/resource_bundle_accessor.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/resource_bundle_accessor~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/resource_bundle_accessor.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordCore.build/resource_bundle_accessor.dia"
+  }
+}

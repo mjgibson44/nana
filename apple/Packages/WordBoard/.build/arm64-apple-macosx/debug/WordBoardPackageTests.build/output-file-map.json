@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardPackageTests.build/primary.swiftdeps"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardPackageTests.build/runner.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardPackageTests.build/runner.dia"
+  }
+}

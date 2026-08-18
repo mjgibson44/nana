@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/primary.swiftdeps"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/Tests/WordBoardTests/BoardGeometryTests.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/BoardGeometryTests.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/BoardGeometryTests.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/BoardGeometryTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/BoardGeometryTests.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/BoardGeometryTests.dia"
+  },
+  "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/Tests/WordBoardTests/GestureMachineTests.swift": {
+    "dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/GestureMachineTests.d",
+    "object": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/GestureMachineTests.swift.o",
+    "swiftmodule": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/GestureMachineTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/GestureMachineTests.swiftdeps",
+    "diagnostics": "/Users/mgibson/conductor/workspaces/nana/vientiane/apple/Packages/WordBoard/.build/arm64-apple-macosx/debug/WordBoardTests.build/GestureMachineTests.dia"
+  }
+}

@@ -12,6 +12,24 @@ options:
 packages:
   WordCore:
     path: Packages/WordCore
+  WordBoard:
+    path: Packages/WordBoard
+
+schemes:
+  Word:
+    build:
+      targets:
+        Word: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - WordTests
+    profile:
+      config: Release
+    archive:
+      config: Release
 
 targets:
   Word:
@@ -28,6 +46,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: WordCore
+      - package: WordBoard
     info:
       path: Word/Info.plist
       properties:
@@ -45,3 +64,23 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         ENABLE_PREVIEWS: YES
         CODE_SIGN_STYLE: Automatic
+
+  # App-layer tests that need SwiftUI (the §11 board-render perf gate at max
+  # zoom-out). Pure logic tests live in the packages and run in CI; this
+  # bundle runs locally / on a Mac via `xcodebuild test -scheme Word`.
+  WordTests:
+    type: bundle.unit-test
+    supportedDestinations: [iOS, macOS]
+    deploymentTarget:
+      iOS: "18.0"
+      macOS: "15.0"
+    sources:
+      - path: WordTests
+    dependencies:
+      - target: Word
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        # XcodeGen writes one iOS-shaped TEST_HOST; the multiplatform app's
+        # macOS bundle nests its binary differently.
+        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/Word.app/Contents/MacOS/Word"
