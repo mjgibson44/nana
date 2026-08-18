@@ -40,6 +40,10 @@ enum SoloEndReason: Equatable {
 enum SoloSplash: Equatable {
     case start
     case speedUp(seconds: Int, tiles: Int)
+    /// A game put away by the OS and picked back up. Unlike the others this
+    /// one waits for the player rather than timing out — coming back to a
+    /// clock already running would cost them tiles they never saw.
+    case resumed
 }
 
 enum SoloClockEffect: Equatable {
@@ -66,6 +70,31 @@ struct SoloSession: Equatable {
         // The opening card is readable content, so the initial clock starts
         // frozen and is released when the card is dismissed.
         countdown = .paused(remaining: Double(endlessInitialSeconds(pace)))
+    }
+
+    /// The tutorial: a lesson has nothing to run out of, so there is no
+    /// countdown and no opening card holding one (App.tsx:379–380, 584–590).
+    init(tutorialAt _: Date) {
+        pace = .regular
+        countdown = nil
+        splash = nil
+    }
+
+    /// A game coming back from a saved blob. The clock returns frozen at the
+    /// seconds it had left, behind the resume card, so time away is never
+    /// charged and a long absence can't expire the round on arrival.
+    init(
+        restoring pace: SoloPace,
+        phase: SoloPhase,
+        dripsElapsed: Int,
+        remaining: TimeInterval?
+    ) {
+        self.pace = pace
+        self.phase = phase
+        self.dripsElapsed = dripsElapsed
+        countdown = remaining.map { .paused(remaining: max(0, $0)) }
+        // The resume card is the readable overlay holding that clock.
+        splash = .resumed
     }
 
     var clockHeld: Bool { paused || splash != nil }

@@ -96,6 +96,11 @@ enum SoloGaugeTone: Equatable {
     case over
 }
 
+/// How many seconds of an Endless round tick down to the tiles landing. Three
+/// beats is long enough to be a warning and short enough not to be a metronome
+/// (App.tsx:102–106).
+let ENDLESS_TICK_FROM = 3
+
 /// The solo board's interaction model, ported from the word-building half of
 /// `App.tsx`. Phase 2a supplied the board and unified gesture layer; this model
 /// also owns phase 2b's editing loop and Solo session lifecycle. Tutorial and
@@ -121,6 +126,25 @@ final class GameModel {
     /// Bumped per deal so the viewport knows to re-center.
     private(set) var gameSerial = 0
     var boardLocked = false
+
+    /// Which mode is being played. Battle joins in phase 4; the tutorial runs
+    /// the scripted lesson with no clock and no score.
+    private(set) var mode: GameMode = .endless
+    /// The lesson's progress while `mode == .tutorial`.
+    private(set) var tutorial: TutorialRun?
+
+    /// Who sounds the game's cues (audio + haptics). Optional so tests and
+    /// previews stay silent, and so the model never imports AVFoundation.
+    var cues: GameCueSink?
+
+    /// The last Endless tick sounded, keyed by round deadline and second so
+    /// the 4Hz heartbeat plays each of the last three beats exactly once
+    /// (App.tsx:1559–1569).
+    private var tickedKey: String?
+    /// Whether the loose pile is currently over the limit. Digging back under
+    /// re-arms the alarm, so a player riding the limit is warned every time
+    /// they cross it (App.tsx:1578–1588).
+    private var overflowing = false
 
     // Recomputed once per board change rather than per render.
     private(set) var bounds = boardBounds(TileMap())
@@ -278,7 +302,23 @@ final class GameModel {
         rack.count + cellFeedback.values.filter { $0 != .valid }.count
     }
 
-    var showsLooseGauge: Bool { phase == .drip && !isComplete }
+    var showsLooseGauge: Bool { mode == .endless && phase == .drip && !isComplete }
+
+    /// The tutorial has no clock at all — its board waits for the player
+    /// (App.tsx:379–380).
+    var showsClock: Bool { mode == .endless }
+
+    var isTutorial: Bool { mode == .tutorial }
+
+    /// The tutorial's step counter takes the score's corner (App.tsx:3070–3077).
+    var tutorialProgress: (step: Int, of: Int)? {
+        guard let tutorial else { return nil }
+        return (tutorial.displayStep, TUTORIAL_STEPS)
+    }
+
+    /// Every word is down: the way out replaces the pile and the word bar
+    /// (App.tsx:3286–3297).
+    var tutorialFinished: Bool { tutorial?.isDone ?? false }
 
     var gaugeTone: SoloGaugeTone {
         guard showsLooseGauge else { return .ok }
@@ -319,12 +359,33 @@ final class GameModel {
         seed: String = randomSeed(), pace: SoloPace = .regular, now: Date = .now
     ) {
         self.seed = seed
+        mode = .endless
+        tutorial = nil
         solo = SoloSession(pace: pace, now: now)
         gameSerial += 1
         setBoard(TileMap())
         let puzzle = try? generatePuzzle(
             wordPool: commonWords, tileCount: ENDLESS_START_TILES, rng: seededRng(seed))
         rack = puzzle?.letters ?? []
+        resetPlayState()
+    }
+
+    /// Start the guided lesson. Its first word is dealt spelled out in a row
+    /// rather than shuffled — step one is about getting a word down at all
+    /// (App.tsx:527–530) — and there is no clock to run out.
+    func newTutorial(now: Date = .now) {
+        seed = "tutorial"
+        mode = .tutorial
+        tutorial = TutorialRun()
+        solo = SoloSession(tutorialAt: now)
+        gameSerial += 1
+        setBoard(TileMap())
+        rack = tutorialScript[0].tiles
+        resetPlayState()
+    }
+
+    /// Everything a fresh board resets, whatever dealt it.
+    private func resetPlayState() {
         selection = nil
         drag = nil
         wordDrag = nil
@@ -340,6 +401,8 @@ final class GameModel {
         highlightedWord = nil
         history = []
         future = []
+        tickedKey = nil
+        overflowing = false
         // Pre-anchor the middle cell so typing previews immediately
         // (App.tsx:536–539).
         let middle = keyOf(BOARD_SIZE / 2, BOARD_SIZE / 2)
@@ -370,6 +433,38 @@ final class GameModel {
         case .buried:
             finishGame(reason: .buried)
         }
+        soundTick(at: now)
+        soundOverflow()
+    }
+
+    /// The last few seconds of an Endless round tick, once a second, so the
+    /// tiles about to land are heard coming (App.tsx:1552–1569). Keyed by
+    /// deadline and second: the heartbeat runs at 4Hz, and a held clock is
+    /// silent because a paused countdown reports no deadline.
+    private func soundTick(at now: Date) {
+        guard mode == .endless, !isComplete, !solo.clockHeld,
+            case let .running(endsAt) = solo.countdown
+        else { return }
+        let second = Int(ceil(max(0, endsAt.timeIntervalSince(now))))
+        guard second >= 1, second <= ENDLESS_TICK_FROM else { return }
+        let key = "\(endsAt.timeIntervalSinceReferenceDate):\(second)"
+        guard tickedKey != key else { return }
+        tickedKey = key
+        cues?.play(.tick)
+    }
+
+    /// Crossing the loose limit sounds the alarm — a warning, not a verdict:
+    /// the round's remaining seconds are the deadline to dig back under.
+    /// Digging under re-arms it (App.tsx:1571–1588).
+    private func soundOverflow() {
+        guard mode == .endless, phase == .drip, !isComplete else {
+            overflowing = false
+            return
+        }
+        let over = looseTiles > ENDLESS_LOOSE_LIMIT
+        guard over != overflowing else { return }
+        overflowing = over
+        if over { cues?.play(.overflow) }
     }
 
     /// The clear bonus lands before the refill. The view supplies the web's
@@ -399,7 +494,16 @@ final class GameModel {
         showSummary = true
         clearTransientInput()
         clearFocus()
+        // Buried, or out of time: the game beat you (App.tsx:1370).
+        cues?.play(.lose)
+        // One funnel for every ending, so stats are recorded exactly once.
+        onFinish?(finalScore, finalWords.count)
     }
+
+    /// Called once per finished game, with the frozen score and word count —
+    /// the single stats/leaderboard funnel every game end flows through
+    /// (plan §8.1 hangs Game Center submission here in phase 3).
+    var onFinish: ((Int, Int) -> Void)?
 
     func loadDictionary() async {
         guard dictionary == nil,
@@ -659,15 +763,81 @@ final class GameModel {
             }
         }
 
-        // Sound, tutorial gap-step enforcement and battle attacks join here in
-        // later slices — this remains the one funnel for every landing.
+        // The tutorial runs to a script, and its last step is about the gap
+        // tile. The word that step asks for only counts when a gap played it —
+        // typing straight over the letter on the board gets the same word by
+        // the wrong road, so it's refused before anything lands
+        // (App.tsx:2064–2081).
+        let wanted = tutorial?.wantedWord
+        let madeStepWord = wanted.map { word in newRuns.contains { $0.word == word } } ?? false
+        if let tutorial, tutorial.needsGap, madeStepWord,
+            !picksToPlace.contains(where: { $0.letter == nil })
+        {
+            rejectToast(
+                "Spell \(wanted?.uppercased() ?? "") with a gap tile — press Space where the "
+                    + "borrowed letter goes.")
+            return
+        }
+
+        // Battle attacks join this funnel in phase 4 — it stays the one road
+        // every landing takes.
         remember()
         setBoard(next)
         let spent = Set(result.steps.map(\.rackIndex))
         rack = rack.enumerated().filter { !spent.contains($0.offset) }.map(\.element)
         lastDir = dir
         clearFocus()
+        cues?.play(.commit)
+        soundOverflow()
+
+        // The step's word is on the board — deal the next one's tiles.
+        if madeStepWord { advanceTutorial(placedDir: dir) }
     }
+
+    // MARK: The tutorial's script (App.tsx:1990–2017, 2147–2160)
+
+    /// Move the lesson on: call out the word that just landed and deal the
+    /// next step's tiles. Every step crosses the one before it, so guessing
+    /// the other way round next aims the following word right without a
+    /// rotate. Returns true when the whole script is finished.
+    @discardableResult
+    private func advanceTutorial(placedDir: Direction) -> Bool {
+        guard var run = tutorial else { return false }
+        let (done, deal) = run.advance()
+        tutorial = run
+        lastDir = placedDir == .across ? .down : .across
+
+        // Skipped from end to end: hand the player on rather than park them
+        // on a finish button for a lesson they plainly opted out of.
+        if deal == nil, run.skippedEverything {
+            onTutorialWalkedOut?()
+            return true
+        }
+        if let done { rejectToast(done) }
+        guard let deal else { return true }
+        appendDealtTiles(deal)
+        return false
+    }
+
+    /// Skip the step in hand: the tutorial plays the step's word itself, so
+    /// the next step's instructions still describe the board in front of the
+    /// player. A board with nowhere left to play that word just moves on —
+    /// skipping should never be the thing that gets stuck.
+    func skipTutorialStep() {
+        guard var run = tutorial, let step = run.current else { return }
+        run.countSkip()
+        tutorial = run
+        if let played = scriptedPlacement(board: board, bounds: bounds, step: step, rack: rack) {
+            commit(keyOf(played.anchor.row, played.anchor.col), played.dir,
+                picksToPlace: played.picks)
+        } else {
+            advanceTutorial(placedDir: lastDir)
+        }
+    }
+
+    /// A player who skipped every step is walked out rather than parked on a
+    /// finish button; the router decides where they land.
+    var onTutorialWalkedOut: (() -> Void)?
 
     // MARK: Dragging (App.tsx:2418–2533)
 
@@ -920,14 +1090,67 @@ final class GameModel {
             return
         }
 
-        rack.append(contentsOf: deal.letters)
+        appendDealtTiles(deal.letters)
+        if let message { rejectToast(message) }
+    }
+
+    /// Tiles arriving from anywhere the player didn't put them: a clock drip,
+    /// a board clear, the next tutorial step. They join every remembered pile
+    /// too — undoing a move must take back the move alone, never disappear
+    /// tiles that were dealt (App.tsx:1451–1459).
+    private func appendDealtTiles(_ letters: [String]) {
+        guard !letters.isEmpty else { return }
+        rack.append(contentsOf: letters)
         for index in history.indices {
-            history[index].rack.append(contentsOf: deal.letters)
+            history[index].rack.append(contentsOf: letters)
         }
         for index in future.indices {
-            future[index].rack.append(contentsOf: deal.letters)
+            future[index].rack.append(contentsOf: letters)
         }
-        if let message { rejectToast(message) }
+        cues?.play(.deal)
+        soundOverflow()
+    }
+
+    // MARK: Surviving process death (plan §6.1)
+
+    /// The in-progress game as a serializable blob, or nil when there's
+    /// nothing worth restoring (a finished game, an untouched opening board,
+    /// or the tutorial — which is a lesson, not a run to lose).
+    func savedGame(at now: Date = .now) -> SavedSoloGame? {
+        guard mode == .endless, !isComplete else { return nil }
+        guard !board.isEmpty || bankedBonus > 0 || phase == .drip else { return nil }
+        return SavedSoloGame(
+            seed: seed,
+            pace: pace.rawValue,
+            board: board,
+            rack: rack,
+            phase: phase == .drip ? "drip" : "initial",
+            dripsElapsed: dripsElapsed,
+            bankedBonus: bankedBonus,
+            remainingSeconds: solo.remaining(at: now),
+            dealSerial: dealSerial,
+            savedAt: now.timeIntervalSince1970)
+    }
+
+    /// Put a saved game back on the board. The clock comes back **held**, like
+    /// any board behind a readable overlay, and starts when the player
+    /// dismisses the resume card — a game must never lose seconds to being
+    /// away, nor resume already expired.
+    func restore(_ saved: SavedSoloGame, now: Date = .now) {
+        seed = saved.seed
+        mode = .endless
+        tutorial = nil
+        solo = SoloSession(
+            restoring: saved.soloPace,
+            phase: saved.soloPhase,
+            dripsElapsed: saved.dripsElapsed,
+            remaining: saved.remainingSeconds)
+        gameSerial += 1
+        setBoard(saved.board)
+        rack = saved.rack
+        resetPlayState()
+        bankedBonus = saved.bankedBonus
+        dealSerial = saved.dealSerial
     }
 
     private func clearTransientInput() {

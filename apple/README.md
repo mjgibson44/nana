@@ -4,63 +4,45 @@ The native iPhone/iPad/Mac port, built to [`docs/apple-port-plan.md`](../docs/ap
 
 ## State
 
-**Phase 0 + Phase 1 and phase 2a are complete. Phase 2b is underway: its core
-solo editing loop is built.**
+**Phases 0–2 are complete, and phase 4's protocol half is built.** What runs today:
+Solo (both paces) and the guided tutorial, playable on iPhone, iPad and Mac.
 
-`Packages/WordCore` is the full game core in pure Swift — board rules, generator,
-pacing/attack tables, placement engine, battle referee/codes/tile-stream, tutorial
-script, sound-cue tables, and persistence models — **bit-exact with the web game**:
-golden fixtures generated from the TypeScript core (`npm run gen:fixtures` at the
-repo root) replay in the Swift tests, so the same seed deals the same letters on
-both platforms.
-
-`Packages/WordBoard` is the board's interaction brain, kept pure so it tests in CI
-without a simulator (plan §11): the **gesture disambiguation state machine**
-(pointer events in, intents out — 6pt tap slop, 350ms double-press, 300ms
-hold-to-drag preview, locked-board semantics, pointer-id filtering) and the
-**viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit,
-board-growth scroll compensation), each with an exhaustive Swift Testing suite.
-
-The app target's `Word/Board` + `Word/Game` are the phase-2a SwiftUI layer: a
-custom pan/zoom board viewport (owning its offset is what lets pinch zoom and its
-scroll correction land in the same frame), a Canvas-drawn cell lattice with real
-views only for occupied cells (the §11 zoom-out perf gate is a measured XCTest in
-`WordTests`, ~20ms for a full 33×33 board offscreen), and one gesture pipeline
-feeding board and rack alike.
-
-The first phase-2b slices complete the editing loop and Solo session lifecycle:
-Mac/iPad hardware-keyboard commands, a responsive word bar, 50-deep undo/redo,
-selected-word move/rotate/remove controls, both Solo pace schedules, wall-clock
-countdowns that freeze behind readable overlays, the loose-tile gauge and board
-alarm, board-clear refills/bonuses, opaque pause, and a final word/score summary.
-The lifecycle is a deterministic state machine with focused expiry, pause and
-history tests; the controls and summary also have render snapshots. Remaining
-phase 2b work is process-death save/resume, tutorial and onboarding,
-stats/settings/theme, audio/haptics, and the full accessibility pass.
+| Package / target | What it is |
+|---|---|
+| `Packages/WordCore` | The game core in pure Swift — **bit-exact with the web game** via golden fixtures generated from the TypeScript core (`npm run gen:fixtures`), so the same seed deals the same letters on both platforms. |
+| `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold-to-drag, locked-board semantics, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation). |
+| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
+| `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for occupied cells, one gesture pipeline feeding board and rack, the editing loop with undo/redo, the paced Solo session, the tutorial, home/stats/settings screens, synthesized audio + haptics, and save/restore across process death. |
 
 ```bash
-cd apple/Packages/WordCore && swift test    # core + golden parity fixtures
+cd apple/Packages/WordCore  && swift test   # core + golden parity fixtures
 cd apple/Packages/WordBoard && swift test   # gesture machine + board geometry
+cd apple/Packages/WordNet   && swift test   # battle protocol over a mock mesh
 xcodebuild test -project apple/Word.xcodeproj -scheme Word \
-  -destination 'platform=macOS'             # board render perf gate (Mac only)
+  -destination 'platform=macOS'              # app tests incl. the zoom-out perf gate
 ```
 
-CI (`.github/workflows/ci.yml`) runs the web tests, both packages' Swift tests, a
-fixture-drift check (TS core changed → fixtures must be regenerated in the same
-commit), and a resource-sync check (the bundled word pool must stay byte-identical
-to the web's — its file order is determinism-critical).
+CI (`.github/workflows/ci.yml`) runs the web tests, all three Swift packages on Linux, a
+fixture-drift check (TS core changed → fixtures must be regenerated in the same commit),
+and a resource-sync check (the bundled word pool must stay byte-identical to the web's —
+its file order is determinism-critical).
 
 Conventions and the porting API contract live in [`PORTING.md`](PORTING.md).
 
-Known phase-2a gaps to close on-device during 2b (all flagged inline in code):
-pinch-pan tracks the gesture's *initial* midpoint (live-midpoint tracking needs a
-`UIPinchGestureRecognizer` bridge — the math in `WordBoard.PinchAnchor` already
-takes a live midpoint), Apple Pencil is classified as touch (correct behavior,
-coarser than the web's three-way split), and macOS trackpad scroll-to-pan is not
-wired (drag-to-pan and pinch work; scroll-wheel events need an NSEvent bridge —
-phase 5 Mac polish).
+### What's left, and what it's waiting on
 
-## Picking it up on a Mac (phase 2 — the SwiftUI app)
+- **Phase 3 (Game Center + Daily Deal)** needs an Apple Developer account, an App ID with
+  the Game Center/iCloud capabilities, and test Apple IDs — its exit criteria can't be
+  exercised without them. The stats funnel it hangs off already exists
+  (`GameModel.onFinish`).
+- **Phase 4's remaining half** is the `GKMatch` adapter behind `BattleTransport`, plus the
+  lobby UI and the 8-device spike (§7.4). The protocol it speaks is done and tested.
+- Known gaps to tune on-device: pinch pans about the gesture's *initial* midpoint (live
+  midpoint tracking wants a `UIPinchGestureRecognizer` bridge — `PinchAnchor` already
+  accepts one), Apple Pencil is classified as touch, and macOS trackpad scroll-to-pan
+  needs an NSEvent bridge (phase 5 Mac polish; drag-to-pan and pinch work today).
+
+## Picking it up on a Mac
 
 ```bash
 ./apple/bootstrap.sh
@@ -73,9 +55,11 @@ Signing & Capabilities. Then Run — the game screen deals through WordCore and 
 the bundled dictionary (`public/dictionary.txt` is referenced from the web app
 directly, so the platforms can't drift).
 
-Continue phase 2b from process-death save/resume. The notes in
-`../docs/apple-port-notes/ui.md` remain the interaction source of truth, with
-file:line references into the web app.
+Next up is phase 3 (Game Center) once the developer account is in place, or the
+`GKMatch` adapter behind `WordNet`'s `BattleTransport` for phase 4. The notes in
+`../docs/apple-port-notes/` remain the source of truth: `ui.md` for interaction
+and `protocol.md` for the wire format, both with file:line references into the
+web app.
 
 ## Layout
 
@@ -88,8 +72,13 @@ apple/
   Packages/WordBoard/           # board interaction logic (SPM, Linux-testable)
     Sources/WordBoard/          #   GestureMachine + BoardGeometry (pure, no SwiftUI)
     Tests/WordBoardTests/       #   exhaustive gesture + viewport-math suites
+  Packages/WordNet/             # battle protocol (SPM, Linux-testable, no GameKit)
+    Sources/WordNet/            #   Protocol + HostSession/ClientSession + MemoryTransport
+    Tests/WordNetTests/         #   protocol, roster, grace, attacks, referee, election
   Word/                         # the app target (SwiftUI)
     Board/                      #   camera, board rendering, unified pointer surface
-    Game/                       #   model, Solo clock state machine, screen + chrome
+    Game/                       #   model, Solo clock machine, screen + chrome, tutorial
+    Screens/                    #   router, home, doors/cards, stats, settings
+    Services/                   #   audio synthesis, storage, settings, saved games
   WordTests/                    # app-layer rendering, editing + lifecycle tests
 ```

@@ -20,6 +20,10 @@ struct BoardScene {
     var selectedKey: CellKey?
     /// A controls row under the pointer highlights its whole run.
     var highlightedKeys: Set<CellKey> = []
+    /// The words each placed tile reads in, for its spoken label. The web's
+    /// board is bare divs with no accessibility tree at all; the rebuild closes
+    /// that rather than mirroring it (plan §6.6).
+    var wordsAt: [CellKey: [String]] = [:]
     /// The anchored cell and its direction — where the rotate control sits.
     var rotate: (key: CellKey, dir: Direction)?
     var locked = false
@@ -65,6 +69,10 @@ struct BoardContentView: View {
                 .opacity(tile.key == scene.hiddenKey ? 0 : 1)
                 .frame(width: rect.width, height: rect.height)
                 .position(x: rect.midX, y: rect.midY)
+                .accessibilityElement()
+                .accessibilityLabel(Self.tileLabel(for: tile.key, in: scene, letter: tile.letter))
+                .accessibilityAddTraits(
+                    tile.key == scene.selectedKey ? [.isButton, .isSelected] : .isButton)
             }
 
             // Ghost letters of the staged word, and the holes its gaps hold
@@ -112,6 +120,27 @@ struct BoardContentView: View {
         .background(Ink.boardBg)
     }
 
+    /// What a placed tile says out loud: its letter, where it sits, the words
+    /// it reads in, and — crucially — its status in words rather than color
+    /// only, which the web has no equivalent for at all (plan §6.6).
+    static func tileLabel(for key: CellKey, in scene: BoardScene, letter: String) -> String {
+        let cell = parseKey(key)
+        var parts = [
+            "\(letter.uppercased()), row \(cell.row + 1) column \(cell.col + 1)"
+        ]
+        if let words = scene.wordsAt[key], !words.isEmpty {
+            parts.append("part of \(words.map { $0.uppercased() }.joined(separator: " and "))")
+        }
+        switch scene.feedback[key] {
+        case .valid: parts.append("valid")
+        case .invalid: parts.append("not a word")
+        case .isolated: parts.append("not in a word yet")
+        case .disconnected: parts.append("cut off from the crossword")
+        case nil: break
+        }
+        return parts.joined(separator: ", ")
+    }
+
     /// Where the rotate control draws, in content coordinates: riding the
     /// anchored cell's bottom-right corner.
     static func rotateRect(for key: CellKey, metrics: BoardMetrics) -> CGRect {
@@ -146,6 +175,31 @@ struct BoardTileView: View {
                     Rectangle().strokeBorder(Ink.line, lineWidth: max(1.5, cellSize * 0.045))
                 }
             }
+            // Status in shape as well as color, so validation isn't color-only
+            // (plan §6.6): a problem tile wears a bar under its letter, doubled
+            // for the worst of them.
+            .overlay(alignment: .bottom) {
+                if let marks = statusMarks {
+                    HStack(spacing: max(1, cellSize * 0.06)) {
+                        ForEach(0..<marks, id: \.self) { _ in
+                            Capsule()
+                                .fill(inkColor.opacity(0.85))
+                                .frame(width: cellSize * 0.16, height: max(1.5, cellSize * 0.055))
+                        }
+                    }
+                    .padding(.bottom, max(1.5, cellSize * 0.07))
+                    .accessibilityHidden(true)
+                }
+            }
+    }
+
+    /// How many bars a tile's problem earns — none when it's fine.
+    private var statusMarks: Int? {
+        switch feedback {
+        case .invalid: 2
+        case .disconnected, .isolated: 1
+        case .valid, nil: nil
+        }
     }
 
     private var fillColor: Color {

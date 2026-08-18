@@ -35,14 +35,26 @@ struct RackView: View {
                         spacing: Self.spacing
                     ) {
                         ForEach(Array(letters.enumerated()), id: \.offset) { index, letter in
-                            RackTileView(
-                                letter: letter,
-                                pickOrder: picks.firstIndex(of: index).map { $0 + 1 }
-                            )
-                            .opacity(index == hiddenIndex ? 0 : 1)
-                            .pointerSurface(
-                                target: { _ in downTarget(index, letter) },
-                                dispatch: pointerEvent)
+                            let pickOrder = picks.firstIndex(of: index).map { $0 + 1 }
+                            RackTileView(letter: letter, pickOrder: pickOrder)
+                                .opacity(index == hiddenIndex ? 0 : 1)
+                                .pointerSurface(
+                                    target: { _ in downTarget(index, letter) },
+                                    dispatch: pointerEvent)
+                                // Rack tiles are bare divs on the web too
+                                // (Rack.tsx:40–56); the port names them.
+                                .accessibilityElement()
+                                .accessibilityLabel(
+                                    pickOrder.map {
+                                        "\(letter.uppercased()), tile \(index + 1) of "
+                                            + "\(letters.count), letter \($0) of your word"
+                                    } ?? "\(letter.uppercased()), tile \(index + 1) of \(letters.count)")
+                                .accessibilityHint(
+                                    pickOrder == nil
+                                        ? "Adds this letter to your word"
+                                        : "Takes this letter back out of your word")
+                                .accessibilityAddTraits(
+                                    pickOrder == nil ? .isButton : [.isButton, .isSelected])
                         }
                     }
                     // Ten tiles a row, like the web's capped rack field.

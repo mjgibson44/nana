@@ -9,7 +9,15 @@ struct GameScreen: View {
     /// the port's stand-in for the web's client coordinates.
     nonisolated static let space = "game"
 
-    @State private var model = GameModel()
+    /// Owned by the router, which decides what was dealt (a solo run, a
+    /// restored save, the tutorial) before this screen appears.
+    var model: GameModel
+    /// Back out to the home screen — also where a finished tutorial leads.
+    var onLeave: () -> Void = {}
+    /// Raise the settings page over the game (the router owns it, so one page
+    /// serves both home and game).
+    var onShowSettings: () -> Void = {}
+
     @State private var camera = BoardCamera()
     @State private var machine = GestureMachine()
     @State private var holdTask: Task<Void, Never>?
@@ -24,25 +32,34 @@ struct GameScreen: View {
         ZStack {
             VStack(spacing: 0) {
                 header
-                boardArea
-                wordBar
-                RackView(
-                    letters: model.rack,
-                    hiddenIndex: model.hiddenRackIndex,
-                    picks: model.picks,
-                    pointerEvent: dispatch,
-                    downTarget: { index, letter in .rackTile(index: index, letter: letter) },
-                    onShuffle: {
-                        model.shufflePile()
-                        focusGame()
-                    }
-                )
-                .onGeometryChange(for: CGRect.self) { proxy in
-                    proxy.frame(in: .named(Self.space))
-                } action: { frame in
-                    rackFrame = frame
+                if let progress = model.tutorialProgress, !model.tutorialFinished {
+                    TutorialBanner(step: progress.step)
                 }
-                .allowsHitTesting(model.canAcceptInput)
+                boardArea
+                // A finished lesson hands its whole working area to the way
+                // out: there is nothing left to type or place.
+                if model.tutorialFinished {
+                    TutorialFinishBand(onFinish: onLeave)
+                } else {
+                    wordBar
+                    RackView(
+                        letters: model.rack,
+                        hiddenIndex: model.hiddenRackIndex,
+                        picks: model.picks,
+                        pointerEvent: dispatch,
+                        downTarget: { index, letter in .rackTile(index: index, letter: letter) },
+                        onShuffle: {
+                            model.shufflePile()
+                            focusGame()
+                        }
+                    )
+                    .onGeometryChange(for: CGRect.self) { proxy in
+                        proxy.frame(in: .named(Self.space))
+                    } action: { frame in
+                        rackFrame = frame
+                    }
+                    .allowsHitTesting(model.canAcceptInput)
+                }
             }
 
             // The drag ghost rides above everything (web z=1000).
@@ -86,7 +103,6 @@ struct GameScreen: View {
         .onKeyPress(phases: [.down, .repeat], action: handleKeyPress)
         .task {
             clockNow = .now
-            model.newGame(now: clockNow)
             await model.loadDictionary()
             focusGame()
         }
@@ -103,7 +119,9 @@ struct GameScreen: View {
             }
         }
         .task(id: model.splash) {
-            guard model.splash != nil else { return }
+            // The resume card waits for the player: a restored game whose
+            // clock started itself would charge them for being away.
+            guard let splash = model.splash, splash != .resumed else { return }
             do {
                 try await Task.sleep(for: .milliseconds(1_700))
             } catch {
@@ -141,7 +159,24 @@ struct GameScreen: View {
 
     // MARK: Solo scoreboard
 
+    @ViewBuilder
     private var header: some View {
+        if let progress = model.tutorialProgress {
+            TutorialHeaderView(
+                step: progress.step,
+                of: progress.of,
+                showsSkip: !model.tutorialFinished,
+                onSkip: {
+                    model.skipTutorialStep()
+                    focusGame()
+                },
+                onLeave: onLeave)
+        } else {
+            soloHeader
+        }
+    }
+
+    private var soloHeader: some View {
         SoloHeaderView(
             score: model.score,
             complete: model.isComplete,
@@ -155,7 +190,9 @@ struct GameScreen: View {
             onNewDeal: startNewGame,
             onShowSummary: { model.setSummaryPresented(true) },
             pace: model.pace,
-            onChoosePace: startNewGame(pace:))
+            onChoosePace: startNewGame(pace:),
+            onShowSettings: onShowSettings,
+            onReturnHome: onLeave)
     }
 
     // MARK: The board viewport
@@ -234,6 +271,7 @@ struct GameScreen: View {
             cursorKey: model.cursorKey,
             selectedKey: model.selectedKey,
             highlightedKeys: model.highlightedKeys,
+            wordsAt: model.wordsByCell.mapValues { $0.map(\.word) },
             rotate: rotateControl,
             locked: model.boardLocked)
     }
@@ -630,14 +668,23 @@ struct GameScreen: View {
                 .padding(.top, 10)
                 .transition(.opacity)
                 .task(id: toast.serial) {
+                    // Tiles landing, a refusal, a step completed: things the
+                    // board can't show. The web's toast is an aria-live region;
+                    // this is its announcement (plan §6.6).
+                    AccessibilityNotification.Announcement(toast.text).post()
                     try? await Task.sleep(for: .seconds(2.5))
                     model.clearToast(serial: toast.serial)
                 }
+                .accessibilityHidden(true)
                 .allowsHitTesting(false)
         }
     }
 }
 
 #Preview {
-    GameScreen()
+    GameScreen(model: {
+        let model = GameModel()
+        model.newGame(seed: "preview")
+        return model
+    }())
 }

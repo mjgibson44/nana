@@ -14,6 +14,8 @@ packages:
     path: Packages/WordCore
   WordBoard:
     path: Packages/WordBoard
+  WordNet:
+    path: Packages/WordNet
 
 schemes:
   Word:
@@ -47,6 +49,7 @@ targets:
     dependencies:
       - package: WordCore
       - package: WordBoard
+      - package: WordNet
     info:
       path: Word/Info.plist
       properties:

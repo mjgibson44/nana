@@ -15,6 +15,8 @@ struct SoloHeaderView: View {
     var onShowSummary: () -> Void
     var pace: SoloPace
     var onChoosePace: (SoloPace) -> Void
+    var onShowSettings: () -> Void = {}
+    var onReturnHome: () -> Void = {}
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -99,6 +101,9 @@ struct SoloHeaderView: View {
                         }
                     }
                 }
+                Divider()
+                Button("Settings", action: onShowSettings)
+                Button("Return home", action: onReturnHome)
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 17, weight: .bold))
@@ -184,6 +189,7 @@ struct SoloSplashView: View {
         switch splash {
         case .start: "Game on!"
         case .speedUp: "Speeding up!"
+        case .resumed: "Welcome back"
         }
     }
 
@@ -194,6 +200,8 @@ struct SoloSplashView: View {
                 + "\(formatSeconds(Double(endlessInitialSeconds(pace)))) to place them"
         case let .speedUp(seconds, tiles):
             "+\(tiles) tiles every \(formatSeconds(Double(seconds))) from here"
+        case .resumed:
+            "Your game is where you left it — the clock starts when you tap."
         }
     }
 }
