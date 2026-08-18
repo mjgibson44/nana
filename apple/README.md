@@ -24,18 +24,17 @@ Conventions and the porting API contract live in [`PORTING.md`](PORTING.md).
 
 ## Picking it up on a Mac (phase 2 — the SwiftUI app)
 
-There is deliberately no Xcode project yet — this container has no Xcode, and checked-in
-project skeletons nobody has opened are worse than none. First session on a Mac:
+```bash
+./apple/bootstrap.sh
+```
 
-1. Xcode → New Project → **Multiplatform App** (iOS + macOS destinations), name `Word`,
-   save into `apple/` (creates `apple/Word.xcodeproj`).
-2. Add the local package: File → Add Package Dependencies → Add Local → select
-   `apple/Packages/WordCore`. Link the `WordCore` library to the app target.
-3. Add `public/dictionary.txt` to the app target as a bundled resource (the validation
-   dictionary is app-provided by design — the core's `parseDictionary` equivalent is a
-   `Set<String>` init; the package bundles only the generation pool).
-4. Sanity check in a SwiftUI preview: `try! generatePuzzle(wordPool: commonWords,
-   tileCount: 20, rng: seededRng("hello"))` and render the letters.
+That installs XcodeGen if needed, generates `Word.xcodeproj` from
+[`project.yml`](project.yml) (the checked-in source of truth — the generated project
+stays out of git), and opens it. First time only: pick your Team under
+Signing & Capabilities. Then Run — the placeholder screen deals a seeded puzzle
+through WordCore, shows the rack and the hidden solution, and loads the bundled
+dictionary (`public/dictionary.txt` is referenced from the web app directly, so the
+platforms can't drift).
 
 Then phase 2 in the plan: board + the unified gesture layer first (§6.2 lists the four
 hard problems and the notes in `../docs/apple-port-notes/ui.md` carry the full
