@@ -4,7 +4,7 @@ import WordBoard
 import WordCore
 
 /// A tile's live feedback color, worst problem first (App.tsx:196, 1140–1152).
-enum CellFeedback {
+enum CellFeedback: Equatable {
     case valid
     case invalid
     case isolated
@@ -60,10 +60,46 @@ struct GameToast: Equatable {
     var serial: Int
 }
 
+/// Keyboard vocabulary kept independent of SwiftUI's `KeyPress`, so the
+/// global hardware-keyboard behavior is unit-testable (App.tsx:2310–2414).
+enum GameCommand: Equatable {
+    case letter(String)
+    case gap
+    case backspace
+    case deleteForward
+    case escape
+    case confirm
+    case direction(Direction)
+}
+
+private struct GameSnapshot {
+    var board: TileMap
+    var rack: [String]
+    var picks: [Int]
+}
+
+/// A whole word riding under the pointer from the selected-word popover.
+struct WordDrag: Equatable {
+    var word: WordRun
+    var letters: [String]
+    var location: CGPoint
+}
+
+struct ScoredWord: Equatable {
+    var word: String
+    var points: Int
+}
+
+enum SoloGaugeTone: Equatable {
+    case ok
+    case warn
+    case over
+}
+
 /// The solo board's interaction model, ported from the word-building half of
-/// `App.tsx` — the parts phase 2a needs to exercise the board and the unified
-/// gesture layer. Scoring, clocks, undo history, tutorial and battle wiring
-/// arrive with phases 2b/4.
+/// `App.tsx`. Phase 2a supplied the board and unified gesture layer; this model
+/// also owns phase 2b's editing loop and Solo session lifecycle. Tutorial and
+/// battle wiring arrive in later slices.
 @Observable @MainActor
 final class GameModel {
     private(set) var board = TileMap()
@@ -73,9 +109,15 @@ final class GameModel {
     private(set) var hoverCell: CellKey?
     private(set) var lastDir: Direction = .across
     private(set) var drag: TileDrag?
+    private(set) var wordDrag: WordDrag?
     private(set) var toast: GameToast?
     private(set) var dictionary: Set<String>?
     private(set) var seed = ""
+    private(set) var solo = SoloSession(pace: .regular, now: .distantPast)
+    private(set) var bankedBonus = 0
+    private(set) var finalScore = 0
+    private(set) var finalWords: [ScoredWord] = []
+    private(set) var showSummary = false
     /// Bumped per deal so the viewport knows to re-center.
     private(set) var gameSerial = 0
     var boardLocked = false
@@ -88,6 +130,12 @@ final class GameModel {
     private(set) var cellFeedback: [CellKey: CellFeedback] = [:]
 
     private var toastSerial = 0
+    private var dealSerial = 0
+    private var finishRecorded = false
+    private var history: [GameSnapshot] = []
+    private var future: [GameSnapshot] = []
+
+    private static let undoDepth = 50
 
     // MARK: Derived word-building state
 
@@ -189,6 +237,76 @@ final class GameModel {
 
     var canCancel: Bool { interaction != .idle || selectedKey != nil }
 
+    var canUndo: Bool { !boardLocked && !history.isEmpty }
+    var canRedo: Bool { !boardLocked && !future.isEmpty }
+    var canBackspace: Bool { selectedKey != nil || !picks.isEmpty }
+
+    // MARK: Derived Solo state
+
+    var pace: SoloPace { solo.pace }
+    var phase: SoloPhase { solo.phase }
+    var dripsElapsed: Int { solo.dripsElapsed }
+    var countdown: SoloCountdown? { solo.countdown }
+    var isPaused: Bool { solo.paused }
+    var splash: SoloSplash? { solo.splash }
+    var isComplete: Bool { solo.complete }
+    var endReason: SoloEndReason? { solo.endReason }
+
+    /// Full-screen/readable overlays own input while visible. A finished board
+    /// remains viewable but cannot be changed after the summary is dismissed.
+    var canAcceptInput: Bool {
+        !isComplete && !isPaused && splash == nil && !showSummary
+    }
+
+    var canPause: Bool { !isComplete && !isPaused && splash == nil }
+
+    var boardScore: BoardScore {
+        scoreBoard(validation, tilesLeft: rack.count)
+    }
+
+    /// Word points stay live; only the 25-point board-clear awards are banked.
+    var runningScore: Int {
+        bankedBonus + boardScore.words
+            + (boardScore.bonusEarned ? ENDLESS_CONNECT_BONUS : 0)
+    }
+
+    var score: Int { isComplete ? finalScore : runningScore }
+
+    /// Tiles still in the pile, plus placed tiles that are not part of a valid,
+    /// connected word. This matches App.tsx's pressure gauge exactly.
+    var looseTiles: Int {
+        rack.count + cellFeedback.values.filter { $0 != .valid }.count
+    }
+
+    var showsLooseGauge: Bool { phase == .drip && !isComplete }
+
+    var gaugeTone: SoloGaugeTone {
+        guard showsLooseGauge else { return .ok }
+        if looseTiles > ENDLESS_LOOSE_LIMIT { return .over }
+        if ENDLESS_LOOSE_LIMIT - looseTiles <= 5 { return .warn }
+        return .ok
+    }
+
+    var boardClearReady: Bool {
+        !isComplete && boardScore.bonusEarned && drag == nil && wordDrag == nil
+    }
+
+    func remainingSeconds(at now: Date) -> Int? {
+        solo.remaining(at: now).map { Int(ceil($0)) }
+    }
+
+    /// Every run through the selected tile. A crossing offers both rows.
+    var selectedWords: [WordRun] {
+        guard let selectedKey else { return [] }
+        return wordsByCell[selectedKey] ?? []
+    }
+
+    var highlightedKeys: Set<CellKey> {
+        Set(highlightedWord?.cells ?? [])
+    }
+
+    private(set) var highlightedWord: WordRun?
+
     /// The anchored direction, when a cell is chosen.
     var interactionDir: Direction? {
         if case let .place(_, dir, _) = interaction { return dir }
@@ -197,8 +315,11 @@ final class GameModel {
 
     // MARK: Game lifecycle
 
-    func newGame(seed: String = randomSeed()) {
+    func newGame(
+        seed: String = randomSeed(), pace: SoloPace = .regular, now: Date = .now
+    ) {
         self.seed = seed
+        solo = SoloSession(pace: pace, now: now)
         gameSerial += 1
         setBoard(TileMap())
         let puzzle = try? generatePuzzle(
@@ -206,13 +327,78 @@ final class GameModel {
         rack = puzzle?.letters ?? []
         selection = nil
         drag = nil
+        wordDrag = nil
         hoverCell = nil
         toast = nil
+        bankedBonus = 0
+        finalScore = 0
+        finalWords = []
+        showSummary = false
+        dealSerial = 0
+        finishRecorded = false
         lastDir = .across
+        highlightedWord = nil
+        history = []
+        future = []
         // Pre-anchor the middle cell so typing previews immediately
         // (App.tsx:536–539).
         let middle = keyOf(BOARD_SIZE / 2, BOARD_SIZE / 2)
         interaction = .place(anchor: middle, dir: assumeDir(middle) ?? .across, picks: [])
+    }
+
+    func dismissSplash(at now: Date = .now) {
+        solo.dismissSplash(at: now)
+    }
+
+    func pause(at now: Date = .now) {
+        solo.pause(at: now)
+        clearTransientInput()
+    }
+
+    func resume(at now: Date = .now) {
+        solo.resume(at: now)
+    }
+
+    /// Called by the UI heartbeat. The session machine changes its deadline
+    /// before emitting, so the same expiry can never deal twice.
+    func advanceClock(at now: Date = .now) {
+        switch solo.advance(at: now, looseTiles: looseTiles) {
+        case .none:
+            break
+        case let .deal(tiles):
+            dealBonusTiles(tiles, message: "+\(tiles) tile\(tiles == 1 ? "" : "s")!")
+        case .buried:
+            finishGame(reason: .buried)
+        }
+    }
+
+    /// The clear bonus lands before the refill. The view supplies the web's
+    /// 900ms presentation delay and this method re-checks the board afterward.
+    func claimBoardClear() {
+        guard boardClearReady else { return }
+        bankedBonus += ENDLESS_CONNECT_BONUS
+        dealBonusTiles(
+            ENDLESS_CLEAR_TILES,
+            message:
+                "Board clear! +\(ENDLESS_CONNECT_BONUS) points · +\(ENDLESS_CLEAR_TILES) tiles")
+    }
+
+    func setSummaryPresented(_ presented: Bool) {
+        guard isComplete else { return }
+        showSummary = presented
+    }
+
+    func finishGame(reason: SoloEndReason) {
+        guard !finishRecorded else { return }
+        finishRecorded = true
+        finalScore = runningScore
+        finalWords = (validation?.runs ?? [])
+            .filter(\.valid)
+            .map { ScoredWord(word: $0.word, points: wordScore($0.word)) }
+        solo.finish(reason: reason)
+        showSummary = true
+        clearTransientInput()
+        clearFocus()
     }
 
     func loadDictionary() async {
@@ -232,6 +418,58 @@ final class GameModel {
 
     func setPicks(_ next: [Int]) {
         interaction = interaction.withPicks(next)
+    }
+
+    /// The hardware-keyboard contract. `true` means the app consumed the key;
+    /// callers return `.handled` so focus traversal and system beeps stay out.
+    @discardableResult
+    func handle(_ command: GameCommand) -> Bool {
+        switch command {
+        case let .letter(letter):
+            guard letter.count == 1, letter.first?.isLetter == true else { return false }
+            typeLetter(letter)
+            // The web prevents the key even when this letter isn't in the
+            // pile; an unavailable letter is a quiet no-op, never a system
+            // beep or menu command.
+            return true
+
+        case .gap:
+            addGap()
+            return true
+
+        case .backspace:
+            if selectedKey != nil {
+                deleteSelected(.back)
+                return true
+            }
+            guard !picks.isEmpty else { return false }
+            setPicks(Array(picks.dropLast()))
+            return true
+
+        case .deleteForward:
+            guard selectedKey != nil else { return false }
+            deleteSelected(.forward)
+            return true
+
+        case .escape:
+            guard canCancel else { return false }
+            clearFocus()
+            return true
+
+        case .confirm:
+            guard let target, !picks.isEmpty else { return false }
+            commit(target.key, target.dir)
+            return true
+
+        case let .direction(dir):
+            guard case let .place(anchor, _, picks) = interaction else { return false }
+            let allowed = startableDirections(
+                board: board, bounds: bounds, cell: parseKey(anchor))
+            guard allowed.contains(dir) else { return false }
+            lastDir = dir
+            interaction = .place(anchor: anchor, dir: dir, picks: picks)
+            return true
+        }
     }
 
     /// Claim a pile tile for the current word, or release it (App.tsx:1941–1953).
@@ -265,6 +503,7 @@ final class GameModel {
     /// Put the board back to nothing chosen (App.tsx:1296–1300).
     func clearFocus() {
         selection = nil
+        highlightedWord = nil
         interaction = .idle
     }
 
@@ -420,8 +659,9 @@ final class GameModel {
             }
         }
 
-        // Phase 2b/4: undo snapshot, commit sound, tutorial gap-step
-        // enforcement and battle attacks join here — this is the one funnel.
+        // Sound, tutorial gap-step enforcement and battle attacks join here in
+        // later slices — this remains the one funnel for every landing.
+        remember()
         setBoard(next)
         let spent = Set(result.steps.map(\.rackIndex))
         rack = rack.enumerated().filter { !spent.contains($0.offset) }.map(\.element)
@@ -477,6 +717,7 @@ final class GameModel {
             }()
             let sameCell = sourceKey == key
             guard sameCell || board[key] == nil else { return }
+            remember()
             var next = board
             if let sourceKey { next[sourceKey] = nil }
             next[key] = drag.letter
@@ -492,6 +733,7 @@ final class GameModel {
 
         case .rack:
             if case let .board(cell, letter) = source {
+                remember()
                 var next = board
                 next[keyOf(cell.row, cell.col)] = nil
                 setBoard(next)
@@ -524,13 +766,17 @@ final class GameModel {
     /// Move a word's tiles so its first letter lands on `start`.
     @discardableResult
     func moveWord(_ word: WordRun, to start: CellKey, dir: Direction) -> Bool {
+        guard !boardLocked else { return false }
         guard
             let targets = planWordCells(
                 board: board, bounds: bounds, length: word.cells.count, own: word.cells,
                 dir: dir, start: parseKey(start))
         else { return false }
         let letters = word.cells.compactMap { board[$0] }
+        guard letters.count == word.cells.count else { return false }
+        remember()
         selection = nil
+        highlightedWord = nil
         var next = board
         for key in word.cells { next[key] = nil }
         for (i, key) in targets.enumerated() { next[key] = letters[i] }
@@ -548,12 +794,96 @@ final class GameModel {
 
     /// Send the tile back to the pile (App.tsx returnToRack, 2535–2549).
     func returnToRack(_ key: CellKey) {
+        guard !boardLocked else { return }
         guard let letter = board[key] else { return }
+        remember()
         var next = board
         next[key] = nil
         setBoard(next)
         rack.append(letter)
         if selection?.key == key { selection = nil }
+    }
+
+    /// Return every tile in a run to the pile (WordControls.tsx remove).
+    func removeWord(_ word: WordRun) {
+        guard !boardLocked else { return }
+        let letters = word.cells.compactMap { board[$0] }
+        guard letters.count == word.cells.count else { return }
+        remember()
+        var next = board
+        for key in word.cells { next[key] = nil }
+        setBoard(next)
+        rack.append(contentsOf: letters)
+        clearFocus()
+    }
+
+    enum DeleteStep { case back, forward }
+
+    /// Remove the selected tile and step along its word, so key repeat eats a
+    /// run backward (Backspace) or forward (Delete), App.tsx:1898–1932.
+    func deleteSelected(_ step: DeleteStep) {
+        guard !boardLocked, let selection else { return }
+        let key = selection.key
+        guard let letter = board[key] else {
+            self.selection = nil
+            return
+        }
+        let cell = parseKey(key)
+        let delta = step == .back ? -1 : 1
+        let nextKey = selection.dir == .across
+            ? keyOf(cell.row, cell.col + delta)
+            : keyOf(cell.row + delta, cell.col)
+
+        remember()
+        var next = board
+        next[key] = nil
+        setBoard(next)
+        rack.append(letter)
+        self.selection = board[nextKey] == nil ? nil : Selection(key: nextKey, dir: selection.dir)
+    }
+
+    func setHighlightedWord(_ word: WordRun?) {
+        highlightedWord = word
+    }
+
+    // MARK: Whole-word dragging (WordControls.tsx grab)
+
+    func beginWordDrag(_ word: WordRun, at location: CGPoint) {
+        guard !boardLocked else { return }
+        let letters = word.cells.compactMap { board[$0] }
+        guard letters.count == word.cells.count else { return }
+        highlightedWord = nil
+        wordDrag = WordDrag(word: word, letters: letters, location: location)
+    }
+
+    func wordDragMoved(to location: CGPoint) {
+        wordDrag?.location = location
+    }
+
+    func endWordDrag(at cell: Cell?) {
+        guard let wordDrag else { return }
+        self.wordDrag = nil
+        guard let cell else { return }
+        _ = moveWord(wordDrag.word, to: keyOf(cell.row, cell.col), dir: wordDrag.word.direction)
+    }
+
+    func cancelWordDrag() {
+        wordDrag = nil
+    }
+
+    // MARK: Undo / redo (App.tsx:935–998)
+
+    func undo() {
+        guard !boardLocked, let previous = history.popLast() else { return }
+        future.append(snapshot())
+        restore(previous)
+    }
+
+    func redo() {
+        guard !boardLocked, let next = future.popLast() else { return }
+        history.append(snapshot())
+        if history.count > Self.undoDepth { history.removeFirst() }
+        restore(next)
     }
 
     /// Reshuffle the pile and drop the staged word (App.tsx:2602–2605).
@@ -571,6 +901,40 @@ final class GameModel {
 
     func clearToast(serial: Int) {
         if toast?.serial == serial { toast = nil }
+    }
+
+    // MARK: Solo deals
+
+    /// Grow a guaranteed-playable batch off the board and append it to every
+    /// remembered pile. Clock deals must survive undo/redo of unrelated moves.
+    private func dealBonusTiles(_ count: Int, message: String?) {
+        guard count > 0 else { return }
+        let rng = seededRng("\(seed)/solo/\(dealSerial)")
+        dealSerial += 1
+        guard
+            let deal = try? extendPuzzle(
+                board: board, bounds: bounds, wordPool: commonWords,
+                tileCount: count, rng: rng)
+        else {
+            rejectToast("Couldn’t deal the next tiles.")
+            return
+        }
+
+        rack.append(contentsOf: deal.letters)
+        for index in history.indices {
+            history[index].rack.append(contentsOf: deal.letters)
+        }
+        for index in future.indices {
+            future[index].rack.append(contentsOf: deal.letters)
+        }
+        if let message { rejectToast(message) }
+    }
+
+    private func clearTransientInput() {
+        drag = nil
+        wordDrag = nil
+        hoverCell = nil
+        highlightedWord = nil
     }
 
     // MARK: Board mutation
@@ -608,5 +972,32 @@ final class GameModel {
             for key in validation.isolatedTiles { feedback[key] = .isolated }
         }
         cellFeedback = feedback
+    }
+
+    private func snapshot() -> GameSnapshot {
+        GameSnapshot(board: board, rack: rack, picks: picks)
+    }
+
+    /// Remember before a move. A fresh move forks the timeline, exactly like
+    /// the web; battles never record because their placed tiles are permanent.
+    private func remember() {
+        guard !boardLocked else { return }
+        history.append(snapshot())
+        if history.count > Self.undoDepth { history.removeFirst() }
+        future = []
+    }
+
+    /// Undo restores staged picks as a loose spell: the move came off its old
+    /// cell, so its preview must not remain anchored there.
+    private func restore(_ snapshot: GameSnapshot) {
+        board = snapshot.board
+        rack = snapshot.rack
+        interaction = snapshot.picks.isEmpty ? .idle : .spell(picks: snapshot.picks)
+        selection = nil
+        highlightedWord = nil
+        drag = nil
+        wordDrag = nil
+        hoverCell = nil
+        refreshBoardCaches()
     }
 }

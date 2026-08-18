@@ -4,7 +4,8 @@ The native iPhone/iPad/Mac port, built to [`docs/apple-port-plan.md`](../docs/ap
 
 ## State
 
-**Phase 0 + Phase 1 are complete; phase 2a (board + unified gesture layer) is built.**
+**Phase 0 + Phase 1 and phase 2a are complete. Phase 2b is underway: its core
+solo editing loop is built.**
 
 `Packages/WordCore` is the full game core in pure Swift — board rules, generator,
 pacing/attack tables, placement engine, battle referee/codes/tile-stream, tutorial
@@ -25,8 +26,17 @@ custom pan/zoom board viewport (owning its offset is what lets pinch zoom and it
 scroll correction land in the same frame), a Canvas-drawn cell lattice with real
 views only for occupied cells (the §11 zoom-out perf gate is a measured XCTest in
 `WordTests`, ~20ms for a full 33×33 board offscreen), and one gesture pipeline
-feeding board and rack alike. Solo chrome (clocks, scoring UI, undo, tutorial,
-settings) is phase 2b.
+feeding board and rack alike.
+
+The first phase-2b slices complete the editing loop and Solo session lifecycle:
+Mac/iPad hardware-keyboard commands, a responsive word bar, 50-deep undo/redo,
+selected-word move/rotate/remove controls, both Solo pace schedules, wall-clock
+countdowns that freeze behind readable overlays, the loose-tile gauge and board
+alarm, board-clear refills/bonuses, opaque pause, and a final word/score summary.
+The lifecycle is a deterministic state machine with focused expiry, pause and
+history tests; the controls and summary also have render snapshots. Remaining
+phase 2b work is process-death save/resume, tutorial and onboarding,
+stats/settings/theme, audio/haptics, and the full accessibility pass.
 
 ```bash
 cd apple/Packages/WordCore && swift test    # core + golden parity fixtures
@@ -59,14 +69,13 @@ phase 5 Mac polish).
 That installs XcodeGen if needed, generates `Word.xcodeproj` from
 [`project.yml`](project.yml) (the checked-in source of truth — the generated project
 stays out of git), and opens it. First time only: pick your Team under
-Signing & Capabilities. Then Run — the placeholder screen deals a seeded puzzle
-through WordCore, shows the rack and the hidden solution, and loads the bundled
-dictionary (`public/dictionary.txt` is referenced from the web app directly, so the
-platforms can't drift).
+Signing & Capabilities. Then Run — the game screen deals through WordCore and loads
+the bundled dictionary (`public/dictionary.txt` is referenced from the web app
+directly, so the platforms can't drift).
 
-Then phase 2 in the plan: board + the unified gesture layer first (§6.2 lists the four
-hard problems and the notes in `../docs/apple-port-notes/ui.md` carry the full
-interaction inventory with file:line references into the web app).
+Continue phase 2b from process-death save/resume. The notes in
+`../docs/apple-port-notes/ui.md` remain the interaction source of truth, with
+file:line references into the web app.
 
 ## Layout
 
@@ -81,6 +90,6 @@ apple/
     Tests/WordBoardTests/       #   exhaustive gesture + viewport-math suites
   Word/                         # the app target (SwiftUI)
     Board/                      #   camera, board rendering, unified pointer surface
-    Game/                       #   GameModel (App.tsx port), GameScreen, rack
-  WordTests/                    # app-layer tests (board render perf gate)
+    Game/                       #   model, Solo clock state machine, screen + chrome
+  WordTests/                    # app-layer rendering, editing + lifecycle tests
 ```

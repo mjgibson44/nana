@@ -18,6 +18,8 @@ struct BoardScene {
     var cursorKey: CellKey?
     /// The placed tile picked out for deletion.
     var selectedKey: CellKey?
+    /// A controls row under the pointer highlights its whole run.
+    var highlightedKeys: Set<CellKey> = []
     /// The anchored cell and its direction — where the rotate control sits.
     var rotate: (key: CellKey, dir: Direction)?
     var locked = false
@@ -57,6 +59,7 @@ struct BoardContentView: View {
                     letter: tile.letter,
                     feedback: scene.feedback[tile.key],
                     selected: tile.key == scene.selectedKey,
+                    highlighted: scene.highlightedKeys.contains(tile.key),
                     cellSize: metrics.cellSize
                 )
                 .opacity(tile.key == scene.hiddenKey ? 0 : 1)
@@ -125,6 +128,7 @@ struct BoardTileView: View {
     var letter: String
     var feedback: CellFeedback?
     var selected: Bool
+    var highlighted = false
     var cellSize: Double
 
     var body: some View {
@@ -138,6 +142,8 @@ struct BoardTileView: View {
             .overlay {
                 if selected {
                     Rectangle().strokeBorder(Ink.focus, lineWidth: max(2, cellSize * 0.07))
+                } else if highlighted {
+                    Rectangle().strokeBorder(Ink.line, lineWidth: max(1.5, cellSize * 0.045))
                 }
             }
     }

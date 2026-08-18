@@ -2,11 +2,8 @@ import SwiftUI
 import WordBoard
 import WordCore
 
-/// The phase-2a game screen: the board in its pan/zoom viewport, the pile,
-/// and a lean word bar — all pointer input funneled through ONE gesture
-/// machine, the way the web funnels everything through its window-level
-/// pointer pipeline (ui.md §8.1). Header chrome, clocks, scoring UI, undo and
-/// the rest of solo arrive in phase 2b.
+/// The solo game screen: phase 2a's pan/zoom board and unified pointer layer,
+/// plus phase 2b's editing, scoring and session lifecycle.
 struct GameScreen: View {
     /// The shared coordinate space every pointer event and frame reads —
     /// the port's stand-in for the web's client coordinates.
@@ -17,6 +14,8 @@ struct GameScreen: View {
     @State private var machine = GestureMachine()
     @State private var holdTask: Task<Void, Never>?
     @State private var rackFrame: CGRect = .zero
+    @State private var clockNow = Date.now
+    @FocusState private var gameFocused: Bool
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -33,13 +32,17 @@ struct GameScreen: View {
                     picks: model.picks,
                     pointerEvent: dispatch,
                     downTarget: { index, letter in .rackTile(index: index, letter: letter) },
-                    onShuffle: { model.shufflePile() }
+                    onShuffle: {
+                        model.shufflePile()
+                        focusGame()
+                    }
                 )
                 .onGeometryChange(for: CGRect.self) { proxy in
                     proxy.frame(in: .named(Self.space))
                 } action: { frame in
                     rackFrame = frame
                 }
+                .allowsHitTesting(model.canAcceptInput)
             }
 
             // The drag ghost rides above everything (web z=1000).
@@ -47,12 +50,76 @@ struct GameScreen: View {
                 GhostTileView(letter: drag.letter)
                     .position(drag.location)
             }
+            if let wordDrag = model.wordDrag {
+                WordGhostView(drag: wordDrag, cellSize: camera.metrics.cellSize)
+            }
+
+            if let splash = model.splash {
+                SoloSplashView(splash: splash, pace: model.pace) {
+                    model.dismissSplash(at: .now)
+                    focusGame()
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+
+            if model.showSummary {
+                SoloSummaryView(
+                    words: model.finalWords,
+                    score: model.score,
+                    onPlayAgain: startNewGame,
+                    onSeeBoard: { model.setSummaryPresented(false) })
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+
+            if model.isPaused {
+                SoloPauseView(pace: model.pace) {
+                    model.resume(at: .now)
+                    focusGame()
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
         .coordinateSpace(name: Self.space)
         .background(Ink.bg)
+        .focusable()
+        .focused($gameFocused)
+        .onKeyPress(phases: [.down, .repeat], action: handleKeyPress)
         .task {
-            model.newGame()
+            clockNow = .now
+            model.newGame(now: clockNow)
             await model.loadDictionary()
+            focusGame()
+        }
+        .task(id: model.gameSerial) {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .milliseconds(250))
+                } catch {
+                    return
+                }
+                let now = Date.now
+                clockNow = now
+                model.advanceClock(at: now)
+            }
+        }
+        .task(id: model.splash) {
+            guard model.splash != nil else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(1_700))
+            } catch {
+                return
+            }
+            model.dismissSplash(at: .now)
+            focusGame()
+        }
+        .task(id: model.boardClearReady) {
+            guard model.boardClearReady else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(900))
+            } catch {
+                return
+            }
+            model.claimBoardClear()
         }
         // Growth compensation must run before auto-fit sizes to the new
         // tiles: onChange order is declaration order.
@@ -72,24 +139,23 @@ struct GameScreen: View {
         #endif
     }
 
-    // MARK: Chrome (placeholder until phase 2b's real header)
+    // MARK: Solo scoreboard
 
     private var header: some View {
-        HStack {
-            Text("Word")
-                .font(.title3.bold())
-                .foregroundStyle(Ink.ink)
-            Spacer()
-            Text("Score \(scoreBoard(model.validation, tilesLeft: model.rack.count).total)")
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(Ink.ink)
-            Spacer()
-            Button("New deal") { model.newGame() }
-                .buttonStyle(.bordered)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Ink.surface)
+        SoloHeaderView(
+            score: model.score,
+            complete: model.isComplete,
+            seconds: model.remainingSeconds(at: clockNow),
+            timerLabel: model.phase == .drip ? "Next tiles" : "Time",
+            looseTiles: model.showsLooseGauge ? model.looseTiles : nil,
+            gaugeTone: model.gaugeTone,
+            bonusEarned: model.boardScore.bonusEarned,
+            canPause: model.canPause,
+            onPause: pauseGame,
+            onNewDeal: startNewGame,
+            onShowSummary: { model.setSummaryPresented(true) },
+            pace: model.pace,
+            onChoosePace: startNewGame(pace:))
     }
 
     // MARK: The board viewport
@@ -101,23 +167,34 @@ struct GameScreen: View {
             BoardContentView(scene: scene)
                 .allowsHitTesting(false)
                 .offset(x: origin.x - camera.offset.x, y: origin.y - camera.offset.y)
+
+            // One transparent input plane sits above every board cell and
+            // below popovers. Keeping the word controls outside this plane is
+            // what lets their external drag own its pointer from press time.
+            Rectangle()
+                .fill(.clear)
+                .contentShape(Rectangle())
+                .pointerSurface(
+                    target: boardTarget(at:), context: { machineContext }, dispatch: dispatch)
+                .simultaneousGesture(pinchGesture)
+                .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
+                    // Mouse/trackpad aims the preview by hovering (ui.md §8.10);
+                    // the model gates it to letters-staged-and-nothing-dragged.
+                    switch phase {
+                    case let .active(point):
+                        model.setHover(
+                            camera.cell(atGame: point).map { keyOf($0.row, $0.col) })
+                    case .ended:
+                        model.setHover(nil)
+                    }
+                }
+                .allowsHitTesting(model.canAcceptInput)
+
+            wordControls
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Ink.boardBg)
         .clipped()
-        .contentShape(Rectangle())
-        .pointerSurface(target: boardTarget(at:), context: { machineContext }, dispatch: dispatch)
-        .simultaneousGesture(pinchGesture)
-        .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
-            // Mouse/trackpad aims the preview by hovering (ui.md §8.10);
-            // the model gates it to letters-staged-and-nothing-dragged.
-            switch phase {
-            case let .active(point):
-                model.setHover(camera.cell(atGame: point).map { keyOf($0.row, $0.col) })
-            case .ended:
-                model.setHover(nil)
-            }
-        }
         .onGeometryChange(for: BoardGeometryValues.self) { proxy in
             BoardGeometryValues(frame: proxy.frame(in: .named(Self.space)), size: proxy.size)
         } action: { values in
@@ -125,6 +202,20 @@ struct GameScreen: View {
             camera.viewportChanged(to: values.size, tileBox: model.tileBounds)
         }
         .overlay(alignment: .top) { toastView }
+        .overlay { boardAlarm }
+    }
+
+    @ViewBuilder
+    private var boardAlarm: some View {
+        if model.showsLooseGauge, model.gaugeTone != .ok {
+            let urgent = model.gaugeTone == .over
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(urgent ? Ink.badInk : Ink.warnInk, lineWidth: 4)
+                .padding(2)
+                .alarmPulse(active: true, urgent: urgent)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 
     private struct BoardGeometryValues: Equatable {
@@ -142,6 +233,7 @@ struct GameScreen: View {
             previewGaps: model.previewGaps,
             cursorKey: model.cursorKey,
             selectedKey: model.selectedKey,
+            highlightedKeys: model.highlightedKeys,
             rotate: rotateControl,
             locked: model.boardLocked)
     }
@@ -157,7 +249,7 @@ struct GameScreen: View {
         GestureMachine.Context(
             boardLocked: model.boardLocked,
             hasStagedPicks: !model.picks.isEmpty,
-            externalDragActive: false)
+            externalDragActive: model.wordDrag != nil)
     }
 
     /// The press-time hit-test — the port of `elementFromPoint` against
@@ -271,30 +363,135 @@ struct GameScreen: View {
         }
     }
 
-    // MARK: Word bar (lean 2a version of WordBar.tsx + PileTools.tsx)
+    // MARK: Selected-word controls
+
+    @ViewBuilder
+    private var wordControls: some View {
+        if model.canAcceptInput,
+            let selectedKey = model.selectedKey, !model.selectedWords.isEmpty
+        {
+            let words = model.selectedWords
+            let cellRect = camera.gameRect(
+                ofContent: camera.metrics.rect(of: parseKey(selectedKey)))
+            let height = Double(words.count * 37 + 10)
+            let localX = min(
+                max(cellRect.midX - camera.frame.minX, 168),
+                max(168, camera.viewport.width - 168))
+            let localY = max(
+                height / 2,
+                cellRect.minY - camera.frame.minY - height / 2 + 6)
+
+            WordControlsView(
+                words: words,
+                canRotate: model.canRotate,
+                onGrabBegan: { word, point in model.beginWordDrag(word, at: point) },
+                onGrabMoved: model.wordDragMoved,
+                onGrabEnded: { point in
+                    model.endWordDrag(at: camera.cell(atGame: point))
+                    focusGame()
+                },
+                onGrabCancelled: model.cancelWordDrag,
+                onRotate: { word in
+                    model.rotateWord(word)
+                    focusGame()
+                },
+                onRemove: { word in
+                    model.removeWord(word)
+                    focusGame()
+                },
+                onHighlight: model.setHighlightedWord)
+                // Keep the gesture's source mounted until the external drag
+                // ends; hiding it must not cancel its pointer stream.
+                .opacity(model.wordDrag == nil ? 1 : 0)
+                .allowsHitTesting(model.wordDrag == nil)
+                .position(x: localX, y: localY)
+        }
+    }
+
+    // MARK: Word bar (WordBar.tsx + PileTools.tsx)
 
     private var wordBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 4) {
-                ForEach(Array(model.pickList.enumerated()), id: \.offset) { position, pick in
-                    Button {
-                        model.removePick(at: position)
-                    } label: {
-                        Text(pick.letter?.uppercased() ?? "␣")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(verdictInk)
-                            .frame(width: 26, height: 26)
-                            .background(RoundedRectangle(cornerRadius: 5).fill(Ink.surface))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .strokeBorder(verdictInk, lineWidth: 1.5))
-                    }
-                    .buttonStyle(.plain)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                stagedLetters
+                Spacer(minLength: 8)
+                wordActions
+            }
+
+            // Phone: the word gets the first row and every action stays in a
+            // single thumb row below it, with confirm/cancel at the far edge.
+            VStack(spacing: 4) {
+                ScrollView(.horizontal) {
+                    stagedLetters
+                }
+                .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                wordActions
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Ink.surface)
+        .overlay(alignment: .top) {
+            if let tone = wordBarTone {
+                Rectangle().fill(tone).frame(height: 3)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Word builder")
+        .accessibilityValue(wordBarAccessibilityValue)
+        .allowsHitTesting(model.canAcceptInput)
+    }
+
+    private var stagedLetters: some View {
+        HStack(spacing: 4) {
+            if model.pickList.isEmpty {
+                Text(model.interaction == .idle ? "No letters selected" : "Type your word…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(Array(model.pickList.enumerated()), id: \.offset) { position, pick in
+                Button {
+                    model.removePick(at: position)
+                    focusGame()
+                } label: {
+                    Text(pick.letter?.uppercased() ?? "␣")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(verdictInk)
+                        .frame(width: 26, height: 26)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Ink.surface))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .strokeBorder(verdictInk, lineWidth: 1.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    pick.letter.map { "Remove \($0.uppercased())" } ?? "Remove gap")
+            }
+        }
+        .frame(minHeight: 34)
+    }
+
+    private var wordActions: some View {
+        HStack(spacing: 6) {
+            if model.canRedo {
+                barButton("↷", label: "Redo the move") {
+                    model.redo()
                 }
             }
-            .frame(minHeight: 34)
+            barButton("↶", label: "Undo the last move", disabled: !model.canUndo) {
+                model.undo()
+            }
 
-            Spacer()
+            barButton("□", label: "Add a gap tile") {
+                model.addGap()
+            }
+
+            barButton("⌫", label: "Remove the last letter", disabled: !model.canBackspace) {
+                _ = model.handle(.backspace)
+            }
 
             if model.canRotateAnchor {
                 barButton(
@@ -314,13 +511,11 @@ struct GameScreen: View {
                 model.clearFocus()
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(Ink.surface)
     }
 
-    /// The bar's live verdict tint: color-only, like the web (WordBar.tsx:16).
+    /// The bar's live verdict tint; VoiceOver receives the same state as text.
     private var verdictInk: Color {
+        if model.plan != nil, model.plan?.complete == false { return Ink.badInk }
         switch model.verdictOK {
         case true: return Ink.okInk
         case false: return Ink.badInk
@@ -328,10 +523,31 @@ struct GameScreen: View {
         }
     }
 
+    private var wordBarTone: Color? {
+        if model.plan != nil, model.plan?.complete == false { return Ink.badInk }
+        return switch model.verdictOK {
+        case true: Ink.okInk
+        case false: Ink.badInk
+        default: nil
+        }
+    }
+
+    private var wordBarAccessibilityValue: String {
+        if model.plan != nil, model.plan?.complete == false { return "Word does not fit" }
+        return switch model.verdictOK {
+        case true: "Valid word"
+        case false: "Not a valid word"
+        default: model.pickList.isEmpty ? "Empty" : "Not yet judged"
+        }
+    }
+
     private func barButton(
         _ glyph: String, label: String, disabled: Bool = false, action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button {
+            action()
+            focusGame()
+        } label: {
             Text(glyph)
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(Ink.ink)
@@ -343,6 +559,60 @@ struct GameScreen: View {
         .buttonStyle(.plain)
         .disabled(disabled)
         .accessibilityLabel(label)
+    }
+
+    // MARK: Hardware keyboard (Mac + iPad)
+
+    private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        if model.isPaused, press.key == .escape {
+            model.resume(at: .now)
+            focusGame()
+            return .handled
+        }
+        guard model.canAcceptInput else { return .ignored }
+        if !press.modifiers.isDisjoint(with: [.command, .control, .option]) {
+            return .ignored
+        }
+
+        let command: GameCommand?
+        switch press.key {
+        case .space: command = .gap
+        case .delete: command = .backspace
+        case .deleteForward: command = .deleteForward
+        case .escape: command = .escape
+        case .return: command = .confirm
+        case .rightArrow: command = .direction(.across)
+        case .downArrow: command = .direction(.down)
+        default:
+            command = press.characters.count == 1 ? .letter(press.characters) : nil
+        }
+
+        guard let command else { return .ignored }
+        return model.handle(command) ? .handled : .ignored
+    }
+
+    private func focusGame() {
+        gameFocused = true
+    }
+
+    private func startNewGame() {
+        startNewGame(pace: model.pace)
+    }
+
+    private func pauseGame() {
+        holdTask?.cancel()
+        holdTask = nil
+        machine = GestureMachine()
+        model.pause(at: .now)
+    }
+
+    private func startNewGame(pace: SoloPace) {
+        let now = Date.now
+        clockNow = now
+        holdTask?.cancel()
+        holdTask = nil
+        machine = GestureMachine()
+        model.newGame(pace: pace, now: now)
     }
 
     // MARK: Toast (single slot, keyed by serial — App.tsx:415, 1746–1750)
