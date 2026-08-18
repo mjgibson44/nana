@@ -38,3 +38,28 @@ jobs:
       - name: swift test
         working-directory: apple/Packages/WordCore
         run: swift test
+
+  wordboard:
+    name: WordBoard swift test (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.0-noble
+    steps:
+      - uses: actions/checkout@v4
+      # The board's gesture state machine and viewport math (plan §11: gesture
+      # disambiguation is unit-tested in CI, not XCUITested).
+      - name: swift test
+        working-directory: apple/Packages/WordBoard
+        run: swift test
+
+  wordnet:
+    name: WordNet swift test (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.0-noble
+    steps:
+      - uses: actions/checkout@v4
+      # The battle protocol over an in-memory transport: roster, seat grace,
+      # attack splitting, referee, host election, version gate. Only the
+      # GKMatch adapter needs devices (plan §7.5).
+      - name: swift test
+        working-directory: apple/Packages/WordNet
+        run: swift test
