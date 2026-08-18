@@ -198,40 +198,49 @@ struct GameScreen: View {
     // MARK: The board viewport
 
     private var boardArea: some View {
-        ZStack(alignment: .topLeading) {
-            let metrics = camera.metrics
-            let origin = contentOrigin(contentSize: metrics.contentSize, viewport: camera.viewport)
-            BoardContentView(scene: scene)
-                .allowsHitTesting(false)
-                .offset(x: origin.x - camera.offset.x, y: origin.y - camera.offset.y)
-
+        // The board's rendered content is the size of the whole lattice —
+        // 1,400pt-plus square at default zoom — so it must never be a direct
+        // child of the layout: SwiftUI would take that as the area's ideal
+        // size, push it up as the window's minimum, and shove the pile off the
+        // bottom of the screen. An overlay is laid out *inside* the size its
+        // parent already chose, so a flexible transparent base decides how big
+        // the viewport is and the board is drawn into it (and clipped).
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topLeading) {
+                let metrics = camera.metrics
+                let origin = contentOrigin(
+                    contentSize: metrics.contentSize, viewport: camera.viewport)
+                BoardContentView(scene: scene)
+                    .allowsHitTesting(false)
+                    .offset(x: origin.x - camera.offset.x, y: origin.y - camera.offset.y)
+            }
             // One transparent input plane sits above every board cell and
             // below popovers. Keeping the word controls outside this plane is
             // what lets their external drag own its pointer from press time.
-            Rectangle()
-                .fill(.clear)
-                .contentShape(Rectangle())
-                .pointerSurface(
-                    target: boardTarget(at:), context: { machineContext }, dispatch: dispatch)
-                .simultaneousGesture(pinchGesture)
-                .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
-                    // Mouse/trackpad aims the preview by hovering (ui.md §8.10);
-                    // the model gates it to letters-staged-and-nothing-dragged.
-                    switch phase {
-                    case let .active(point):
-                        model.setHover(
-                            camera.cell(atGame: point).map { keyOf($0.row, $0.col) })
-                    case .ended:
-                        model.setHover(nil)
+            .overlay {
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .pointerSurface(
+                        target: boardTarget(at:), context: { machineContext }, dispatch: dispatch)
+                    .simultaneousGesture(pinchGesture)
+                    .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
+                        // Mouse/trackpad aims the preview by hovering (ui.md §8.10);
+                        // the model gates it to letters-staged-and-nothing-dragged.
+                        switch phase {
+                        case let .active(point):
+                            model.setHover(
+                                camera.cell(atGame: point).map { keyOf($0.row, $0.col) })
+                        case .ended:
+                            model.setHover(nil)
+                        }
                     }
-                }
-                .allowsHitTesting(model.canAcceptInput)
-
-            wordControls
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Ink.boardBg)
-        .clipped()
+                    .allowsHitTesting(model.canAcceptInput)
+            }
+            .overlay(alignment: .topLeading) { wordControls }
+            .background(Ink.boardBg)
+            .clipped()
         .onGeometryChange(for: BoardGeometryValues.self) { proxy in
             BoardGeometryValues(frame: proxy.frame(in: .named(Self.space)), size: proxy.size)
         } action: { values in

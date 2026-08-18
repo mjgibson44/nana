@@ -28,12 +28,20 @@ struct RackView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 20)
                 } else {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(
-                            minimum: Self.tileSize, maximum: Self.tileSize),
-                            spacing: Self.spacing)],
-                        spacing: Self.spacing
-                    ) {
+                    // The pile scrolls past a few rows rather than growing
+                    // without limit (the web caps it at 28vh, styles.css:1360).
+                    // The ScrollView is load-bearing for layout, not just
+                    // overflow: a bare LazyVGrid asked for its ideal size
+                    // stacks every tile into one column — a thousand points of
+                    // demanded height, which becomes the window's minimum and
+                    // pushes the pile off the screen.
+                    ScrollView(.vertical) {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(
+                                minimum: Self.tileSize, maximum: Self.tileSize),
+                                spacing: Self.spacing)],
+                            spacing: Self.spacing
+                        ) {
                         ForEach(Array(letters.enumerated()), id: \.offset) { index, letter in
                             let pickOrder = picks.firstIndex(of: index).map { $0 + 1 }
                             RackTileView(letter: letter, pickOrder: pickOrder)
@@ -56,9 +64,16 @@ struct RackView: View {
                                 .accessibilityAddTraits(
                                     pickOrder == nil ? .isButton : [.isButton, .isSelected])
                         }
+                        }
+                        // Ten tiles a row, like the web's capped rack field.
+                        .frame(maxWidth: (Self.tileSize + Self.spacing) * 10)
                     }
-                    // Ten tiles a row, like the web's capped rack field.
-                    .frame(maxWidth: (Self.tileSize + Self.spacing) * 10)
+                    .scrollBounceBehavior(.basedOnSize)
+                    // Room for three rows before it scrolls; one row's worth
+                    // is the floor so the pile never collapses to nothing.
+                    .frame(
+                        minHeight: Self.tileSize + Self.spacing,
+                        maxHeight: (Self.tileSize + Self.spacing) * 3)
                 }
             }
             .frame(maxWidth: .infinity)
