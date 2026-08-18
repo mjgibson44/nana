@@ -1,0 +1,47 @@
+# XcodeGen spec — the source of truth for the Xcode project.
+# Regenerate with `xcodegen generate` (or just run ./bootstrap.sh);
+# Word.xcodeproj is generated output and stays out of git.
+name: Word
+options:
+  bundleIdPrefix: dev.nana
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+packages:
+  WordCore:
+    path: Packages/WordCore
+
+targets:
+  Word:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    deploymentTarget:
+      iOS: "18.0"
+      macOS: "15.0"
+    sources:
+      - path: Word
+      # The canonical validation dictionary, referenced (not copied) from the
+      # web app's public/ so the two platforms can never drift.
+      - path: ../public/dictionary.txt
+        buildPhase: resources
+    dependencies:
+      - package: WordCore
+    info:
+      path: Word/Info.plist
+      properties:
+        CFBundleDisplayName: Word
+        UILaunchScreen: {}
+        LSApplicationCategoryType: public.app-category.word-games
+        # Game Mode opt-in (see docs/apple-port-plan.md §9.5).
+        GCSupportsGameMode: true
+        LSSupportsGameMode: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        ENABLE_PREVIEWS: YES
+        CODE_SIGN_STYLE: Automatic

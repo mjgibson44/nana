@@ -193,10 +193,11 @@ public final class TileStream {
 public let commonWords: [String] = {
     let url = Bundle.module.url(forResource: "common-words", withExtension: "txt")!
     let text = try! String(contentsOf: url, encoding: .utf8)
-    return text.split(separator: "\n", omittingEmptySubsequences: false)
-        // .whitespacesAndNewlines, like JS trim(): a CRLF-normalized checkout
-        // must not leave every word wearing a \r (which would empty the
-        // usable pool and kill every battle at startup).
+    // Split on any newline, not the Character "\n" — in Swift "\r\n" is one
+    // grapheme, so a plain split(separator: "\n") would leave a CRLF file as
+    // a single garbage entry, empty the usable pool, and kill every battle
+    // at startup. Trim mirrors JS trim() for the same reason.
+    return text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
 }()
