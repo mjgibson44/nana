@@ -233,7 +233,13 @@ public func battleAttackMultiplier(round: Int) -> Double {
 /// Which round a battle is in `seconds` into the game: rounds one and two are
 /// `BATTLE_ROUND_SECONDS` each, and the final round runs forever.
 public func battleRoundAt(seconds: Double) -> Int {
-    clampRound(Int((seconds / Double(BATTLE_ROUND_SECONDS)).rounded(.down)) + 1)
+    // Clamp in Double space so a huge or infinite clock value degrades to a
+    // valid round instead of trapping in the Int conversion — ±infinity
+    // clamps exactly as in JS (+inf → final round, -inf → round 1). Only
+    // NaN needs a guard (JS propagates it; Swift can't).
+    guard !seconds.isNaN else { return 1 }
+    let round = (seconds / Double(BATTLE_ROUND_SECONDS)).rounded(.down) + 1
+    return Int(min(max(round, 1), Double(BATTLE_ROUNDS)))
 }
 
 /// How many tiles the drip numbered `dripIndex` (0-based) deals. Pure in the
@@ -275,7 +281,11 @@ public func battleAttackTiles(wordLength: Int, round: Int, grewFrom: [Int] = [])
 /// itself. With one rival left the whole attack lands on them, head-to-head.
 public func splitAttackTiles(count: Double, targets: Int, from: Int = 0) -> [Int] {
     if !count.isFinite || targets <= 0 { return [] }
-    let total = Int(max(0, count.rounded(.down)))
+    // Unlike JS, Int(Double) traps on values past Int.max; a hostile or
+    // corrupt count must degrade, not crash. Anything at this scale is
+    // nonsense — cap it (the game layer clamps real attacks to 50 anyway).
+    let floored = max(0, count.rounded(.down))
+    let total = floored < 9_007_199_254_740_992 ? Int(floored) : Int.max
     let base = total / targets
     let extra = total % targets
     let start = ((from % targets) + targets) % targets
@@ -288,7 +298,10 @@ public func splitAttackTiles(count: Double, targets: Int, from: Int = 0) -> [Int
 
 /// Whole seconds as "m:ss" for the header clock and splashes.
 public func formatSeconds(_ totalSeconds: Double) -> String {
-    let clamped = Int(max(0, totalSeconds.rounded(.down)))
+    // Non-finite or absurd clock values render as a stopped clock rather
+    // than trapping in the Int conversion.
+    guard totalSeconds.isFinite else { return "0:00" }
+    let clamped = Int(min(max(0, totalSeconds.rounded(.down)), 9_007_199_254_740_991))
     let minutes = clamped / 60
     let seconds = clamped % 60
     return "\(minutes):" + (seconds < 10 ? "0\(seconds)" : "\(seconds)")

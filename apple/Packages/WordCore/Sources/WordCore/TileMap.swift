@@ -78,18 +78,43 @@ extension TileMap: Sequence {
 }
 
 extension TileMap: Codable {
-    /// Encodes as a plain `{"row,col": "letter"}` object, byte-compatible
-    /// with the web game's serialized boards. Decoding rebuilds insertion
-    /// order from the document order where the decoder preserves it;
-    /// deterministic paths never decode boards, so this is a convenience.
+    /// Encodes as an ordered `[["row,col", "letter"], …]` pair list, NOT a
+    /// JSON object: insertion order is part of this type's contract (the
+    /// seeded generator indexes the RNG into it), and Foundation's keyed
+    /// containers cannot observe or reproduce document order. The pair list
+    /// round-trips the order exactly, so a saved mid-game board resumes with
+    /// the identical deal. (Boards never cross the battle wire — only seeds
+    /// do — so this format is app-internal.)
     public init(from decoder: Decoder) throws {
-        let dict = try [String: String](from: decoder)
-        // Sorted for determinism when document order is unavailable.
-        self.init(dict.sorted { $0.key < $1.key }.map { ($0.key, $0.value) })
+        let pairs = try [[String]](from: decoder)
+        var map = TileMap()
+        for pair in pairs {
+            guard pair.count == 2 else {
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "TileMap entry must be a [key, letter] pair"
+                ))
+            }
+            guard Self.isValidKey(pair[0]) else {
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "malformed cell key \(pair[0].debugDescription)"
+                ))
+            }
+            map[pair[0]] = pair[1]
+        }
+        self = map
     }
 
     public func encode(to encoder: Encoder) throws {
-        try storage.encode(to: encoder)
+        try keys.map { [$0, storage[$0]!] }.encode(to: encoder)
+    }
+
+    /// A key `parseKey` can digest: `<int>,<int>` with no padding.
+    static func isValidKey(_ key: String) -> Bool {
+        guard let comma = key.firstIndex(of: ",") else { return false }
+        return Int(key[key.startIndex..<comma]) != nil
+            && Int(key[key.index(after: comma)...]) != nil
     }
 }
 

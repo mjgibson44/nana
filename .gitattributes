@@ -1,0 +1,3 @@
+src/assets/common-words.txt text eol=lf
+public/dictionary.txt text eol=lf
+apple/Packages/WordCore/Sources/WordCore/Resources/common-words.txt text eol=lf

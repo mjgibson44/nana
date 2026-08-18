@@ -159,6 +159,10 @@ public final class TileStream {
     }
 
     public func next(_ count: Int) -> [String] {
+        // The TS stream tolerates a non-positive count (network-derived
+        // attack counts flow in here): it still sizes the opening board on
+        // the first call, then hands back nothing.
+        let take = max(0, count)
         if hidden == nil {
             // The opening deal sizes the hidden board — but never below what
             // a crossword needs, so a stream can serve requests of any size
@@ -169,7 +173,7 @@ public final class TileStream {
             hidden = puzzle.solution ?? TileMap()
             pending.append(contentsOf: puzzle.letters)
         }
-        while pending.count < count {
+        while pending.count < take {
             let grown = try! extendPuzzle(
                 board: hidden!, bounds: boardBounds(hidden!),
                 wordPool: wordPool, tileCount: STREAM_CHUNK, rng: rng
@@ -177,8 +181,8 @@ public final class TileStream {
             if let solution = grown.solution { hidden = solution }
             pending.append(contentsOf: grown.letters)
         }
-        let batch = Array(pending.prefix(count))
-        pending.removeFirst(count)
+        let batch = Array(pending.prefix(take))
+        pending.removeFirst(take)
         return batch
     }
 }
@@ -190,7 +194,10 @@ public let commonWords: [String] = {
     let url = Bundle.module.url(forResource: "common-words", withExtension: "txt")!
     let text = try! String(contentsOf: url, encoding: .utf8)
     return text.split(separator: "\n", omittingEmptySubsequences: false)
-        .map { $0.trimmingCharacters(in: .whitespaces) }
+        // .whitespacesAndNewlines, like JS trim(): a CRLF-normalized checkout
+        // must not leave every word wearing a \r (which would empty the
+        // usable pool and kill every battle at startup).
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
 }()
 

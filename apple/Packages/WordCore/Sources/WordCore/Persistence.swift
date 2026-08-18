@@ -34,6 +34,12 @@ public protocol KeyValueStore {
 
 public struct GameRecord: Codable, Equatable {
     /// Final score for the game.
+    ///
+    /// Deliberate divergence from the TS validator: a stored record whose
+    /// score/words is fractional (possible only in hand-edited storage — the
+    /// game's scoring is integral) passes TS's `typeof === 'number'` check
+    /// but is dropped here by the strict Int decode. Accepted: dropping a
+    /// corrupt record beats keeping a lie.
     public var score: Int
     /// How many words were on the finished board.
     public var words: Int
