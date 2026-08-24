@@ -160,6 +160,38 @@ Store Connect. The identifiers it must match are already fixed in code — `Lead
 (four boards, one the Daily Deal's *recurring* 24h/24h board) and `AchievementID`
 (fifteen) — and a test asserts those strings don't drift.
 
+### Shipping a build
+
+```bash
+./apple/tools/release.sh ios            # archive + export an .ipa
+./apple/tools/release.sh ios upload     # ...and send it to App Store Connect
+./apple/tools/release.sh macos          # a .pkg for the Mac App Store
+```
+
+Both platforms archive, export and sign cleanly today — verified end to end, producing a
+distribution-signed `Time Tiles.ipa` carrying `beta-reports-active` (the TestFlight
+entitlement) alongside Game Center and iCloud KVS.
+
+The build number is the **commit count**, not a hand-maintained field: App Store Connect
+rejects a build number it has already seen, and bumping one by hand is the kind of thing
+that gets forgotten exactly once. That also means `CFBundleVersion` and
+`CFBundleShortVersionString` have to *reference* the build settings — XcodeGen otherwise
+writes literal defaults that silently override them, and every upload arrives as build 1.
+
+**Before the first upload**, two things that can't be done from the CLI:
+
+1. An **app record** in App Store Connect for `dev.nana.TimeTiles` (Apps → +). Apps can't
+   be created by the API.
+2. An **App Store Connect API key** (Users and Access → Integrations), with the `.p8` in
+   `~/.appstoreconnect/private_keys/` and its ids exported as `ASC_KEY_ID` and
+   `ASC_ISSUER_ID`. Without them the script stops after building the package, which you
+   can still drag into Transporter.
+
+The app icon is generated from the game's design tokens by
+[`tools/make-icon.swift`](tools/make-icon.swift) — kept as a script so it's reproducible
+rather than a mystery binary. It is honestly a placeholder: the game's visual language
+rather than a designed mark. Fine for TestFlight, worth replacing before the App Store.
+
 ### What's left, and what it's waiting on
 
 - **Phase 3 needs exercising, not writing.** The app signs with Game Center and iCloud KVS
@@ -168,7 +200,7 @@ Store Connect. The identifiers it must match are already fixed in code — `Lead
   board, an achievement banner, two devices merging through iCloud. That needs the GameKit
   bundle (below) and test Apple IDs. Note unreleased leaderboards are visible to friends of
   test accounts (TN2417).
-- **Phase 4 is down to the spike**, which the plan puts in week one precisely because its
+- **The §7.4 spike is the last unknown**, which the plan puts in week one precisely because its
   findings can resize the phase: 8-device mesh stability under a star protocol, and what
   actually happens to a backgrounded player. There is no documented API to rejoin an
   existing >2-player `GKMatch`, so re-entry goes through the host's `addPlayers` backfill —
