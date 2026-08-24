@@ -24,7 +24,10 @@ struct RootView: View {
     @State private var model = GameModel()
     @State private var settings = AppSettings()
     @State private var audio = AudioEngine()
-    @State private var progression = Progression()
+    // iCloud-backed now that the entitlement exists: each device writes only
+    // its own blob, so the merge (§9.1) is what makes two devices add up.
+    @State private var progression = Progression(sync: UbiquitousSyncStore())
+    @State private var gameCenter = GameCenter()
 
     @State private var pending: PendingDoor?
     @State private var showSetup = false
@@ -51,6 +54,7 @@ struct RootView: View {
             case .home:
                 HomeScreen(
                     hasSavedGame: savedGame != nil,
+                    showsGameCenter: gameCenter.isSignedIn,
                     daily: daily,
                     onResume: resumeSavedGame,
                     onDaily: chooseDaily,
@@ -148,11 +152,14 @@ struct RootView: View {
                     VStack(spacing: 12) {
                         Text(BATTLE_ROYALE_INFO.name)
                             .font(.system(size: 25, weight: .heavy, design: .rounded))
-                        Text("Battles are coming to this app with Game Center. "
-                            + "For now, Solo and the tutorial are ready to play.")
-                            .font(.callout)
-                            .foregroundStyle(Ink.ink.opacity(0.8))
-                            .multilineTextAlignment(.center)
+                        Text(
+                            gameCenter.battleBlockedReason
+                                ?? "Matchmaking arrives with the next slice — the battle "
+                                    + "itself is built and tested."
+                        )
+                        .font(.callout)
+                        .foregroundStyle(Ink.ink.opacity(0.8))
+                        .multilineTextAlignment(.center)
                         Button("Back") { battleDoorNotice = false }
                             .buttonStyle(InkActionButtonStyle(primary: true))
                     }
@@ -163,6 +170,10 @@ struct RootView: View {
         .task {
             savedGame = settings.loadSavedGame()
             daily = settings.dailyStatus()
+            // Kicked off at launch and never blocking: everything except
+            // Battle plays signed out (§7.1), and anything earned meanwhile is
+            // held by Progression and flushed if this succeeds.
+            gameCenter.authenticate(feeding: progression)
             model.cues = audio
             audio.isSoundEnabled = { [settings] in settings.soundEnabled }
             audio.isHapticsEnabled = { [settings] in settings.hapticsEnabled }

@@ -4,9 +4,10 @@ The native iPhone/iPad/Mac port, built to [`docs/apple-port-plan.md`](../docs/ap
 
 ## State
 
-**Phases 0–2 are complete. Everything in phases 3 and 4 that doesn't need an Apple
-Developer account is built — what's left in both is the GameKit call sites and the
-hardware to test them on.** What runs today: Solo (both paces), the **Daily Deal**, and the guided
+**Phases 0–2 are complete; phase 3 is code-complete and signing against a real team;
+phase 4 needs matchmaking and its spike.** What's left in both is behavior that can only
+be exercised on hardware with a real Apple ID — there has been no Game Center sandbox
+since 2016 (TN2417). What runs today: Solo (both paces), the **Daily Deal**, and the guided
 tutorial, playable on iPhone, iPad and Mac.
 
 | Package / target | What it is |
@@ -24,8 +25,10 @@ xcodebuild test -project apple/Word.xcodeproj -scheme Word \
   -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO   # app tests incl. the zoom-out perf gate
 ```
 
-(`CODE_SIGNING_ALLOWED=NO` is only needed until there's a developer account to
-sign with — see phase 3 below. Drop it once a Team is set.)
+(`CODE_SIGNING_ALLOWED=NO` keeps the test run working on a machine with no team
+configured — CI, or a fresh clone before `Local.xcconfig` is filled in. With a team set you
+can drop it, and `xcodebuild build -allowProvisioningUpdates` produces a properly signed
+app with the Game Center and iCloud entitlements.)
 
 CI (`.github/workflows/ci.yml`) runs the web tests, all three Swift packages on Linux, a
 fixture-drift check (TS core changed → fixtures must be regenerated in the same commit),
@@ -59,8 +62,9 @@ the *set* of days played, which is the shape §9.1's iCloud merge needs.
 
 ### Progression, leaderboards and achievements
 
-Phase 3's logic layer, built so that the only thing left needing an Apple Developer account
-is the GameKit call itself:
+Phase 3's logic layer. `Services/GameCenter.swift` now sits on top of it with the real
+GameKit calls — auth, `GameKitSubmitter`, and `UbiquitousSyncStore` putting the merge below
+on iCloud:
 
 - **`Progress.swift` — the cross-device merge (§9.1).** iCloud's key-value store is
   last-writer-wins *per key*, so one shared stats blob would eat itself: play on the phone
@@ -80,9 +84,10 @@ is the GameKit call itself:
   `GameReport`; nine can be earned today.
 
 `Services/Progression.swift` binds them together and leaves the GameKit call sites as one
-small protocol, `ProgressionSubmitter`, so all of the above tests without an account.
-Storage is `LocalSyncStore` today; swapping in `NSUbiquitousKeyValueStore` once the iCloud
-entitlement exists is a one-line change there and nothing anywhere else.
+small protocol, `ProgressionSubmitter`, so all of the above still tests without an account —
+which is what kept the rules testable while the account was pending, and what keeps them
+testable in CI now that it isn't. `UbiquitousSyncStore` supplies the real iCloud store;
+`LocalSyncStore` remains for tests and for a device with no iCloud account.
 
 ### Battle
 
@@ -111,14 +116,40 @@ actually play:
 against one** — that needs an account and two devices — so treat it as the shape the §7.4
 spike starts from rather than as working code.
 
+### Game Center
+
+The shape follows §7.1: **signed-out is a designed state, not an error.** Auth starts at
+launch and blocks nothing — Solo, the Daily Deal and the tutorial never ask about it, and
+anything earned meanwhile is held and flushed if sign-in later succeeds. Only Battle,
+which genuinely needs an identity, turns anyone away, and it says which of three reasons
+applies: not signed in, still signing in, or Screen Time restricting multiplayer — the
+last being its own state because retrying can't fix it.
+
+Two GameKit details the service exists to absorb: the authenticate handler can fire more
+than once (the player can sign in or out from Settings), and it sometimes hands back a
+view controller that *must* be presented — ignoring it strands the player signed out with
+no way forward.
+
+Signing is per-developer: `bootstrap.sh` copies `Local.xcconfig.example` to
+`Local.xcconfig` (gitignored) for your Team ID. It goes through an xcconfig rather than
+Xcode's UI because `xcodegen generate` would wipe the latter; entitlements live in
+`project.yml` for the same reason, since XcodeGen owns the generated `.entitlements` file
+and overwrites anything hand-written there.
+
+**Still to do, and only doable in Xcode's UI:** create the GameKit bundle (File → New →
+File → GameKit) holding the leaderboard and achievement definitions, which syncs to App
+Store Connect. The identifiers it must match are already fixed in code — `LeaderboardID`
+(four boards, one the Daily Deal's *recurring* 24h/24h board) and `AchievementID`
+(fifteen) — and a test asserts those strings don't drift.
+
 ### What's left, and what it's waiting on
 
-- **Phase 3's Game Center half** needs an Apple Developer account, an App ID with the Game
-  Center/iCloud capabilities, and test Apple IDs. What remains is genuinely small: implement
-  `ProgressionSubmitter` with `GKLeaderboard.submitScore` / `GKAchievement.report`, add
-  `GKLocalPlayer` auth (calling `Progression.signedIn(as:)` on success), the `GKAccessPoint`,
-  the GameKit bundle whose leaderboard IDs must match `LeaderboardID`, and swap the sync
-  store for iCloud's.
+- **Phase 3 needs exercising, not writing.** The app signs with Game Center and iCloud KVS
+  entitlements in the binary (verified: `codesign -d --entitlements`), but *none of the
+  runtime behavior has been seen work* — the sign-in sheet, a score landing on a real
+  board, an achievement banner, two devices merging through iCloud. That needs the GameKit
+  bundle (below) and test Apple IDs. Note unreleased leaderboards are visible to friends of
+  test accounts (TN2417).
 - **Phase 4's remaining half** is matchmaking and the spike. Match *formation* — party
   codes on iOS 26, invites below it — needs Game Center auth, so it waits on the account
   alongside phase 3. Then the §7.4 spike, which the plan puts in week one because its
@@ -180,6 +211,6 @@ apple/
     Screens/                    #   router, home, doors/cards, stats, settings, lobby
     Services/                   #   audio synthesis, storage, settings, saved games,
                                 #   Daily Deal results, progression, battle session,
-                                #   the GKMatch transport
+                                #   Game Center auth, the GKMatch transport
   WordTests/                    # app-layer rendering, editing + lifecycle tests
 ```

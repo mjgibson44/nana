@@ -50,6 +50,20 @@ targets:
       - package: WordCore
       - package: WordBoard
       - package: WordNet
+    # XcodeGen generates the entitlements plist from this block, so these keys
+    # live here rather than in a hand-written file it would overwrite.
+    entitlements:
+      path: Word/Word.entitlements
+      properties:
+        # Game Center: auth, leaderboards, achievements, GKMatch (§7, §8).
+        com.apple.developer.game-center: true
+        # iCloud key-value storage for the cross-device progress merge (§9.1).
+        # A few KB of stat blobs — well inside the 1 MB / 1,024 key budget,
+        # which is why CloudKit would be over-engineering here.
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
+        # The Mac build is sandboxed; GKMatch needs the network.
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
     info:
       path: Word/Info.plist
       properties:
@@ -60,6 +74,9 @@ targets:
         GCSupportsGameMode: true
         LSSupportsGameMode: true
         ITSAppUsesNonExemptEncryption: false
+    configFiles:
+      Debug: Local.xcconfig
+      Release: Local.xcconfig
     settings:
       base:
         SWIFT_VERSION: "6.0"
@@ -67,6 +84,10 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         ENABLE_PREVIEWS: YES
         CODE_SIGN_STYLE: Automatic
+        # Read from Local.xcconfig (gitignored) rather than hardcoded: a team
+        # id is per-developer, and picking one in Xcode's UI would be wiped by
+        # the next `xcodegen generate`.
+        DEVELOPMENT_TEAM: "$(WORD_DEVELOPMENT_TEAM)"
 
   # App-layer tests that need SwiftUI (the §11 board-render perf gate at max
   # zoom-out). Pure logic tests live in the packages and run in CI; this

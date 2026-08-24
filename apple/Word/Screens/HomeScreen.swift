@@ -7,6 +7,10 @@ import WordCore
 /// explained once, in the card that fronts its first game.
 struct HomeScreen: View {
     var hasSavedGame: Bool
+    /// Shows Game Center's own access point over the home screen. Off in
+    /// snapshot tests and previews — it's a UIKit/AppKit overlay the renderer
+    /// can't draw, and it needs a signed-in player to say anything.
+    var showsGameCenter = false
     var daily: DailyStatus?
     var onResume: () -> Void
     var onDaily: () -> Void
@@ -33,6 +37,7 @@ struct HomeScreen: View {
             ScrollView { content }
                 .frame(idealHeight: Self.idealHeight)
                 .background(Ink.bg.ignoresSafeArea())
+                .modifier(GameCenterAccessPoint(active: showsGameCenter))
         } else {
             content.background(Ink.bg)
         }
