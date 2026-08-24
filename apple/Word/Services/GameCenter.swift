@@ -118,32 +118,13 @@ final class GameCenter {
 
     // MARK: Presenting the sign-in sheet
 
-    #if os(iOS)
-    typealias AuthViewController = UIViewController
+    typealias AuthViewController = ModalPresenter.ViewController
 
-    private func present(_ viewController: UIViewController) {
-        guard
-            let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive }),
-            let root = scene.keyWindow?.rootViewController
-        else { return }
-        // Never stack two of them: the handler can fire again while the sheet
-        // is already up.
-        guard root.presentedViewController == nil else { return }
-        root.present(viewController, animated: true)
+    /// `ModalPresenter` refuses when something is already up, which is what
+    /// keeps the handler firing twice from stacking two sign-in sheets.
+    private func present(_ viewController: AuthViewController) {
+        ModalPresenter.present(viewController)
     }
-    #elseif os(macOS)
-    typealias AuthViewController = NSViewController
-
-    private func present(_ viewController: NSViewController) {
-        guard let window = NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first
-        else { return }
-        guard window.attachedSheet == nil else { return }
-        let sheet = NSWindow(contentViewController: viewController)
-        window.beginSheet(sheet)
-    }
-    #endif
 }
 
 /// `ProgressionSubmitter` over the real Game Center.

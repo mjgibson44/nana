@@ -1,3 +1,4 @@
+import GameKit
 import SwiftUI
 import WordCore
 
@@ -6,6 +7,10 @@ import WordCore
 /// says so.
 enum Route: Equatable {
     case home
+    /// Getting into a battle: opening a room or joining one.
+    case battleEntry
+    /// In a battle's lobby, waiting for the host to start.
+    case battleLobby
     case game
 }
 
@@ -28,6 +33,11 @@ struct RootView: View {
     // its own blob, so the merge (§9.1) is what makes two devices add up.
     @State private var progression = Progression(sync: UbiquitousSyncStore())
     @State private var gameCenter = GameCenter()
+    @State private var matchmaking = Matchmaking()
+    @State private var battle: BattleSession?
+    @State private var battleBusy = false
+    @State private var battleError: String?
+    @State private var partyCode: String?
 
     @State private var pending: PendingDoor?
     @State private var showSetup = false
@@ -62,6 +72,29 @@ struct RootView: View {
                     onTutorial: startTutorialDirectly,
                     onStats: { showStats = true },
                     onSettings: { showSettings = true })
+
+            case .battleEntry:
+                BattleEntryScreen(
+                    supportsPartyCodes: Matchmaking.supportsPartyCodes,
+                    partyCode: partyCode,
+                    isBusy: battleBusy,
+                    error: battleError,
+                    onHost: hostBattle,
+                    onJoin: joinBattle(code:),
+                    onInvite: inviteToBattle,
+                    onClose: leaveBattle)
+
+            case .battleLobby:
+                BattleLobbyScreen(
+                    state: battle?.state,
+                    selfID: battle?.selfID ?? "",
+                    hostID: battle?.hostID,
+                    isHost: battle?.isHost ?? false,
+                    canStart: battle?.canStart ?? false,
+                    isReconnecting: battle?.isReconnecting ?? false,
+                    rejection: battle?.rejection,
+                    onStart: { battle?.start() },
+                    onLeave: leaveBattle)
 
             case .game:
                 GameScreen(
@@ -152,11 +185,9 @@ struct RootView: View {
                     VStack(spacing: 12) {
                         Text(BATTLE_ROYALE_INFO.name)
                             .font(.system(size: 25, weight: .heavy, design: .rounded))
-                        Text(
-                            gameCenter.battleBlockedReason
-                                ?? "Matchmaking arrives with the next slice — the battle "
-                                    + "itself is built and tested."
-                        )
+                        // Only raised when there *is* a reason — the door
+                        // leads straight to matchmaking otherwise.
+                        Text(gameCenter.battleBlockedReason ?? "")
                         .font(.callout)
                         .foregroundStyle(Ink.ink.opacity(0.8))
                         .multilineTextAlignment(.center)
@@ -216,7 +247,15 @@ struct RootView: View {
         case .solo:
             showSetup = true
         case .battle:
-            battleDoorNotice = true
+            // Battle is the one mode that genuinely needs an identity, so it
+            // is the only place sign-in is ever insisted on (§7.1).
+            if gameCenter.battleBlockedReason != nil {
+                battleDoorNotice = true
+            } else {
+                battleError = nil
+                partyCode = nil
+                route = .battleEntry
+            }
         }
     }
 
@@ -310,6 +349,93 @@ struct RootView: View {
         settings.save(nil)
     }
 
+    // MARK: Battle (plan §7.3)
+
+    /// Open a room and show its code. The party exists before the match does —
+    /// players join the party, and it becomes a `GKMatch` when we ask.
+    private func hostBattle() {
+        guard #available(iOS 26, macOS 26, *) else { return }
+        runBattleSetup { 
+            let (activity, code) = try await matchmaking.hostParty()
+            partyCode = code
+            let match = try await matchmaking.match(for: activity)
+            return (match, .host)
+        }
+    }
+
+    private func joinBattle(code: String) {
+        guard #available(iOS 26, macOS 26, *) else { return }
+        runBattleSetup {
+            let activity = try await matchmaking.joinParty(code: code)
+            let match = try await matchmaking.match(for: activity)
+            return (match, .client)
+        }
+    }
+
+    /// Game Center's own invite sheet — the road that works on every OS the
+    /// app supports. Whoever sends the invite referees.
+    private func inviteToBattle() {
+        runBattleSetup {
+            let match = try await matchmaking.findMatchByInvite()
+            return (match, .host)
+        }
+    }
+
+    /// The shared shape of every road in: show it's working, form a match,
+    /// build the session, land in the lobby.
+    private func runBattleSetup(
+        _ form: @escaping () async throws -> (GKMatch, BattleSession.Role)
+    ) {
+        battleBusy = true
+        battleError = nil
+        Task {
+            do {
+                let (match, role) = try await form()
+                startBattle(match: match, role: role)
+            } catch let failure as Matchmaking.Failure {
+                partyCode = nil
+                if case .cancelled = failure {
+                    // Backing out of matchmaking isn't an error worth saying.
+                    battleError = nil
+                } else if case let .unavailable(message) = failure {
+                    battleError = message
+                } else if case let .failed(message) = failure {
+                    battleError = message
+                }
+            } catch {
+                partyCode = nil
+                battleError = error.localizedDescription
+            }
+            battleBusy = false
+        }
+    }
+
+    private func startBattle(match: GKMatch, role: BattleSession.Role) {
+        let transport = GameKitTransport(match: match)
+        let session = BattleSession(
+            role: role,
+            transport: transport,
+            model: model,
+            displayName: { transport.displayName(for: $0) })
+        session.onGameStart = { route = .game }
+        session.onReturnToLobby = { route = .battleLobby }
+        session.run()
+        battle = session
+        route = .battleLobby
+    }
+
+    /// Out of a battle by any road — backing out of the entry screen, leaving
+    /// the lobby, or quitting a game.
+    private func leaveBattle() {
+        battle?.leave()
+        battle = nil
+        partyCode = nil
+        battleError = nil
+        battleBusy = false
+        route = .home
+        daily = settings.dailyStatus()
+    }
+
     private func startSolo(pace: SoloPace) {
         showSetup = false
         // This is the one moment a player says what they want out of a door,
@@ -359,6 +485,12 @@ struct RootView: View {
     /// Done with a game by any road. A first-timer who came through the
     /// tutorial on their way to a door is handed on to it (App.tsx:722–730).
     private func leaveGame() {
+        // A battle's board belongs to its lobby: leaving the game goes back
+        // there, and only leaving the lobby goes home.
+        if battle != nil {
+            route = .battleLobby
+            return
+        }
         persistGame()
         route = .home
         // The day can have rolled over while a game was open.

@@ -113,3 +113,36 @@ final class GameCenterTests: XCTestCase {
         XCTAssertTrue(text.contains("com.apple.security.network.client"))
     }
 }
+
+/// Matchmaking's testable surface. Forming a match needs a signed-in Apple ID
+/// on real hardware, so what's pinned here is the part that is pure.
+@MainActor
+final class MatchmakingTests: XCTestCase {
+
+    func testPartyCodesAreGatedOnTheOSRatherThanAssumed() {
+        // Party codes are 26-and-up; below that the invite sheet is the only
+        // road, and the entry screen has to know which it's offering.
+        if #available(iOS 26, macOS 26, *) {
+            XCTAssertTrue(Matchmaking.supportsPartyCodes)
+        } else {
+            XCTAssertFalse(Matchmaking.supportsPartyCodes)
+        }
+    }
+
+    func testATypedCodeIsUppercasedAndStrippedOfSpaces() {
+        XCTAssertEqual(Matchmaking.normalizePartyCode(" abc def "), "ABCDEF")
+        XCTAssertEqual(Matchmaking.normalizePartyCode("Abc-Def"), "ABC-DEF")
+    }
+
+    func testTheDashIsLeftAloneBecauseApplesFormatUsesIt() {
+        // Unlike the web's five-letter codes, a party code is two same-length
+        // parts joined by a dash — so stripping it would break the format.
+        XCTAssertTrue(Matchmaking.normalizePartyCode("ab-cd").contains("-"))
+    }
+
+    func testTheBattleActivityIDIsStable() {
+        // Must match the activity configured in the GameKit bundle, the same
+        // way the leaderboard ids must.
+        XCTAssertEqual(Matchmaking.battleActivityID, "battle")
+    }
+}

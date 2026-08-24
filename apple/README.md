@@ -5,8 +5,7 @@ The native iPhone/iPad/Mac port, built to [`docs/apple-port-plan.md`](../docs/ap
 **Naming:** the game ships as **Time Tiles** (§16.2 — "Word" is unsearchable on the App
 Store), under the bundle id `dev.nana.TimeTiles`. Only the store-facing name changed: the
 repo, the Xcode target, and the `WordCore` / `WordBoard` / `WordNet` modules keep their
-names, exactly as plan §13 anticipated. The web app is still called "Word" — a decision
-that hasn't been made rather than one that has.
+names, exactly as plan §13 anticipated. The web app carries the same name.
 
 ## State
 
@@ -118,9 +117,22 @@ actually play:
   *held* for a dropped player. A battle plays on around a disconnect rather than pausing,
   so a held seat has to read as held, not gone.
 
-`GameKitTransport` implements `BattleTransport` over a real `GKMatch`. **It has never run
-against one** — that needs an account and two devices — so treat it as the shape the §7.4
-spike starts from rather than as working code.
+`GameKitTransport` implements `BattleTransport` over a real `GKMatch`, and
+`Matchmaking` forms one. Two roads in, ranked by what the OS can do (§7.3):
+
+- **Party codes (26+)** — `GKGameActivity` issues a short shareable code and URL, and
+  `findMatch` turns the party into a `GKMatch`. Worth knowing the code *format* is
+  Apple's, not ours: two same-length parts joined by a dash, so `newBattleCode`'s five
+  letters don't apply here.
+- **Invites (everywhere)** — `GKMatchmakerViewController` in invite-only mode: friends,
+  Messages threads, nearby players. The only road below 26, and the fallback above it.
+
+Everything the web game ran a broker, STUN and TURN for is Apple's problem from here.
+
+**None of it has formed a match.** That needs a signed-in Apple ID on real hardware — no
+sandbox (TN2417), and real-time matches are reported broken in the simulator. It compiles
+for both platforms against the documented API; treat it as the shape the §7.4 spike starts
+from rather than as working code.
 
 ### Game Center
 
@@ -156,14 +168,16 @@ Store Connect. The identifiers it must match are already fixed in code — `Lead
   board, an achievement banner, two devices merging through iCloud. That needs the GameKit
   bundle (below) and test Apple IDs. Note unreleased leaderboards are visible to friends of
   test accounts (TN2417).
-- **Phase 4's remaining half** is matchmaking and the spike. Match *formation* — party
-  codes on iOS 26, invites below it — needs Game Center auth, so it waits on the account
-  alongside phase 3. Then the §7.4 spike, which the plan puts in week one because its
-  findings can resize the phase: 8-device mesh stability, and what actually happens to a
-  backgrounded player (there is no documented API to rejoin an existing >2-player
-  `GKMatch`, so re-entry goes through the host's `addPlayers` backfill — and whether a
-  party code lands you back in the *live* match is undocumented, i.e. a spike question,
-  not a mechanism).
+- **Phase 4 is down to the spike**, which the plan puts in week one precisely because its
+  findings can resize the phase: 8-device mesh stability under a star protocol, and what
+  actually happens to a backgrounded player. There is no documented API to rejoin an
+  existing >2-player `GKMatch`, so re-entry goes through the host's `addPlayers` backfill —
+  and whether a party code lands you back in the *live* match is undocumented, which makes
+  it a spike question rather than a mechanism. Everything the spike needs to run is now
+  built; it needs devices and test Apple IDs.
+- **The GameKit bundle needs a `battle` activity** alongside the leaderboards and
+  achievements, with party codes enabled — `Matchmaking.battleActivityID` is the identifier
+  it has to match.
 - **Phase 5's input bridges are in** (`Board/BoardInputBridge.swift`): pinch now re-aims at
   the fingers' *live* midpoint every frame rather than the one it started at, so a pinch
   that travels pans the board the way the web's does; iOS reads the real `UITouch.TouchType`,
@@ -214,9 +228,11 @@ apple/
     Board/                      #   camera, board rendering, pointer surface,
                                 #   the UIKit/AppKit input bridge
     Game/                       #   model, Solo + Battle clocks, screen + chrome, tutorial
-    Screens/                    #   router, home, doors/cards, stats, settings, lobby
+    Screens/                    #   router, home, doors/cards, stats, settings,
+                                #   battle entry + lobby
     Services/                   #   audio synthesis, storage, settings, saved games,
                                 #   Daily Deal results, progression, battle session,
-                                #   Game Center auth, the GKMatch transport
+                                #   Game Center auth, matchmaking, the GKMatch
+                                #   transport
   WordTests/                    # app-layer rendering, editing + lifecycle tests
 ```

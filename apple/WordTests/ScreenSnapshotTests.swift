@@ -101,6 +101,23 @@ final class ScreenSnapshotTests: XCTestCase {
             name: "battle-lobby-host", size: CGSize(width: 420, height: 700))
     }
 
+    func testBattleEntryRendersWithAPartyCode() throws {
+        try render(
+            BattleEntryScreen(
+                supportsPartyCodes: true, partyCode: "ABC-DEF", isBusy: false, error: nil,
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onClose: {}, scrollable: false),
+            name: "battle-entry-hosting", size: CGSize(width: 420, height: 620))
+    }
+
+    func testBattleEntryRendersWithoutPartyCodeSupport() throws {
+        try render(
+            BattleEntryScreen(
+                supportsPartyCodes: false, partyCode: nil, isBusy: false,
+                error: "Game Center couldn’t open matchmaking.",
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onClose: {}, scrollable: false),
+            name: "battle-entry-invites", size: CGSize(width: 420, height: 620))
+    }
+
     func testTutorialChromeRenders() throws {
         try render(
             VStack(spacing: 0) {
