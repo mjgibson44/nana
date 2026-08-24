@@ -79,6 +79,19 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        # Required: an upload with no orientations at all is rejected (90474).
+        # The game screen is a vertical stack — header, board, word bar, pile —
+        # so a phone plays it upright. An iPad has the height for any of them,
+        # and supporting all four is what iPad multitasking requires (the
+        # alternative being UIRequiresFullScreen, which is worse on a device
+        # people run apps side by side on).
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         LSApplicationCategoryType: public.app-category.word-games
         # Game Mode opt-in (see docs/apple-port-plan.md §9.5).
         GCSupportsGameMode: true
