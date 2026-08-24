@@ -182,10 +182,11 @@ writes literal defaults that silently override them, and every upload arrives as
 
 1. An **app record** in App Store Connect for `dev.nana.TimeTiles` (Apps → +). Apps can't
    be created by the API.
-2. An **App Store Connect API key** (Users and Access → Integrations), with the `.p8` in
-   `~/.appstoreconnect/private_keys/` and its ids exported as `ASC_KEY_ID` and
-   `ASC_ISSUER_ID`. Without them the script stops after building the package, which you
-   can still drag into Transporter.
+2. An **App Store Connect API key** (Users and Access → Integrations). Save the `.p8` as
+   `~/.appstoreconnect/private_keys/AuthKey_<KEYID>.p8` — **it downloads exactly once**,
+   and a lost one has to be revoked and replaced — then put its two ids in
+   `apple/Local.env` (gitignored; copy `Local.env.example`). Without them the script stops
+   after building the package, which you can still drag into Transporter.
 
 The app icon is generated from the game's design tokens by
 [`tools/make-icon.swift`](tools/make-icon.swift) — kept as a script so it's reproducible

@@ -10,11 +10,12 @@
 #   1. An app record in App Store Connect for dev.nana.TimeTiles. Apps can't be
 #      created from the CLI — App Store Connect → Apps → +.
 #   2. An App Store Connect API key (Users and Access → Integrations → keys),
-#      with the .p8 saved to ~/.appstoreconnect/private_keys/, and its key id
-#      and issuer id exported:
+#      with the .p8 saved as ~/.appstoreconnect/private_keys/AuthKey_<KEYID>.p8,
+#      and its two ids either exported or dropped in apple/Local.env
+#      (gitignored, and read automatically):
 #
-#        export ASC_KEY_ID=XXXXXXXXXX
-#        export ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+#        ASC_KEY_ID=XXXXXXXXXX
+#        ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 #
 # The build number is the commit count, so it always increases — App Store
 # Connect rejects a build number it has already seen, and hand-bumping one in
@@ -92,9 +93,25 @@ if [ "$ACTION" != "upload" ]; then
   exit 0
 fi
 
+# Credentials can live in a gitignored file rather than being re-exported
+# every shell, the same way the team id does.
+ENV_FILE="${APPLE_DIR}/Local.env"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$ENV_FILE"; set +a
+fi
+
 if [ -z "${ASC_KEY_ID:-}" ] || [ -z "${ASC_ISSUER_ID:-}" ]; then
   echo "ASC_KEY_ID and ASC_ISSUER_ID must be set to upload — see the notes at the" >&2
   echo "top of this script." >&2
+  exit 1
+fi
+
+KEY_FILE="${HOME}/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+if [ ! -f "$KEY_FILE" ]; then
+  echo "No ${KEY_FILE}." >&2
+  echo "The .p8 downloads once and only once — if it's lost, revoke the key and" >&2
+  echo "make a new one." >&2
   exit 1
 fi
 

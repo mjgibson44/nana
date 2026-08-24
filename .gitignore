@@ -23,3 +23,7 @@ apple/Local.xcconfig
 apple/Word/Word.entitlements
 # Release artefacts (apple/tools/release.sh)
 apple/.release/
+
+# App Store Connect credentials — the .p8 is a secret and downloads only once
+apple/Local.env
+*.p8
