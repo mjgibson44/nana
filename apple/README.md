@@ -4,8 +4,9 @@ The native iPhone/iPad/Mac port, built to [`docs/apple-port-plan.md`](../docs/ap
 
 ## State
 
-**Phases 0–2 are complete, everything in phase 3 that doesn't need an Apple Developer
-account is built, and phase 4's protocol half is built.** What runs today: Solo (both paces), the **Daily Deal**, and the guided
+**Phases 0–2 are complete. Everything in phases 3 and 4 that doesn't need an Apple
+Developer account is built — what's left in both is the GameKit call sites and the
+hardware to test them on.** What runs today: Solo (both paces), the **Daily Deal**, and the guided
 tutorial, playable on iPhone, iPad and Mac.
 
 | Package / target | What it is |
@@ -83,6 +84,33 @@ small protocol, `ProgressionSubmitter`, so all of the above tests without an acc
 Storage is `LocalSyncStore` today; swapping in `NSUbiquitousKeyValueStore` once the iCloud
 entitlement exists is a one-line change there and nothing anywhere else.
 
+### Battle
+
+The protocol landed in #48; this is the rest of it — the parts that make a battle
+actually play:
+
+- **`BattleRun`** is battle's clock: a batch lands in the pile every
+  `BATTLE_DRIP_SECONDS`, and the only losing condition is letting the pile past
+  `BATTLE_PILE_LIMIT`. The load-bearing detail is that a drip's size is **pure in its
+  index**, not the wall clock — players' clocks drift, so drip *k* has to be drip *k* on
+  every screen for everyone to draw the same batch from the shared stream.
+- **Battle in `GameModel`**: the locked board (words are permanent, so only real words
+  land), the shared deal, and the attack a word owes. Attacks price only the *growth* —
+  stretching HEART to HEARTS earns the S, not the whole word again — and travel as counts:
+  the receiver draws its own letters from a private `<seed>/attacks/<id>` stream, so tiles
+  never cross the wire.
+- **`BattleSession`** binds `WordNet`'s host/client sessions to the board, and takes its
+  transport rather than making one. That's what lets a `MemoryMesh` play a whole battle in
+  tests — two sessions, two boards, one mesh — and it's why the GameKit adapter is a
+  drop-in that changes nothing below it.
+- **`BattleLobbyScreen`**: the roster from the host's snapshot, including seats being
+  *held* for a dropped player. A battle plays on around a disconnect rather than pausing,
+  so a held seat has to read as held, not gone.
+
+`GameKitTransport` implements `BattleTransport` over a real `GKMatch`. **It has never run
+against one** — that needs an account and two devices — so treat it as the shape the §7.4
+spike starts from rather than as working code.
+
 ### What's left, and what it's waiting on
 
 - **Phase 3's Game Center half** needs an Apple Developer account, an App ID with the Game
@@ -91,8 +119,14 @@ entitlement exists is a one-line change there and nothing anywhere else.
   `GKLocalPlayer` auth (calling `Progression.signedIn(as:)` on success), the `GKAccessPoint`,
   the GameKit bundle whose leaderboard IDs must match `LeaderboardID`, and swap the sync
   store for iCloud's.
-- **Phase 4's remaining half** is the `GKMatch` adapter behind `BattleTransport`, plus the
-  lobby UI and the 8-device spike (§7.4). The protocol it speaks is done and tested.
+- **Phase 4's remaining half** is matchmaking and the spike. Match *formation* — party
+  codes on iOS 26, invites below it — needs Game Center auth, so it waits on the account
+  alongside phase 3. Then the §7.4 spike, which the plan puts in week one because its
+  findings can resize the phase: 8-device mesh stability, and what actually happens to a
+  backgrounded player (there is no documented API to rejoin an existing >2-player
+  `GKMatch`, so re-entry goes through the host's `addPlayers` backfill — and whether a
+  party code lands you back in the *live* match is undocumented, i.e. a spike question,
+  not a mechanism).
 - **Phase 5's input bridges are in** (`Board/BoardInputBridge.swift`): pinch now re-aims at
   the fingers' *live* midpoint every frame rather than the one it started at, so a pinch
   that travels pans the board the way the web's does; iOS reads the real `UITouch.TouchType`,
@@ -142,9 +176,10 @@ apple/
   Word/                         # the app target (SwiftUI)
     Board/                      #   camera, board rendering, pointer surface,
                                 #   the UIKit/AppKit input bridge
-    Game/                       #   model, Solo clock machine, screen + chrome, tutorial
-    Screens/                    #   router, home, doors/cards, stats, settings
+    Game/                       #   model, Solo + Battle clocks, screen + chrome, tutorial
+    Screens/                    #   router, home, doors/cards, stats, settings, lobby
     Services/                   #   audio synthesis, storage, settings, saved games,
-                                #   Daily Deal results, progression + queues
+                                #   Daily Deal results, progression, battle session,
+                                #   the GKMatch transport
   WordTests/                    # app-layer rendering, editing + lifecycle tests
 ```

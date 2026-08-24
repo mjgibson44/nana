@@ -154,6 +154,26 @@ final class GameModel {
     /// roll over mid-game, and the result belongs to the day it was begun on,
     /// not the day it happened to end on.
     private(set) var daily: DailyDeal?
+
+    /// The battle's clock and deal position, while `mode == .battle`.
+    private(set) var battle: BattleRun?
+    /// Which round the battle is in, refreshed by the clock tick. Held rather
+    /// than computed so `commit` — which has no clock of its own — values a
+    /// word by the round it actually landed in.
+    private(set) var battleRound = 1
+    /// Watching rather than playing: buried already, or joined mid-game and
+    /// waiting for the next start (App.tsx:1605–1609). A dead board takes no
+    /// drips and can't be buried twice.
+    var spectating = false
+    /// The shared deal. Every player's stream is seeded identically, so drip
+    /// *k* is the same letters on every screen.
+    private var battleStream: TileStream?
+    /// This player's private attack stream, seeded `<seed>/attacks/<selfID>`.
+    /// Only counts cross the wire; the letters are drawn locally.
+    private var attackStream: TileStream?
+
+    /// A word landed and owes the field tiles. The session splits and sends it.
+    var onBattleAttack: ((Int) -> Void)?
     /// The lesson's progress while `mode == .tutorial`.
     private(set) var tutorial: TutorialRun?
 
@@ -343,6 +363,16 @@ final class GameModel {
 
     var isTutorial: Bool { mode == .tutorial }
     var isDaily: Bool { mode == .daily }
+    var isBattle: Bool { mode == .battle }
+
+    /// Battle's pile gauge counts tiles in hand against a hard limit — unlike
+    /// Solo's, which counts anything loose and treats the limit as a deadline.
+    var battlePileTone: SoloGaugeTone {
+        guard mode == .battle else { return .ok }
+        if rack.count >= BATTLE_PILE_URGENT { return .over }
+        if rack.count >= BATTLE_PILE_WARN { return .warn }
+        return .ok
+    }
 
     /// The Daily Deal's pressure isn't a clock, it's the pile: a fixed deal,
     /// and every tile you can't place costs you the bonus.
@@ -403,6 +433,7 @@ final class GameModel {
         mode = .endless
         tutorial = nil
         daily = nil
+        clearBattle()
         solo = SoloSession(pace: pace, now: now)
         gameSerial += 1
         setBoard(TileMap())
@@ -410,6 +441,58 @@ final class GameModel {
             wordPool: commonWords, tileCount: ENDLESS_START_TILES, rng: seededRng(seed))
         rack = puzzle?.letters ?? []
         resetPlayState()
+    }
+
+    /// The host said go. Grow the shared deal from the seed and dive in.
+    ///
+    /// Battle's board is **locked**: a word placed is permanent, so only real
+    /// words may land (the `boardLocked` branch of `commit` already enforces
+    /// that). The opening batch is `BATTLE_START_TILES` for everyone, which is
+    /// what keeps the shared stream in step — every client asks the stream for
+    /// the same first number.
+    func newBattle(
+        seed: String, selfID: String, spectating: Bool = false, now: Date = .now
+    ) {
+        self.seed = seed
+        mode = .battle
+        tutorial = nil
+        daily = nil
+        self.spectating = spectating
+        boardLocked = true
+        battle = BattleRun(startedAt: now)
+        battleRound = 1
+        let stream = TileStream(seed: seed)
+        battleStream = stream
+        attackStream = TileStream(seed: "\(seed)/attacks/\(selfID)")
+        solo = SoloSession(battleAt: now)
+        gameSerial += 1
+        setBoard(TileMap())
+        rack = spectating ? [] : stream.next(BATTLE_START_TILES)
+        resetPlayState()
+    }
+
+    /// Our share of a rival's word. Only the count crossed the wire; the
+    /// letters come off this player's private stream (App.tsx:803–819).
+    func receiveAttack(_ count: Int) {
+        guard mode == .battle, !isComplete, !spectating, count > 0,
+            let attackStream
+        else { return }
+        let letters = attackStream.next(count)
+        guard !letters.isEmpty else { return }
+        appendDealtTiles(letters)
+        // Sent tiles get their own voice — lower and falling, so incoming
+        // trouble never sounds like tiles you earned.
+        cues?.play(.attack)
+        rejectToast(
+            "Incoming! +\(letters.count) tile\(letters.count == 1 ? "" : "s") from a rival")
+        checkBattleBurial()
+    }
+
+    /// Battle's one loss rule: let the pile past the limit, for any reason at
+    /// any moment, and you're out on the spot (App.tsx:1636–1639).
+    private func checkBattleBurial() {
+        guard mode == .battle, !isComplete, !spectating else { return }
+        if rack.count > BATTLE_PILE_LIMIT { finishGame(reason: .buried) }
     }
 
     /// Deal today's puzzle.
@@ -422,6 +505,7 @@ final class GameModel {
         seed = deal.seed
         mode = .daily
         tutorial = nil
+        clearBattle()
         daily = deal
         solo = SoloSession(dailyAt: now)
         gameSerial += 1
@@ -444,12 +528,23 @@ final class GameModel {
         seed = "tutorial"
         mode = .tutorial
         daily = nil
+        clearBattle()
         tutorial = TutorialRun()
         solo = SoloSession(tutorialAt: now)
         gameSerial += 1
         setBoard(TileMap())
         rack = tutorialScript[0].tiles
         resetPlayState()
+    }
+
+    /// Leave battle behind — every other mode deals its own way.
+    private func clearBattle() {
+        battle = nil
+        battleStream = nil
+        attackStream = nil
+        battleRound = 1
+        spectating = false
+        boardLocked = false
     }
 
     /// Everything a fresh board resets, whatever dealt it.
@@ -499,6 +594,10 @@ final class GameModel {
     /// Called by the UI heartbeat. The session machine changes its deadline
     /// before emitting, so the same expiry can never deal twice.
     func advanceClock(at now: Date = .now) {
+        if mode == .battle {
+            advanceBattle(at: now)
+            return
+        }
         switch solo.advance(at: now, looseTiles: looseTiles) {
         case .none:
             break
@@ -509,6 +608,24 @@ final class GameModel {
         }
         soundTick(at: now)
         soundOverflow()
+    }
+
+    /// The battle's tick: keep the round current, land a drip when one is due.
+    private func advanceBattle(at now: Date) {
+        guard var run = battle else { return }
+        battleRound = run.round(at: now)
+        guard !isComplete, !spectating else {
+            battle = run
+            return
+        }
+        if let tiles = run.advance(at: now), let stream = battleStream {
+            let letters = stream.next(tiles)
+            appendDealtTiles(letters)
+            rejectToast("+\(letters.count) tile\(letters.count == 1 ? "" : "s")")
+            cues?.play(.deal)
+        }
+        battle = run
+        checkBattleBurial()
     }
 
     /// The last few seconds of an Endless round tick, once a second, so the
@@ -897,6 +1014,10 @@ final class GameModel {
             longestWordPlaced = max(longestWordPlaced, placedLengths.max() ?? 0)
         }
 
+        // Captured before the board changes: an attack is priced against the
+        // words that were already down.
+        let oldRuns = mode == .battle ? extractRuns(board) : []
+
         remember()
         setBoard(next)
         let spent = Set(result.steps.map(\.rackIndex))
@@ -905,6 +1026,31 @@ final class GameModel {
         clearFocus()
         cues?.play(.commit)
         soundOverflow()
+
+        // Battle: the word that just landed hits the field. Only the growth
+        // counts — a word extended or bridged from words already down is
+        // worth the difference, not the whole word again — and the
+        // best-paying word the placement made is the one that counts
+        // (App.tsx:2098–2122).
+        if mode == .battle, !spectating {
+            let attack = newRuns.reduce(0) { top, run in
+                let cells = Set(run.cells)
+                // The runs this word swallowed: same direction, every cell now
+                // inside it. Anything merely crossed keeps its cells outside.
+                let grewFrom = oldRuns
+                    .filter { $0.direction == run.direction && $0.cells.allSatisfy(cells.contains) }
+                    .map { $0.word.count }
+                return max(
+                    top,
+                    battleAttackTiles(
+                        wordLength: run.word.count, round: battleRound, grewFrom: grewFrom))
+            }
+            if attack > 0 {
+                onBattleAttack?(attack)
+                rejectToast(
+                    "Sent \(attack) tile\(attack == 1 ? "" : "s") across your rivals!")
+            }
+        }
 
         // The step's word is on the board — deal the next one's tiles.
         if madeStepWord { advanceTutorial(placedDir: dir) }

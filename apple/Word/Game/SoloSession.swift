@@ -92,6 +92,15 @@ struct SoloSession: Equatable {
         splash = nil
     }
 
+    /// A battle: no countdown of its own. The pressure is the drip and the
+    /// pile limit, both of which `BattleRun` and `GameModel` own — this
+    /// session is here only to carry `complete` and `endReason`.
+    init(battleAt _: Date) {
+        pace = .regular
+        countdown = nil
+        splash = nil
+    }
+
     /// A game coming back from a saved blob. The clock returns frozen at the
     /// seconds it had left, behind the resume card, so time away is never
     /// charged and a long absence can't expire the round on arrival.

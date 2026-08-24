@@ -1,6 +1,7 @@
 import SwiftUI
 import WordBoard
 import WordCore
+import WordNet
 import XCTest
 
 @testable import Word
@@ -65,6 +66,39 @@ final class ScreenSnapshotTests: XCTestCase {
                 daily: SoloSummaryView.DailySummary(
                     date: "Aug 24", tilesLeft: 0, bonusEarned: true, streak: 6)),
             name: "summary-daily", size: CGSize(width: 420, height: 720))
+    }
+
+    func testBattleLobbyRenders() throws {
+        let state = BattleState(
+            phase: .lobby,
+            players: [
+                BattlePlayer(id: "a", name: "Ada", host: true),
+                BattlePlayer(id: "b", name: "Grace"),
+                BattlePlayer(id: "c", name: "Katherine", connected: false),
+                BattlePlayer(id: "d", name: "Dorothy", waiting: true),
+            ],
+            game: 1,
+            winnerId: nil)
+        try render(
+            BattleLobbyScreen(
+                state: state, selfID: "b", hostID: "a", isHost: false, canStart: false,
+                isReconnecting: false, rejection: nil,
+                onStart: {}, onLeave: {}, scrollable: false),
+            name: "battle-lobby", size: CGSize(width: 420, height: 760))
+    }
+
+    func testBattleLobbyRendersForTheHost() throws {
+        let state = BattleState(
+            phase: .lobby,
+            players: [BattlePlayer(id: "a", name: "Ada", host: true)],
+            game: 0,
+            winnerId: nil)
+        try render(
+            BattleLobbyScreen(
+                state: state, selfID: "a", hostID: "a", isHost: true, canStart: false,
+                isReconnecting: true, rejection: nil,
+                onStart: {}, onLeave: {}, scrollable: false),
+            name: "battle-lobby-host", size: CGSize(width: 420, height: 700))
     }
 
     func testTutorialChromeRenders() throws {
