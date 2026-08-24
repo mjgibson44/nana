@@ -67,7 +67,11 @@ targets:
     info:
       path: Word/Info.plist
       properties:
-        CFBundleDisplayName: Word
+        # The store-facing name. "Word" is unsearchable on the App Store
+        # (plan §13, §16.2); the repo, targets and modules keep their names —
+        # only what a player sees changes.
+        CFBundleDisplayName: Time Tiles
+        CFBundleName: Time Tiles
         UILaunchScreen: {}
         LSApplicationCategoryType: public.app-category.word-games
         # Game Mode opt-in (see docs/apple-port-plan.md §9.5).
@@ -84,6 +88,10 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         ENABLE_PREVIEWS: YES
         CODE_SIGN_STYLE: Automatic
+        # Set explicitly rather than derived from the target name: a bundle id
+        # is permanent once the app ships, so it matches the product name now
+        # while that is still free to do.
+        PRODUCT_BUNDLE_IDENTIFIER: dev.nana.TimeTiles
         # Read from Local.xcconfig (gitignored) rather than hardcoded: a team
         # id is per-developer, and picking one in Xcode's UI would be wiped by
         # the next `xcodegen generate`.

@@ -729,14 +729,7 @@ final class GameModel {
     var onFinish: ((GameOutcome) -> Void)?
 
     func loadDictionary() async {
-        guard dictionary == nil,
-            let url = Bundle.main.url(forResource: "dictionary", withExtension: "txt")
-        else { return }
-        let parsed = await Task.detached(priority: .utility) { () -> Set<String>? in
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-            return parseDictionary(text)
-        }.value
-        guard let parsed else { return }
+        guard dictionary == nil, let parsed = await WordDictionary.shared() else { return }
         dictionary = parsed
         refreshBoardCaches()
     }

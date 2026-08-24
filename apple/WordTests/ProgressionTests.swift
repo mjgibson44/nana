@@ -22,10 +22,17 @@ final class ProgressionTests: XCTestCase {
     }
 
     /// Records every call, and can be told to fail — the network does.
-    private final class FakeSubmitter: ProgressionSubmitter, @unchecked Sendable {
-        var accepts = true
+    ///
+    /// An actor rather than a lock-free class on purpose: `submit` is called
+    /// from off the main actor, so a plain array here would be a data race the
+    /// moment two flushes overlapped. It did, and it was.
+    private actor FakeSubmitter: ProgressionSubmitter {
+        private var accepts: Bool
         private(set) var submitted: [PendingScore] = []
         private(set) var reported: [AchievementProgress] = []
+
+        init(accepts: Bool = true) { self.accepts = accepts }
+        func setAccepts(_ value: Bool) { accepts = value }
 
         func submit(_ score: PendingScore) async -> Bool {
             submitted.append(score)
@@ -187,31 +194,77 @@ final class ProgressionTests: XCTestCase {
 
         XCTAssertTrue(progression.pendingScores.isEmpty)
         XCTAssertTrue(progression.pendingAchievements.isEmpty)
-        XCTAssertEqual(Set(submitter.submitted.map(\.board)), [.soloFast, .soloRegular])
-        XCTAssertFalse(submitter.reported.isEmpty)
+        let boards = await Set(submitter.submitted.map(\.board))
+        XCTAssertEqual(boards, [.soloFast, .soloRegular])
+        let reported = await submitter.reported
+        XCTAssertFalse(reported.isEmpty)
     }
 
     func testARefusedSubmissionStaysQueued() async {
         let progression = Progression(store: MemoryStore())
         progression.record(outcome(pace: .fast, score: 300))
 
-        let submitter = FakeSubmitter()
-        submitter.accepts = false
+        let submitter = FakeSubmitter(accepts: false)
         await progression.signedIn(as: submitter)
 
-        XCTAssertFalse(submitter.submitted.isEmpty, "it tried")
+        let tried = await submitter.submitted
+        XCTAssertFalse(tried.isEmpty, "it tried")
         XCTAssertFalse(progression.pendingScores.isEmpty, "and kept it for next time")
 
-        submitter.accepts = true
+        await submitter.setAccepts(true)
         await progression.flush()
         XCTAssertTrue(progression.pendingScores.isEmpty)
+    }
+
+    func testOverlappingFlushesSendEachScoreOnce() async {
+        // Regression: `record` fires a flush of its own and `signedIn` runs
+        // another, and `submit` leaves the main actor — so two flushes really
+        // did run concurrently, racing the queue and duplicating sends. This
+        // failed about one run in three before `flush` was made non-reentrant.
+        let progression = Progression(store: MemoryStore())
+        progression.record(outcome(pace: .fast, score: 300))
+        progression.record(outcome(pace: .regular, score: 120))
+
+        let submitter = FakeSubmitter()
+        progression.submitter = submitter
+        // Plain tasks rather than a task group: the region-isolation checker
+        // can't reason about a main-actor closure captured into a group.
+        var flushes: [Task<Void, Never>] = []
+        for _ in 0..<8 {
+            flushes.append(Task { @MainActor in await progression.flush() })
+        }
+        for flush in flushes { await flush.value }
+
+        let submitted = await submitter.submitted
+        XCTAssertEqual(
+            submitted.count, 2, "eight overlapping flushes, two scores, two sends")
+        XCTAssertTrue(progression.pendingScores.isEmpty)
+    }
+
+    func testAScoreQueuedDuringAFlushStillGetsSent() async {
+        // The other half of the guard: a caller turned away mid-flush marks
+        // the queue dirty, so the flush in progress goes round again rather
+        // than leaving the new score sitting there.
+        let progression = Progression(store: MemoryStore())
+        let submitter = FakeSubmitter()
+        progression.submitter = submitter
+
+        progression.record(outcome(pace: .fast, score: 300))
+        await progression.flush()
+        progression.record(outcome(pace: .regular, score: 120))
+        await progression.flush()
+
+        XCTAssertTrue(progression.pendingScores.isEmpty)
+        let boards = await Set(submitter.submitted.map(\.board))
+        XCTAssertEqual(boards, [.soloFast, .soloRegular])
     }
 
     func testFlushingWithNothingHeldDoesNothing() async {
         let progression = Progression(store: MemoryStore())
         let submitter = FakeSubmitter()
         await progression.signedIn(as: submitter)
-        XCTAssertTrue(submitter.submitted.isEmpty)
+        let submitted = await submitter.submitted
+        XCTAssertTrue(submitted.isEmpty)
     }
 
     func testSigningOutGoesBackToHolding() async {

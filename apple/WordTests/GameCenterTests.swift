@@ -63,7 +63,7 @@ final class GameCenterTests: XCTestCase {
 
     func testScoresEarnedSignedOutAreHeldAndFlushOnSignIn() async {
         // The §7.1 contract end to end, with a stand-in for GameKit.
-        final class Submitter: ProgressionSubmitter, @unchecked Sendable {
+        actor Submitter: ProgressionSubmitter {
             private(set) var submitted: [PendingScore] = []
             func submit(_ score: PendingScore) async -> Bool {
                 submitted.append(score)
@@ -82,7 +82,8 @@ final class GameCenterTests: XCTestCase {
         let submitter = Submitter()
         await progression.signedIn(as: submitter)
         XCTAssertTrue(progression.pendingScores.isEmpty, "and sent on sign-in")
-        XCTAssertEqual(submitter.submitted.first?.board, .soloFast)
+        let first = await submitter.submitted.first
+        XCTAssertEqual(first?.board, .soloFast)
     }
 
     // MARK: Config the GameKit bundle has to agree with

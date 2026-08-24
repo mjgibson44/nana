@@ -34,6 +34,10 @@ final class Progression {
     /// designed state, not an error.
     var submitter: ProgressionSubmitter?
 
+    /// Guards `flush` against overlapping itself — see the note there.
+    private var isFlushing = false
+    private var flushAgain = false
+
     init(store: KeyValueStore = UserDefaultsStore(), sync: SyncStore? = nil) {
         self.store = store
         if let existing = store.get(Self.deviceKey), !existing.isEmpty {
@@ -116,12 +120,34 @@ final class Progression {
     }
 
     /// Send whatever is waiting. A no-op while signed out — which is the
-    /// normal state, not a failure — and safe to call as often as you like:
-    /// leaderboard submissions and achievement reports are both idempotent.
+    /// normal state, not a failure — and safe to call as often as you like.
+    ///
+    /// **One at a time.** `record` fires a flush of its own and `signedIn`
+    /// runs another, so two can easily overlap — and `submit` is a suspension
+    /// point that leaves the main actor, so an overlapping pair really does
+    /// run concurrently. Submitting twice would be harmless (both GameKit
+    /// calls are idempotent), but hammering the network with a duplicate of
+    /// every queued score isn't, and it makes the queue's mutations
+    /// interleave for no reason. A second caller arriving mid-flush instead
+    /// marks the queue dirty, and the flush in progress goes round again —
+    /// so nothing queued during a send is left sitting there either.
     func flush() async {
-        guard let submitter, !pendingScores.isEmpty || !pendingAchievements.isEmpty else {
+        guard submitter != nil else { return }
+        guard !isFlushing else {
+            flushAgain = true
             return
         }
+        isFlushing = true
+        defer { isFlushing = false }
+
+        repeat {
+            flushAgain = false
+            await drainQueues()
+        } while flushAgain
+    }
+
+    private func drainQueues() async {
+        guard let submitter else { return }
         for score in pendingScores.ordered {
             guard await submitter.submit(score) else { continue }
             pendingScores.clear(score)

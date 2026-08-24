@@ -46,7 +46,7 @@ struct HomeScreen: View {
     private var content: some View {
         VStack(spacing: 26) {
                 VStack(spacing: 6) {
-                    Text("Word")
+                    Text("Time Tiles")
                         .font(.system(size: 46, weight: .heavy, design: .rounded))
                         .foregroundStyle(Ink.ink)
                     Text("Race to weave every tile into one crossword.")

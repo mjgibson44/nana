@@ -1,6 +1,12 @@
-# Word on Apple platforms
+# Time Tiles — the Apple platforms port
 
 The native iPhone/iPad/Mac port, built to [`docs/apple-port-plan.md`](../docs/apple-port-plan.md).
+
+**Naming:** the game ships as **Time Tiles** (§16.2 — "Word" is unsearchable on the App
+Store), under the bundle id `dev.nana.TimeTiles`. Only the store-facing name changed: the
+repo, the Xcode target, and the `WordCore` / `WordBoard` / `WordNet` modules keep their
+names, exactly as plan §13 anticipated. The web app is still called "Word" — a decision
+that hasn't been made rather than one that has.
 
 ## State
 
