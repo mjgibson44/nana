@@ -24,6 +24,7 @@ struct RootView: View {
     @State private var model = GameModel()
     @State private var settings = AppSettings()
     @State private var audio = AudioEngine()
+    @State private var progression = Progression()
 
     @State private var pending: PendingDoor?
     @State private var showSetup = false
@@ -31,6 +32,13 @@ struct RootView: View {
     @State private var showSettings = false
     @State private var battleDoorNotice = false
     @State private var savedGame: SavedSoloGame?
+    /// Today's puzzle and what's been done about it, refreshed whenever the
+    /// home screen comes back into view.
+    @State private var daily: DailyStatus?
+    @State private var dailyExplainer = false
+    @State private var dailyStreak = 0
+    /// Shown when the row is tapped on a day already played.
+    @State private var dailyResult: DailyResult?
     /// Set while the tutorial is on its way to a door a first-timer picked, so
     /// finishing the lesson hands them on rather than dropping them home.
     @State private var doorAfterTutorial: GameDoor?
@@ -43,7 +51,9 @@ struct RootView: View {
             case .home:
                 HomeScreen(
                     hasSavedGame: savedGame != nil,
+                    daily: daily,
                     onResume: resumeSavedGame,
+                    onDaily: chooseDaily,
                     onChoose: choose(door:),
                     onTutorial: startTutorialDirectly,
                     onStats: { showStats = true },
@@ -53,7 +63,8 @@ struct RootView: View {
                 GameScreen(
                     model: model,
                     onLeave: leaveGame,
-                    onShowSettings: { showSettings = true })
+                    onShowSettings: { showSettings = true },
+                    dailyStreak: dailyStreak)
             }
 
             if let pending {
@@ -74,6 +85,40 @@ struct RootView: View {
                 }
             }
 
+            if let result = dailyResult {
+                DialogCard(dismiss: { dailyResult = nil }) {
+                    VStack(spacing: 12) {
+                        Text(DAILY_DEAL_INFO.name)
+                            .font(.system(size: 25, weight: .heavy, design: .rounded))
+                        Text(dailyDeal(day: result.day).shortLabel)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Ink.ink.opacity(0.7))
+                        HStack(spacing: 22) {
+                            dailyResultStat("\(result.score)", "Score")
+                            dailyResultStat("\(result.words)", result.words == 1 ? "Word" : "Words")
+                            dailyResultStat(
+                                "\(result.tilesLeft)",
+                                result.tilesLeft == 1 ? "Tile left" : "Tiles left")
+                        }
+                        Text(nextDealNote)
+                            .font(.caption)
+                            .foregroundStyle(Ink.ink.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                        Button("Back") { dailyResult = nil }
+                            .buttonStyle(InkActionButtonStyle(primary: true))
+                    }
+                }
+            }
+
+            if dailyExplainer {
+                ModeInfoCard(
+                    info: DAILY_DEAL_INFO,
+                    confirmLabel: "Play today’s deal",
+                    skipLabel: "Not now",
+                    onConfirm: startDaily,
+                    onSkip: { dailyExplainer = false })
+            }
+
             if showSetup {
                 SoloSetupCard(
                     pace: settings.pace,
@@ -82,7 +127,12 @@ struct RootView: View {
             }
 
             if showStats {
-                StatsScreen(stats: settings.stats(), onClose: { showStats = false })
+                StatsScreen(
+                    stats: settings.stats(),
+                    progress: progression.merged,
+                    earned: progression.earned,
+                    dailyStreak: progression.dailyStreak,
+                    onClose: { showStats = false })
                     .transition(.opacity)
             }
 
@@ -112,13 +162,12 @@ struct RootView: View {
         .preferredColorScheme(settings.theme.colorScheme)
         .task {
             savedGame = settings.loadSavedGame()
+            daily = settings.dailyStatus()
             model.cues = audio
             audio.isSoundEnabled = { [settings] in settings.soundEnabled }
             audio.isHapticsEnabled = { [settings] in settings.hapticsEnabled }
-            model.onFinish = { [settings] score, words in
-                settings.record(score: score, words: words)
-                // A finished game is not a game to come back to.
-                settings.save(nil)
+            model.onFinish = { outcome in
+                recordFinish(outcome)
             }
             model.onTutorialWalkedOut = leaveGame
         }
@@ -158,6 +207,96 @@ struct RootView: View {
         case .battle:
             battleDoorNotice = true
         }
+    }
+
+    /// The Daily Deal row. Its explainer is shown once, like a door's; after
+    /// that the row leads straight to today's puzzle — or, once it's been
+    /// played, to what the player scored.
+    private func chooseDaily() {
+        let status = settings.dailyStatus()
+        daily = status
+        guard status.canPlay else {
+            // One attempt a day: the row becomes a way back to the result.
+            // Deliberately *not* by re-dealing and finishing the game — that
+            // would run the finish funnel again and file a phantom Solo score.
+            dailyResult = status.result
+            return
+        }
+        if !settings.hasSeenDailyExplainer() {
+            dailyExplainer = true
+            return
+        }
+        startDaily()
+    }
+
+    private func dailyResultStat(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .foregroundStyle(Ink.ink)
+            Text(label)
+                .font(.caption2.bold())
+                .foregroundStyle(Ink.ink.opacity(0.65))
+        }
+    }
+
+    /// How long until the next puzzle, in whole hours — the honest unit, since
+    /// the reset is a fixed instant and nobody needs it to the second.
+    private var nextDealNote: String {
+        guard let daily else { return "" }
+        let hours = Int(
+            (daily.deal.closesAt.timeIntervalSinceNow / 3_600).rounded(.up))
+        guard hours > 0 else { return "A new deal is ready." }
+        return hours == 1
+            ? "A new deal in about an hour."
+            : "A new deal in about \(hours) hours."
+    }
+
+    private func startDaily() {
+        settings.markDailyExplainerSeen()
+        dailyExplainer = false
+        let status = settings.dailyStatus()
+        daily = status
+        guard status.canPlay else { return }
+        dailyStreak = status.streak
+        settings.save(nil)
+        savedGame = nil
+        model.newDaily(deal: status.deal)
+        route = .game
+    }
+
+    /// Every finished game lands here — Solo's stats, the Daily Deal's result
+    /// and streak, and (phase 3) the Game Center submission that hangs off the
+    /// same funnel.
+    private func recordFinish(_ outcome: GameOutcome) {
+        // Cross-device progress, achievements, and the leaderboard queue —
+        // all of which work signed out and flush when auth arrives (§7.1).
+        let recorded = progression.record(outcome)
+        if !recorded.completed.isEmpty {
+            model.announceAchievements(recorded.completed)
+        }
+        // The tutorial earns a badge but isn't a game, so it stops here.
+        guard outcome.mode != .tutorial else { return }
+        settings.record(score: outcome.score, words: outcome.words)
+        if let deal = outcome.daily {
+            // Recorded against the day the game *started* on, and marked
+            // ineligible if the puzzle rolled over while it was being played
+            // (plan §8.2).
+            let history = settings.recordDaily(
+                DailyResult(
+                    day: deal.day,
+                    date: deal.date,
+                    score: outcome.score,
+                    words: outcome.words,
+                    tilesLeft: outcome.tilesLeft,
+                    bonusEarned: outcome.bonusEarned,
+                    withinDay: dailyDayNumber(at: .now) == deal.day,
+                    at: Date.now.timeIntervalSince1970))
+            dailyStreak = history.streak(today: deal.day)
+            daily = settings.dailyStatus()
+        }
+        // A finished game is not a game to come back to.
+        settings.save(nil)
     }
 
     private func startSolo(pace: SoloPace) {
@@ -211,6 +350,8 @@ struct RootView: View {
     private func leaveGame() {
         persistGame()
         route = .home
+        // The day can have rolled over while a game was open.
+        daily = settings.dailyStatus()
         if let door = doorAfterTutorial {
             doorAfterTutorial = nil
             if settings.hasSeen(door: door) {

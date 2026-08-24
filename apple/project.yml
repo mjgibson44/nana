@@ -84,6 +84,10 @@ targets:
     settings:
       base:
         SWIFT_VERSION: "6.0"
+        # A test bundle needs an Info.plist to be signed, and XcodeGen writes
+        # none for a target with no `info:` block — without this, the whole
+        # scheme fails to build before a single test runs.
+        GENERATE_INFOPLIST_FILE: YES
         # XcodeGen writes one iOS-shaped TEST_HOST; the multiplatform app's
         # macOS bundle nests its binary differently.
         "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/Word.app/Contents/MacOS/Word"

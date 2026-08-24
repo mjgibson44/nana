@@ -5,6 +5,11 @@ import WordCore
 /// recent ones with their scores and when they were played.
 struct StatsScreen: View {
     var stats: Stats
+    /// The cross-device picture (§9.1). Separate from `stats`, which stays the
+    /// web-compatible local blob.
+    var progress = MergedProgress()
+    var earned: Set<AchievementID> = []
+    var dailyStreak = 0
     var onClose: () -> Void
     var scrollable = true
 
@@ -24,6 +29,18 @@ struct StatsScreen: View {
                     label: stats.gamesPlayed == 1 ? "Game played" : "Games played")
                 if !stats.recent.isEmpty {
                     PageStat(value: "\(best)", label: "Best recent score")
+                }
+            }
+
+            if dailyStreak > 0 || !progress.dailyDays.isEmpty {
+                HStack(spacing: 12) {
+                    PageStat(value: "\(progress.dailyDays.count)", label: "Daily Deals")
+                    if dailyStreak > 0 {
+                        PageStat(value: "\(dailyStreak)", label: "Day streak")
+                    }
+                    if progress.bestDailyScore > 0 {
+                        PageStat(value: "\(progress.bestDailyScore)", label: "Best daily")
+                    }
                 }
             }
 
@@ -59,6 +76,41 @@ struct StatsScreen: View {
                                     .strokeBorder(Ink.lineSoft, lineWidth: 2))
                             .accessibilityElement(children: .combine)
                         }
+                    }
+                }
+            }
+
+            PageSection("Achievements") {
+                // Shown from local progress rather than Game Center: the game
+                // is fully playable signed out (§7.1), so the badges have to be
+                // too. Game Center mirrors them once there's an account.
+                VStack(spacing: 5) {
+                    ForEach(AchievementID.allCases, id: \.rawValue) { id in
+                        let got = earned.contains(id)
+                        HStack(spacing: 10) {
+                            Image(systemName: got ? "checkmark.seal.fill" : "seal")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(got ? Ink.okInk : Ink.ink.opacity(0.3))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(id.title)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(Ink.ink.opacity(got ? 1 : 0.55))
+                                Text(id.detail)
+                                    .font(.caption2)
+                                    .foregroundStyle(Ink.ink.opacity(0.6))
+                                    .lineLimit(2)
+                            }
+                            Spacer(minLength: 4)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Ink.surface))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(Ink.lineSoft, lineWidth: 2))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            "\(id.title), \(got ? "earned" : "not yet earned"). \(id.detail)")
                     }
                 }
             }

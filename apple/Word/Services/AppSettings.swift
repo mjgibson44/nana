@@ -47,6 +47,11 @@ final class AppSettings {
     /// New on Apple platforms — sound has its own switch on the web, and
     /// haptics get a separate one (plan §6.5).
     private static let hapticsKey = "nana.haptics.v1"
+    /// The Daily Deal's explainer is shown once, like a door's. It isn't a
+    /// `GameDoor` — the mode is a row on the home screen with its own state,
+    /// not one of the two mode cards — so it keeps its own flag rather than
+    /// bending the ported onboarding module around it.
+    private static let dailySeenKey = "nana.daily.seen.v1"
 
     private let store: KeyValueStore
 
@@ -104,6 +109,30 @@ final class AppSettings {
         recordGame(
             GameRecord(score: score, words: words, at: date.timeIntervalSince1970 * 1000),
             in: store)
+    }
+
+    // MARK: Daily Deal (plan §8.2)
+
+    func hasSeenDailyExplainer() -> Bool { store.get(Self.dailySeenKey) == "1" }
+    func markDailyExplainerSeen() { store.set(Self.dailySeenKey, "1") }
+
+    func dailyHistory() -> DailyHistory { DailyHistory.load(from: store) }
+
+    /// Today, and what's been done about it.
+    func dailyStatus(at now: Date = .now) -> DailyStatus {
+        let deal = dailyDeal(at: now)
+        let history = dailyHistory()
+        return DailyStatus(
+            deal: deal, result: history.result(for: deal.day),
+            streak: history.streak(today: deal.day))
+    }
+
+    @discardableResult
+    func recordDaily(_ result: DailyResult) -> DailyHistory {
+        var history = dailyHistory()
+        history.record(result)
+        history.save(to: store)
+        return history
     }
 
     // MARK: Saved solo game (plan §6.1 — solo games survive process death)

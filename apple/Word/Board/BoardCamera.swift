@@ -108,19 +108,25 @@ final class BoardCamera {
 
     // MARK: Pinch (App.tsx:2744–2895)
 
-    /// Grab the board point under the fingers, once. `startAnchor` is the
-    /// gesture's initial midpoint as a fraction of the board area.
-    func beginPinch(startAnchor: UnitPoint) {
-        pinchMidpoint = CGPoint(
-            x: startAnchor.x * viewport.width, y: startAnchor.y * viewport.height)
+    /// Grab the board point under the fingers, once. `midpoint` is the live
+    /// two-finger midpoint from `BoardInputBridge`; `startAnchor` is
+    /// `MagnifyGesture`'s own estimate, used only when the bridge has nothing
+    /// to say (it never attached, or the pinch began before it saw a touch).
+    func beginPinch(startAnchor: UnitPoint, midpoint: CGPoint?) {
+        pinchMidpoint =
+            midpoint
+            ?? CGPoint(x: startAnchor.x * viewport.width, y: startAnchor.y * viewport.height)
         pinch = PinchAnchor.capture(
             midpoint: pinchMidpoint, offset: offset, metrics: metrics, viewport: viewport)
     }
 
     /// Re-aim the anchored point every change: zoom and the matching scroll
-    /// correction land in the same update, so the board never tears.
-    func updatePinch(scale: Double) {
+    /// correction land in the same update, so the board never tears. Tracking
+    /// the *live* midpoint is what makes a pinch that also travels pan the
+    /// board with the fingers, the way the web's does (App.tsx:2823–2861).
+    func updatePinch(scale: Double, midpoint: CGPoint?) {
         guard let pinch else { return }
+        if let midpoint { pinchMidpoint = midpoint }
         zoom = pinch.zoom(forScale: scale)
         offset = pinch.alignedOffset(midpoint: pinchMidpoint, metrics: metrics, viewport: viewport)
     }

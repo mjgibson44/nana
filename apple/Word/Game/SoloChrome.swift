@@ -7,6 +7,9 @@ struct SoloHeaderView: View {
     var seconds: Int?
     var timerLabel: String
     var looseTiles: Int?
+    /// The Daily Deal's counterpart to the loose gauge: a fixed deal, so what
+    /// matters is how many letters are still unplaced.
+    var tilesLeft: Int?
     var gaugeTone: SoloGaugeTone
     var bonusEarned: Bool
     var canPause: Bool
@@ -17,6 +20,10 @@ struct SoloHeaderView: View {
     var onChoosePace: (SoloPace) -> Void
     var onShowSettings: () -> Void = {}
     var onReturnHome: () -> Void = {}
+    /// Hand today's board in. Non-nil only for the Daily Deal.
+    var onFinish: (() -> Void)?
+    /// One attempt a day means a finished daily offers no way to start over.
+    var allowsReplay = true
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -52,6 +59,17 @@ struct SoloHeaderView: View {
                             : "\(looseTiles) of \(ENDLESS_LOOSE_LIMIT) loose tiles")
             }
 
+            if let tilesLeft {
+                scoreBlock(
+                    label: tilesLeft == 0 ? "All placed" : "Tiles left",
+                    value: "\(tilesLeft)",
+                    tone: tilesLeft == 0 ? Ink.okInk : Ink.ink)
+                    .accessibilityLabel(
+                        tilesLeft == 0
+                            ? "Every tile placed"
+                            : "\(tilesLeft) tile\(tilesLeft == 1 ? "" : "s") left")
+            }
+
             if bonusEarned && !complete && horizontalSizeClass != .compact {
                 Text("+\(ENDLESS_CONNECT_BONUS) all tiles")
                     .font(.caption.bold())
@@ -65,7 +83,15 @@ struct SoloHeaderView: View {
             Spacer(minLength: 4)
 
             if complete {
-                Button("Play again", action: onNewDeal)
+                if allowsReplay {
+                    Button("Play again", action: onNewDeal)
+                        .buttonStyle(InkActionButtonStyle(primary: true))
+                } else {
+                    Button("Results", action: onShowSummary)
+                        .buttonStyle(InkActionButtonStyle(primary: true))
+                }
+            } else if let onFinish {
+                Button("Finish", action: onFinish)
                     .buttonStyle(InkActionButtonStyle(primary: true))
             } else if canPause {
                 Button(action: onPause) {
@@ -256,6 +282,16 @@ struct SoloSummaryView: View {
     var onPlayAgain: () -> Void
     var onSeeBoard: () -> Void
     var scrollable = true
+    /// Set for the Daily Deal, which ends by being handed in rather than lost
+    /// — and can't be played again today.
+    var daily: DailySummary?
+
+    struct DailySummary: Equatable {
+        var date: String
+        var tilesLeft: Int
+        var bonusEarned: Bool
+        var streak: Int
+    }
 
     @ViewBuilder
     var body: some View {
@@ -269,28 +305,50 @@ struct SoloSummaryView: View {
         }
     }
 
+    private var headline: String {
+        guard let daily else { return "Buried in tiles!" }
+        if daily.bonusEarned { return "Perfect — every tile placed!" }
+        return daily.tilesLeft == 0 ? "All tiles down!" : "Handed in."
+    }
+
     private var report: some View {
         VStack(spacing: 24) {
             VStack(spacing: 4) {
-                Text("GAME OVER")
+                Text(daily == nil ? "GAME OVER" : DAILY_DEAL_INFO.name.uppercased())
                     .font(.caption.bold())
                     .tracking(1.1)
                     .foregroundStyle(Ink.ink.opacity(0.65))
-                Text("Buried in tiles!")
+                Text(headline)
                     .font(.system(size: 34, weight: .heavy, design: .rounded))
                     .foregroundStyle(Ink.ink)
+                if let daily {
+                    Text(daily.date)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Ink.ink.opacity(0.7))
+                }
             }
 
             HStack(spacing: 10) {
-                Button("Play again", action: onPlayAgain)
-                    .buttonStyle(InkActionButtonStyle(primary: true))
+                // One attempt a day: a finished daily has nothing to replay.
+                if daily == nil {
+                    Button("Play again", action: onPlayAgain)
+                        .buttonStyle(InkActionButtonStyle(primary: true))
+                }
                 Button("See the board", action: onSeeBoard)
-                    .buttonStyle(InkActionButtonStyle())
+                    .buttonStyle(InkActionButtonStyle(primary: daily != nil))
             }
 
             HStack(spacing: 12) {
                 summaryStat(value: "\(score)", label: "Final score")
                 summaryStat(value: "\(words.count)", label: words.count == 1 ? "Word" : "Words")
+                if let daily {
+                    summaryStat(
+                        value: "\(daily.tilesLeft)",
+                        label: daily.tilesLeft == 1 ? "Tile left" : "Tiles left")
+                    if daily.streak > 1 {
+                        summaryStat(value: "\(daily.streak)", label: "Day streak")
+                    }
+                }
             }
 
             if !lengthCounts.isEmpty {
