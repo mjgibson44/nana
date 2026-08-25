@@ -3,9 +3,9 @@ import WordBoard
 import WordCore
 
 /// The pile (Rack.tsx): tiles in rows capped at ten wide, the field centered
-/// while its rows fill from the left, the shuffle button pinned to the corner
-/// rather than scrolling with the tiles. Picked tiles lift, invert, and wear
-/// a 1-based order badge (styles.css:572–586).
+/// while its rows fill from the left, the shuffle button pinned to the top
+/// corner rather than scrolling with the tiles. Picked tiles lift, invert, and
+/// wear a 1-based order badge (styles.css:572–586).
 struct RackView: View {
     var letters: [String]
     var hiddenIndex: Int?
@@ -16,11 +16,25 @@ struct RackView: View {
     var downTarget: (Int, String) -> GestureMachine.DownTarget
     var onShuffle: () -> Void
 
-    private static let tileSize: Double = 44
-    private static let spacing: Double = 8
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    /// The web's rack geometry (styles.css:1370–1383): a tile is `--cell` less
+    /// its 4px of border, the gap is 6, and below 600px the cell itself drops
+    /// from 44 to 38 (styles.css:1740). That last step is what fits eight tiles
+    /// in a phone's row rather than six — the row is the unit a player scans,
+    /// so the port keeps the count rather than the point size.
+    static func tileSize(for sizeClass: UserInterfaceSizeClass?) -> Double {
+        sizeClass == .compact ? 34 : 40
+    }
+
+    private static let spacing: Double = 6
+    private static let columnCap = 10
+
+    private var tileSize: Double { Self.tileSize(for: sizeClass) }
+    private var compact: Bool { sizeClass == .compact }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .topTrailing) {
             Group {
                 if letters.isEmpty {
                     Text("Pile empty — every tile is on the board")
@@ -38,13 +52,13 @@ struct RackView: View {
                     ScrollView(.vertical) {
                         LazyVGrid(
                             columns: [GridItem(.adaptive(
-                                minimum: Self.tileSize, maximum: Self.tileSize),
+                                minimum: tileSize, maximum: tileSize),
                                 spacing: Self.spacing)],
                             spacing: Self.spacing
                         ) {
                         ForEach(Array(letters.enumerated()), id: \.offset) { index, letter in
                             let pickOrder = picks.firstIndex(of: index).map { $0 + 1 }
-                            RackTileView(letter: letter, pickOrder: pickOrder)
+                            RackTileView(letter: letter, pickOrder: pickOrder, size: tileSize)
                                 .opacity(index == hiddenIndex ? 0 : 1)
                                 .pointerSurface(
                                     target: { _ in downTarget(index, letter) },
@@ -66,21 +80,26 @@ struct RackView: View {
                         }
                         }
                         // Ten tiles a row, like the web's capped rack field.
-                        .frame(maxWidth: (Self.tileSize + Self.spacing) * 10)
+                        .frame(maxWidth: tileSize * Double(Self.columnCap)
+                            + Self.spacing * Double(Self.columnCap - 1))
                     }
                     .scrollBounceBehavior(.basedOnSize)
                     // Room for three rows before it scrolls; one row's worth
                     // is the floor so the pile never collapses to nothing.
                     .frame(
-                        minHeight: Self.tileSize + Self.spacing,
-                        maxHeight: (Self.tileSize + Self.spacing) * 3)
+                        minHeight: tileSize + Self.spacing,
+                        maxHeight: (tileSize + Self.spacing) * 3)
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
-            // Keep tiles clear of the pinned shuffle button (styles.css:1355).
-            .padding(.trailing, 50)
-            .padding(.leading, 18)
+            // Clearance for the pinned shuffle button, with a phone tightening
+            // the left margin to buy row width (styles.css:1355, 1798–1802).
+            // The web drops the clearance past 600px, where a capped field can
+            // no longer reach the button; a Mac window can be narrower than
+            // that and still be a regular size class, so the port keeps it.
+            .padding(.trailing, compact ? 50 : 56)
+            .padding(.leading, compact ? 12 : 18)
 
             Button(action: onShuffle) {
                 Image(systemName: "shuffle")
@@ -92,7 +111,9 @@ struct RackView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Shuffle the pile")
-            .padding(8)
+            // The pile's top corner, where the web pins it (styles.css:1391).
+            .padding(.top, 8)
+            .padding(.trailing, 12)
         }
         .background(Ink.surfaceAlt)
     }
@@ -101,9 +122,14 @@ struct RackView: View {
 struct RackTileView: View {
     var letter: String
     var pickOrder: Int?
+    var size: Double
 
     var body: some View {
         let picked = pickOrder != nil
+        // The badge holds its proportion to the tile. The letter doesn't: the
+        // web's is a flat 21px whatever the tile measures (styles.css:515), so
+        // a phone's smaller tile carries a proportionally bigger letter.
+        let badge = size * 0.36
         RoundedRectangle(cornerRadius: 8)
             .fill(picked ? Ink.ink : Ink.tileFace)
             .overlay(
@@ -112,22 +138,22 @@ struct RackTileView: View {
             )
             .overlay(
                 Text(letter.uppercased())
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(size: 21, weight: .bold))
                     .foregroundStyle(picked ? Ink.inkInvert : Ink.ink)
             )
             .overlay(alignment: .topTrailing) {
                 if let pickOrder {
                     Text("\(pickOrder)")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: badge * 0.7, weight: .bold))
                         .foregroundStyle(Ink.ink)
-                        .frame(width: 16, height: 16)
+                        .frame(width: badge, height: badge)
                         .background(Circle().fill(Ink.inkInvert))
                         .overlay(Circle().strokeBorder(Ink.ink, lineWidth: 1.5))
-                        .offset(x: 5, y: -5)
+                        .offset(x: badge * 0.3, y: -badge * 0.3)
                 }
             }
             .shadow(color: .black.opacity(picked ? 0 : 0.18), radius: 0, x: 0, y: 2)
-            .frame(width: 44, height: 44)
+            .frame(width: size, height: size)
             .offset(y: picked ? -4 : 0)
     }
 }
@@ -135,9 +161,11 @@ struct RackTileView: View {
 /// A tile riding under the pointer (z above everything, App.tsx:3347–3357).
 struct GhostTileView: View {
     var letter: String
+    /// Matches the pile it came out of, so the tile doesn't change size on lift.
+    var size: Double
 
     var body: some View {
-        RackTileView(letter: letter, pickOrder: nil)
+        RackTileView(letter: letter, pickOrder: nil, size: size)
             .scaleEffect(1.08)
             .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
             .allowsHitTesting(false)
