@@ -172,11 +172,22 @@ Both platforms archive, export and sign cleanly today — verified end to end, p
 distribution-signed `Time Tiles.ipa` carrying `beta-reports-active` (the TestFlight
 entitlement) alongside Game Center and iCloud KVS.
 
-The build number is the **commit count**, not a hand-maintained field: App Store Connect
-rejects a build number it has already seen, and bumping one by hand is the kind of thing
-that gets forgotten exactly once. That also means `CFBundleVersion` and
-`CFBundleShortVersionString` have to *reference* the build settings — XcodeGen otherwise
-writes literal defaults that silently override them, and every upload arrives as build 1.
+The build number comes from
+[`tools/next-build-number.py`](tools/next-build-number.py), not a hand-maintained field:
+the **commit count**, raised past the highest build App Store Connect already holds. The
+count alone almost works — it needs no maintenance and rises on its own — but it is not
+monotonic across a squash merge, which collapses a branch's commits into one. #49 went up
+as build 60 from a 64-commit branch that landed as main's 56th commit, so the next four
+uploads would have collided with builds already accepted. Asking what's up there is the
+rule the number is actually subject to, and it needs no constant to keep in step.
+
+```bash
+./apple/tools/next-build-number.py --explain   # the number, and how it got there
+```
+
+That also means `CFBundleVersion` and `CFBundleShortVersionString` have to *reference* the
+build settings — XcodeGen otherwise writes literal defaults that silently override them,
+and every upload arrives as build 1.
 
 **Before the first upload**, two things that can't be done from the CLI:
 
@@ -187,6 +198,46 @@ writes literal defaults that silently override them, and every upload arrives as
    and a lost one has to be revoked and replaced — then put its two ids in
    `apple/Local.env` (gitignored; copy `Local.env.example`). Without them the script stops
    after building the package, which you can still drag into Transporter.
+
+### Shipping from CI
+
+Merging to main is the release. Any push to main that touches `apple/` runs
+[`release.yml`](../.github/workflows/release.yml): it runs the app tests, archives,
+exports, validates and uploads to TestFlight, on a macOS runner with no laptop involved.
+The Actions tab's **Release** workflow also takes a manual run, with a switch to build
+without uploading when you just want to know it still archives.
+
+Everything signing needs is in the repository's Actions secrets, put there once by:
+
+```bash
+./apple/tools/setup-ci.py --dry-run   # what exists, what it would create
+./apple/tools/setup-ci.py             # create it, set the secrets
+```
+
+It issues the distribution certificate through the App Store Connect API rather than
+Xcode's UI — same reason `setup-gamecenter.py` exists — by generating a key pair here and
+sending Apple only the CSR. Six secrets come out of it: `APPLE_TEAM_ID`, `ASC_KEY_ID`,
+`ASC_ISSUER_ID`, `ASC_KEY_P8`, `APPLE_DIST_CERT_P12` and `APPLE_DIST_CERT_PASSWORD`.
+
+**The certificate's private key exists in exactly one place**: `apple/.release/ci/`
+(gitignored). Apple never had it and can't reissue it. Lose it and the certificate is
+scrap — you revoke it and run the script again, which is survivable, but there are only
+three distribution certificates to go around. Note that `.release/` is otherwise build
+output: `release.sh` only clears the archive and export directories inside it, but a
+blanket `rm -rf apple/.release` takes the key with it.
+
+Two things the runner can't do:
+
+- **The Mac build.** A `.pkg` needs a Mac Installer Distribution certificate as well as
+  the Apple Distribution one, so `./apple/tools/release.sh macos upload` stays a local
+  command.
+- **Create the app record.** Still Apps → + in App Store Connect, once, by hand.
+
+The runner writes the same gitignored `Local.xcconfig` and `Local.env` a developer keeps,
+so the release script can't tell a laptop from a runner — there is one release path, not a
+CI copy of one that drifts. What makes that possible on a machine with no Apple ID signed
+in is `xcodebuild`'s API-key authentication: given the `.p8`, it issues and downloads the
+provisioning profile itself.
 
 The app icon is generated from the game's design tokens by
 [`tools/make-icon.swift`](tools/make-icon.swift) — kept as a script so it's reproducible

@@ -13,20 +13,15 @@ after adding a leaderboard or an achievement.
     ./apple/tools/setup-gamecenter.py            # create what's missing
     ./apple/tools/setup-gamecenter.py --dry-run  # just report
 
-Reads ASC_KEY_ID / ASC_ISSUER_ID from apple/Local.env, same as release.sh.
+Credentials come from apple/Local.env via asc.py, same as release.sh.
 """
 
 import datetime
-import json
-import os
-import re
-import subprocess
 import sys
-import urllib.error
-import urllib.request
 
-BUNDLE_ID = "dev.nana.TimeTiles"
-API = "https://api.appstoreconnect.apple.com"
+import asc
+from asc import call
+
 DRY = "--dry-run" in sys.argv
 
 # --- The battle activity (Matchmaking.battleActivityID) ----------------------
@@ -84,57 +79,10 @@ ACHIEVEMENTS = [
 ]
 
 
-def token():
-    env = {}
-    here = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(os.path.dirname(here), "Local.env")) as handle:
-        for line in handle:
-            if "=" in line and not line.strip().startswith("#"):
-                key, _, value = line.strip().partition("=")
-                env[key] = value
-    out = subprocess.run(
-        ["xcrun", "altool", "--generate-jwt",
-         "--apiKey", env["ASC_KEY_ID"], "--apiIssuer", env["ASC_ISSUER_ID"]],
-        capture_output=True, text=True).stdout + subprocess.run(
-        ["true"], capture_output=True, text=True).stdout
-    match = re.search(r"eyJ[A-Za-z0-9_.-]+", out)
-    if not match:
-        # altool writes the token to stderr.
-        out = subprocess.run(
-            ["xcrun", "altool", "--generate-jwt",
-             "--apiKey", env["ASC_KEY_ID"], "--apiIssuer", env["ASC_ISSUER_ID"]],
-            capture_output=True, text=True).stderr
-        match = re.search(r"eyJ[A-Za-z0-9_.-]+", out)
-    if not match:
-        sys.exit("could not mint an App Store Connect token")
-    return match.group(0)
-
-
-TOKEN = token()
-
-
-def call(method, path, body=None):
-    request = urllib.request.Request(
-        API + path, method=method,
-        data=json.dumps(body).encode() if body else None,
-        headers={"Authorization": "Bearer " + TOKEN,
-                 "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(request) as response:
-            raw = response.read()
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as error:
-        detail = json.loads(error.read() or b"{}")
-        for e in detail.get("errors", []):
-            print(f"    ! {e.get('status')} {e.get('title')} — {e.get('detail')}")
-        return None
-
-
 def main():
-    apps = call("GET", f"/v1/apps?filter[bundleId]={BUNDLE_ID}")
-    if not apps or not apps.get("data"):
-        sys.exit(f"no app record for {BUNDLE_ID}")
-    app_id = apps["data"][0]["id"]
+    app_id = asc.app_id()
+    if not app_id:
+        sys.exit(f"no app record for {asc.BUNDLE_ID}")
 
     detail = call("GET", f"/v1/apps/{app_id}/gameCenterDetail")
     if not detail or not detail.get("data"):
@@ -154,14 +102,8 @@ def main():
 
 def existing(gc, kind, key="vendorIdentifier"):
     found = {}
-    page = f"/v1/gameCenterDetails/{gc}/{kind}?limit=200"
-    while page:
-        result = call("GET", page)
-        if not result:
-            break
-        for item in result.get("data", []):
-            found[item["attributes"][key]] = item["id"]
-        page = (result.get("links") or {}).get("next", "").replace(API, "") or None
+    for item in asc.pages(f"/v1/gameCenterDetails/{gc}/{kind}?limit=200"):
+        found[item["attributes"][key]] = item["id"]
     return found
 
 

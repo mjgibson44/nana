@@ -5,6 +5,10 @@
 #   ./apple/tools/release.sh ios upload     # ...and send it to App Store Connect
 #   ./apple/tools/release.sh macos
 #
+# This is also what CI runs (.github/workflows/release.yml) — the runner writes
+# the same two gitignored files a developer keeps, so there is one release path
+# rather than a CI copy of one that drifts out of step.
+#
 # Before the first upload you need, once:
 #
 #   1. An app record in App Store Connect for dev.nana.TimeTiles. Apps can't be
@@ -17,9 +21,10 @@
 #        ASC_KEY_ID=XXXXXXXXXX
 #        ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 #
-# The build number is the commit count, so it always increases — App Store
-# Connect rejects a build number it has already seen, and hand-bumping one in
-# project.yml is the kind of thing that gets forgotten exactly once.
+# The build number comes from tools/next-build-number.py: the commit count,
+# raised past anything App Store Connect has already accepted. Hand-bumping a
+# field in project.yml is the kind of thing that gets forgotten exactly once,
+# and the commit count alone goes *backwards* over a squash merge.
 
 set -euo pipefail
 
@@ -47,7 +52,30 @@ if [ -z "$TEAM" ]; then
   exit 1
 fi
 
-BUILD_NUMBER="$(git -C "$APPLE_DIR" rev-list --count HEAD)"
+# Credentials can live in a gitignored file rather than being re-exported every
+# shell, the same way the team id does. Sourced before the archive, not just
+# before the upload, because the build number is derived from what App Store
+# Connect already holds.
+ENV_FILE="${APPLE_DIR}/Local.env"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$ENV_FILE"; set +a
+fi
+
+KEY_FILE="${HOME}/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID:-missing}.p8"
+
+# Given the API key, xcodebuild can issue and download the signing assets
+# itself instead of asking an Apple ID that a CI runner hasn't got signed in.
+# Locally it saves the same trip through Xcode's UI.
+AUTH=()
+if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ] && [ -f "$KEY_FILE" ]; then
+  AUTH=(-authenticationKeyPath "$KEY_FILE"
+        -authenticationKeyID "$ASC_KEY_ID"
+        -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+fi
+
+# The number has to be stamped into the archive, so it is settled before it.
+BUILD_NUMBER="$("${HERE}/next-build-number.py")"
 ARCHIVE="${BUILD_DIR}/TimeTiles-${PLATFORM}.xcarchive"
 EXPORT_DIR="${BUILD_DIR}/${PLATFORM}"
 
@@ -64,6 +92,7 @@ xcodebuild archive \
   -destination "$DESTINATION" \
   -archivePath "$ARCHIVE" \
   -allowProvisioningUpdates \
+  ${AUTH[@]+"${AUTH[@]}"} \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
 cat > "${BUILD_DIR}/ExportOptions.plist" <<PLIST
@@ -83,7 +112,8 @@ xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportOptionsPlist "${BUILD_DIR}/ExportOptions.plist" \
   -exportPath "$EXPORT_DIR" \
-  -allowProvisioningUpdates
+  -allowProvisioningUpdates \
+  ${AUTH[@]+"${AUTH[@]}"}
 
 PACKAGE="$(find "$EXPORT_DIR" -maxdepth 1 \( -name '*.ipa' -o -name '*.pkg' \) | head -1)"
 echo "==> Built ${PACKAGE}"
@@ -93,21 +123,12 @@ if [ "$ACTION" != "upload" ]; then
   exit 0
 fi
 
-# Credentials can live in a gitignored file rather than being re-exported
-# every shell, the same way the team id does.
-ENV_FILE="${APPLE_DIR}/Local.env"
-if [ -f "$ENV_FILE" ]; then
-  # shellcheck disable=SC1090
-  set -a; . "$ENV_FILE"; set +a
-fi
-
 if [ -z "${ASC_KEY_ID:-}" ] || [ -z "${ASC_ISSUER_ID:-}" ]; then
   echo "ASC_KEY_ID and ASC_ISSUER_ID must be set to upload — see the notes at the" >&2
   echo "top of this script." >&2
   exit 1
 fi
 
-KEY_FILE="${HOME}/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
 if [ ! -f "$KEY_FILE" ]; then
   echo "No ${KEY_FILE}." >&2
   echo "The .p8 downloads once and only once — if it's lost, revoke the key and" >&2
