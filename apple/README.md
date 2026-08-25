@@ -208,9 +208,30 @@ rather than a designed mark. Fine for TestFlight, worth replacing before the App
   and whether a party code lands you back in the *live* match is undocumented, which makes
   it a spike question rather than a mechanism. Everything the spike needs to run is now
   built; it needs devices and test Apple IDs.
-- **The GameKit bundle needs a `battle` activity** alongside the leaderboards and
-  achievements, with party codes enabled — `Matchmaking.battleActivityID` is the identifier
-  it has to match.
+### Game Center configuration
+
+```bash
+./apple/tools/setup-gamecenter.py --dry-run   # report what's missing
+./apple/tools/setup-gamecenter.py             # create it
+```
+
+Idempotent, and it lives in the repo rather than a web form because the identifiers have
+to stay in lockstep with what the app submits against — `LeaderboardID`, `AchievementID`
+and `Matchmaking.battleActivityID`. A drifted identifier doesn't fail loudly; the score
+just silently never arrives.
+
+Currently configured: the `battle` activity (party codes, 2–8 players), four leaderboards,
+and fifteen achievements totalling 700 points.
+
+**The Daily Deal board is the one to be careful with.** It's recurring — 24h duration,
+daily rule — and its start instant has to agree with `DailyRules.resetHourUTC`, or players
+in different time zones submit *different puzzles* into the same occurrence. The script
+anchors it on the next reset hour for that reason; App Store Connect won't accept a start
+date in the past, so it can't simply be a fixed constant.
+
+Two quirks the API doesn't document well, both discovered the hard way: `recurrenceDuration`
+rejects `P1D` and wants a duration with time components (`PT24H`), and `recurrenceRule` is
+an RRULE (`FREQ=DAILY;INTERVAL=1`), not a duration.
 - **Phase 5's input bridges are in** (`Board/BoardInputBridge.swift`): pinch now re-aims at
   the fingers' *live* midpoint every frame rather than the one it started at, so a pinch
   that travels pans the board the way the web's does; iOS reads the real `UITouch.TouchType`,
