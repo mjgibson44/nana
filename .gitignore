@@ -27,3 +27,6 @@ apple/.release/
 # App Store Connect credentials — the .p8 is a secret and downloads only once
 apple/Local.env
 *.p8
+
+# Byte-compiled asc.py, which the tools import
+__pycache__/

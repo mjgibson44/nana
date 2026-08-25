@@ -131,11 +131,17 @@ struct SoloHeaderView: View {
                 Button("Settings", action: onShowSettings)
                 Button("Return home", action: onReturnHome)
             } label: {
-                Image(systemName: "ellipsis")
+                // The web's hamburger in an icon-btn: a menu you can't see the
+                // edges of doesn't read as somewhere to press (Menu.tsx:94).
+                Image(systemName: "line.3.horizontal")
                     .font(.system(size: 17, weight: .bold))
                     .frame(width: 34, height: 30)
+                    .inkButtonChrome()
+                    .contentShape(RoundedRectangle(cornerRadius: 9))
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .accessibilityLabel("Game menu")
         }
         .padding(.horizontal, 14)
@@ -281,6 +287,10 @@ struct SoloSummaryView: View {
     var score: Int
     var onPlayAgain: () -> Void
     var onSeeBoard: () -> Void
+    /// Out to the mode picker rather than into another game. The menu carries
+    /// one too, but a finished game is exactly when leaving is the likely move,
+    /// and the summary covers the menu (GameSummary.tsx:110).
+    var onReturnHome: () -> Void = {}
     var scrollable = true
     /// Set for the Daily Deal, which ends by being handed in rather than lost
     /// — and can't be played again today.
@@ -311,6 +321,20 @@ struct SoloSummaryView: View {
         return daily.tilesLeft == 0 ? "All tiles down!" : "Handed in."
     }
 
+    /// The ways out of a finished game, in the web's order.
+    @ViewBuilder
+    private var actions: some View {
+        // One attempt a day: a finished daily has nothing to replay.
+        if daily == nil {
+            Button("Play again", action: onPlayAgain)
+                .buttonStyle(InkActionButtonStyle(primary: true))
+        }
+        Button("See the board", action: onSeeBoard)
+            .buttonStyle(InkActionButtonStyle(primary: daily != nil))
+        Button("Return home", action: onReturnHome)
+            .buttonStyle(InkActionButtonStyle())
+    }
+
     private var report: some View {
         VStack(spacing: 24) {
             VStack(spacing: 4) {
@@ -328,14 +352,11 @@ struct SoloSummaryView: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                // One attempt a day: a finished daily has nothing to replay.
-                if daily == nil {
-                    Button("Play again", action: onPlayAgain)
-                        .buttonStyle(InkActionButtonStyle(primary: true))
-                }
-                Button("See the board", action: onSeeBoard)
-                    .buttonStyle(InkActionButtonStyle(primary: daily != nil))
+            // Three ways onward don't fit across a phone, and the web's row
+            // wraps rather than shrinking them (styles.css:.summary-actions).
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { actions }
+                VStack(spacing: 10) { actions }
             }
 
             HStack(spacing: 12) {
@@ -499,6 +520,19 @@ struct InkActionButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .inkButtonChrome(primary: primary, pressed: configuration.isPressed)
+    }
+}
+
+/// What an ink button looks like, separate from `InkActionButtonStyle` because
+/// a `Menu`'s label can't take a `ButtonStyle` — and the game menu still has to
+/// wear the same frame as the buttons it sits beside.
+struct InkButtonChrome: ViewModifier {
+    var primary = false
+    var pressed = false
+
+    func body(content: Content) -> some View {
+        content
             .font(.callout.bold())
             .foregroundStyle(primary ? Ink.inkInvert : Ink.ink)
             .padding(.horizontal, 14)
@@ -507,8 +541,14 @@ struct InkActionButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 9)
                     .fill(primary ? Ink.ink : Ink.surface))
             .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Ink.ink, lineWidth: 2))
-            .offset(y: configuration.isPressed ? 2 : 0)
-            .opacity(configuration.isPressed ? 0.82 : 1)
+            .offset(y: pressed ? 2 : 0)
+            .opacity(pressed ? 0.82 : 1)
+    }
+}
+
+extension View {
+    func inkButtonChrome(primary: Bool = false, pressed: Bool = false) -> some View {
+        modifier(InkButtonChrome(primary: primary, pressed: pressed))
     }
 }
 

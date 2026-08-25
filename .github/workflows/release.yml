@@ -1,0 +1,111 @@
+name: Release
+
+# Every merge to main that touches the app builds it and sends it to
+# TestFlight. Nothing here needs a laptop: the distribution certificate, the
+# App Store Connect key and the team id all live in Actions secrets, put there
+# by `apple/tools/setup-ci.py`.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apple/**'
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Send the build to TestFlight (off = build and stop)'
+        type: boolean
+        default: true
+
+# Build numbers must keep rising, and two runs racing each other could both
+# read the same highest-so-far. One release at a time, and never cancelled
+# half-way through an upload.
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    name: iOS → TestFlight
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The build number counts commits, so a shallow clone would lie.
+          fetch-depth: 0
+
+      # GKGameActivity's party codes need the iOS 26 SDK. Picking the newest
+      # Xcode on the image beats pinning a path that image updates will move.
+      - name: Use the newest Xcode
+        run: |
+          newest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$newest"
+          xcodebuild -version
+          xcodebuild -showsdks | grep iphoneos
+
+      - name: Install XcodeGen
+        run: brew install --quiet xcodegen
+
+      # The app tests don't run in the Linux CI job — this is the only place
+      # they gate anything, and a broken build is worse on a tester's phone
+      # than in a log.
+      - name: Test
+        run: |
+          (cd apple && xcodegen generate)
+          xcodebuild test -quiet -project apple/Word.xcodeproj -scheme Word \
+            -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+
+      - name: Import the distribution certificate
+        env:
+          CERT_P12: ${{ secrets.APPLE_DIST_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_DIST_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -k "$keychain" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          # Without this, codesign prompts for the keychain — and hangs.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/dist.p12"
+          security find-identity -v -p codesigning "$keychain"
+
+      # The same two gitignored files a developer keeps locally, so the release
+      # script can't tell the difference between a runner and a laptop.
+      - name: Write the local configuration
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          printf 'WORD_DEVELOPMENT_TEAM = %s\n' "$TEAM_ID" > apple/Local.xcconfig
+          printf 'ASC_KEY_ID=%s\nASC_ISSUER_ID=%s\n' "$ASC_KEY_ID" "$ASC_ISSUER_ID" > apple/Local.env
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_KEY_P8" | base64 --decode \
+            > ~/.appstoreconnect/private_keys/AuthKey_"$ASC_KEY_ID".p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_"$ASC_KEY_ID".p8
+
+      - name: Archive, export and upload
+        env:
+          # A push always ships; a manual run can ask for the build alone.
+          ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.upload == false && 'export' || 'upload' }}
+        run: ./apple/tools/release.sh ios "$ACTION"
+
+      - name: Keep the build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TimeTiles-ipa
+          path: apple/.release/ios/*.ipa
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Forget the certificate
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true

@@ -33,6 +33,15 @@ struct GameScreen: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
+    /// A lifted tile keeps the size it had in the pile, which a phone shrinks.
+    private var ghostTileSize: Double {
+        #if os(iOS)
+        RackView.tileSize(for: sizeClass)
+        #else
+        RackView.tileSize(for: .regular)
+        #endif
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -69,7 +78,7 @@ struct GameScreen: View {
 
             // The drag ghost rides above everything (web z=1000).
             if let drag = model.drag {
-                GhostTileView(letter: drag.letter)
+                GhostTileView(letter: drag.letter, size: ghostTileSize)
                     .position(drag.location)
             }
             if let wordDrag = model.wordDrag {
@@ -90,6 +99,7 @@ struct GameScreen: View {
                     score: model.score,
                     onPlayAgain: startNewGame,
                     onSeeBoard: { model.setSummaryPresented(false) },
+                    onReturnHome: onLeave,
                     daily: dailySummary)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
@@ -579,13 +589,15 @@ struct GameScreen: View {
                 }
             }
 
-            barButton("✓", label: "Confirm word", disabled: !model.canConfirm) {
+            // Cancel then confirm, so confirm keeps the far-right corner where
+            // a thumb expects it (styles.css:1786, WordBar.tsx).
+            barButton("✗", label: "Clear word", tone: .cancel, disabled: !model.canCancel) {
+                model.clearFocus()
+            }
+            barButton("✓", label: "Confirm word", tone: .confirm, disabled: !model.canConfirm) {
                 if let target = model.target {
                     model.commit(target.key, target.dir)
                 }
-            }
-            barButton("✗", label: "Clear word", disabled: !model.canCancel) {
-                model.clearFocus()
             }
         }
     }
@@ -618,8 +630,32 @@ struct GameScreen: View {
         }
     }
 
+    /// The word bar's yes/no pair wears colour; every other tool is ink on
+    /// white. "Cancel wears red the way confirm wears green: the pair reads as
+    /// no / yes" (styles.css:926–937).
+    enum BarTone {
+        case plain, confirm, cancel
+
+        var fill: Color {
+            switch self {
+            case .plain: Ink.surface
+            case .confirm: Ink.okBg
+            case .cancel: Ink.badBg
+            }
+        }
+
+        var edge: Color {
+            switch self {
+            case .plain: Ink.ink
+            case .confirm: Ink.okEdge
+            case .cancel: Ink.badEdge
+            }
+        }
+    }
+
     private func barButton(
-        _ glyph: String, label: String, disabled: Bool = false, action: @escaping () -> Void
+        _ glyph: String, label: String, tone: BarTone = .plain, disabled: Bool = false,
+        action: @escaping () -> Void
     ) -> some View {
         Button {
             action()
@@ -629,8 +665,8 @@ struct GameScreen: View {
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(Ink.ink)
                 .frame(width: 40, height: 34)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Ink.surface))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Ink.ink, lineWidth: 2))
+                .background(RoundedRectangle(cornerRadius: 8).fill(tone.fill))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tone.edge, lineWidth: 2))
                 .opacity(disabled ? 0.35 : 1)
         }
         .buttonStyle(.plain)
