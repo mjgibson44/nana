@@ -14,11 +14,19 @@ import WordCore
 /// held, and starts ticking when the player dismisses the card.
 struct SavedSoloGame: Codable, Equatable {
     /// Bumped if the shape changes; a stale blob is dropped, never migrated.
-    static let version = 1
+    /// v2 added `mode`, so a Daily Deal interrupted by the OS comes back as a
+    /// Daily Deal rather than an Endless run.
+    static let version = 2
     static let key = "nana.solo.save.v1"
 
     var version: Int = Self.version
     var seed: String
+    /// `GameMode.rawValue`. Only `endless` and `daily` are ever saved — the
+    /// tutorial has nothing worth restoring and battle is host-driven.
+    var mode: String = GameMode.endless.rawValue
+    /// The Daily Deal's day number, so a resumed daily is still *that* day's
+    /// puzzle even if the player comes back after the flip.
+    var dailyDay: Int?
     var pace: String
     var board: TileMap
     var rack: [String]
@@ -35,6 +43,8 @@ struct SavedSoloGame: Codable, Equatable {
 
     var soloPace: SoloPace { SoloPace(rawValue: pace) ?? .regular }
     var soloPhase: SoloPhase { phase == "drip" ? .drip : .initial }
+    var gameMode: GameMode { GameMode(rawValue: mode) ?? .endless }
+    var deal: DailyDeal? { dailyDay.map { dailyDeal(day: $0) } }
 
     var savedDate: Date { Date(timeIntervalSince1970: savedAt) }
 

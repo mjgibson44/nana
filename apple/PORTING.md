@@ -129,4 +129,6 @@ read web exports. Mirror the defensive parsing (garbage → defaults).
 ```bash
 cd apple/Packages/WordCore && swift test          # all suites + parity fixtures
 npm run gen:fixtures                              # regenerate from TS (must be a no-op diff)
+swift apple/tools/make-icon.swift apple           # regenerate the app icon
+./apple/tools/release.sh ios                      # archive + export a TestFlight build
 ```

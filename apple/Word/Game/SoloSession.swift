@@ -34,6 +34,8 @@ enum SoloPhase: Equatable {
 
 enum SoloEndReason: Equatable {
     case buried
+    /// The Daily Deal handed in. Not a loss — there is nothing to survive.
+    case dailyDone
 }
 
 /// Cards that briefly cover the board and freeze a Solo countdown.
@@ -75,6 +77,25 @@ struct SoloSession: Equatable {
     /// The tutorial: a lesson has nothing to run out of, so there is no
     /// countdown and no opening card holding one (App.tsx:379–380, 584–590).
     init(tutorialAt _: Date) {
+        pace = .regular
+        countdown = nil
+        splash = nil
+    }
+
+    /// The Daily Deal: one fixed deal, no clock. The opening card exists to
+    /// hold a frozen countdown behind something readable, so with no clock
+    /// there's nothing for it to do — today's puzzle is introduced on the home
+    /// screen and by its explainer, not by a card in front of the board.
+    init(dailyAt _: Date) {
+        pace = .regular
+        countdown = nil
+        splash = nil
+    }
+
+    /// A battle: no countdown of its own. The pressure is the drip and the
+    /// pile limit, both of which `BattleRun` and `GameModel` own — this
+    /// session is here only to carry `complete` and `endReason`.
+    init(battleAt _: Date) {
         pace = .regular
         countdown = nil
         splash = nil

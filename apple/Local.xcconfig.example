@@ -1,0 +1,8 @@
+// Copy to Local.xcconfig (gitignored) and fill in your Apple Developer Team ID.
+// bootstrap.sh does the copy for you; the generated project reads it, so a
+// `xcodegen generate` can't wipe your signing settings the way picking a team
+// in Xcode's UI would.
+//
+// Find it at developer.apple.com → Membership, or:
+//   security find-identity -v -p codesigning
+WORD_DEVELOPMENT_TEAM =

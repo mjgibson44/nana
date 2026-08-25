@@ -1,4 +1,4 @@
-# Word
+# Time Tiles
 
 A crossword tile race for the web. You're dealt a pile of letters and race to
 arrange **all** of them into a single connected crossword of valid words.

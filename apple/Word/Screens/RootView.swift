@@ -1,3 +1,4 @@
+import GameKit
 import SwiftUI
 import WordCore
 
@@ -6,6 +7,10 @@ import WordCore
 /// says so.
 enum Route: Equatable {
     case home
+    /// Getting into a battle: opening a room or joining one.
+    case battleEntry
+    /// In a battle's lobby, waiting for the host to start.
+    case battleLobby
     case game
 }
 
@@ -24,6 +29,15 @@ struct RootView: View {
     @State private var model = GameModel()
     @State private var settings = AppSettings()
     @State private var audio = AudioEngine()
+    // iCloud-backed now that the entitlement exists: each device writes only
+    // its own blob, so the merge (§9.1) is what makes two devices add up.
+    @State private var progression = Progression(sync: UbiquitousSyncStore())
+    @State private var gameCenter = GameCenter()
+    @State private var matchmaking = Matchmaking()
+    @State private var battle: BattleSession?
+    @State private var battleBusy = false
+    @State private var battleError: String?
+    @State private var partyCode: String?
 
     @State private var pending: PendingDoor?
     @State private var showSetup = false
@@ -31,6 +45,13 @@ struct RootView: View {
     @State private var showSettings = false
     @State private var battleDoorNotice = false
     @State private var savedGame: SavedSoloGame?
+    /// Today's puzzle and what's been done about it, refreshed whenever the
+    /// home screen comes back into view.
+    @State private var daily: DailyStatus?
+    @State private var dailyExplainer = false
+    @State private var dailyStreak = 0
+    /// Shown when the row is tapped on a day already played.
+    @State private var dailyResult: DailyResult?
     /// Set while the tutorial is on its way to a door a first-timer picked, so
     /// finishing the lesson hands them on rather than dropping them home.
     @State private var doorAfterTutorial: GameDoor?
@@ -43,17 +64,44 @@ struct RootView: View {
             case .home:
                 HomeScreen(
                     hasSavedGame: savedGame != nil,
+                    showsGameCenter: gameCenter.isSignedIn,
+                    daily: daily,
                     onResume: resumeSavedGame,
+                    onDaily: chooseDaily,
                     onChoose: choose(door:),
                     onTutorial: startTutorialDirectly,
                     onStats: { showStats = true },
                     onSettings: { showSettings = true })
 
+            case .battleEntry:
+                BattleEntryScreen(
+                    supportsPartyCodes: Matchmaking.supportsPartyCodes,
+                    partyCode: partyCode,
+                    isBusy: battleBusy,
+                    error: battleError,
+                    onHost: hostBattle,
+                    onJoin: joinBattle(code:),
+                    onInvite: inviteToBattle,
+                    onClose: leaveBattle)
+
+            case .battleLobby:
+                BattleLobbyScreen(
+                    state: battle?.state,
+                    selfID: battle?.selfID ?? "",
+                    hostID: battle?.hostID,
+                    isHost: battle?.isHost ?? false,
+                    canStart: battle?.canStart ?? false,
+                    isReconnecting: battle?.isReconnecting ?? false,
+                    rejection: battle?.rejection,
+                    onStart: { battle?.start() },
+                    onLeave: leaveBattle)
+
             case .game:
                 GameScreen(
                     model: model,
                     onLeave: leaveGame,
-                    onShowSettings: { showSettings = true })
+                    onShowSettings: { showSettings = true },
+                    dailyStreak: dailyStreak)
             }
 
             if let pending {
@@ -74,6 +122,40 @@ struct RootView: View {
                 }
             }
 
+            if let result = dailyResult {
+                DialogCard(dismiss: { dailyResult = nil }) {
+                    VStack(spacing: 12) {
+                        Text(DAILY_DEAL_INFO.name)
+                            .font(.system(size: 25, weight: .heavy, design: .rounded))
+                        Text(dailyDeal(day: result.day).shortLabel)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Ink.ink.opacity(0.7))
+                        HStack(spacing: 22) {
+                            dailyResultStat("\(result.score)", "Score")
+                            dailyResultStat("\(result.words)", result.words == 1 ? "Word" : "Words")
+                            dailyResultStat(
+                                "\(result.tilesLeft)",
+                                result.tilesLeft == 1 ? "Tile left" : "Tiles left")
+                        }
+                        Text(nextDealNote)
+                            .font(.caption)
+                            .foregroundStyle(Ink.ink.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                        Button("Back") { dailyResult = nil }
+                            .buttonStyle(InkActionButtonStyle(primary: true))
+                    }
+                }
+            }
+
+            if dailyExplainer {
+                ModeInfoCard(
+                    info: DAILY_DEAL_INFO,
+                    confirmLabel: "Play today’s deal",
+                    skipLabel: "Not now",
+                    onConfirm: startDaily,
+                    onSkip: { dailyExplainer = false })
+            }
+
             if showSetup {
                 SoloSetupCard(
                     pace: settings.pace,
@@ -82,7 +164,12 @@ struct RootView: View {
             }
 
             if showStats {
-                StatsScreen(stats: settings.stats(), onClose: { showStats = false })
+                StatsScreen(
+                    stats: settings.stats(),
+                    progress: progression.merged,
+                    earned: progression.earned,
+                    dailyStreak: progression.dailyStreak,
+                    onClose: { showStats = false })
                     .transition(.opacity)
             }
 
@@ -98,11 +185,12 @@ struct RootView: View {
                     VStack(spacing: 12) {
                         Text(BATTLE_ROYALE_INFO.name)
                             .font(.system(size: 25, weight: .heavy, design: .rounded))
-                        Text("Battles are coming to this app with Game Center. "
-                            + "For now, Solo and the tutorial are ready to play.")
-                            .font(.callout)
-                            .foregroundStyle(Ink.ink.opacity(0.8))
-                            .multilineTextAlignment(.center)
+                        // Only raised when there *is* a reason — the door
+                        // leads straight to matchmaking otherwise.
+                        Text(gameCenter.battleBlockedReason ?? "")
+                        .font(.callout)
+                        .foregroundStyle(Ink.ink.opacity(0.8))
+                        .multilineTextAlignment(.center)
                         Button("Back") { battleDoorNotice = false }
                             .buttonStyle(InkActionButtonStyle(primary: true))
                     }
@@ -112,13 +200,16 @@ struct RootView: View {
         .preferredColorScheme(settings.theme.colorScheme)
         .task {
             savedGame = settings.loadSavedGame()
+            daily = settings.dailyStatus()
+            // Kicked off at launch and never blocking: everything except
+            // Battle plays signed out (§7.1), and anything earned meanwhile is
+            // held by Progression and flushed if this succeeds.
+            gameCenter.authenticate(feeding: progression)
             model.cues = audio
             audio.isSoundEnabled = { [settings] in settings.soundEnabled }
             audio.isHapticsEnabled = { [settings] in settings.hapticsEnabled }
-            model.onFinish = { [settings] score, words in
-                settings.record(score: score, words: words)
-                // A finished game is not a game to come back to.
-                settings.save(nil)
+            model.onFinish = { outcome in
+                recordFinish(outcome)
             }
             model.onTutorialWalkedOut = leaveGame
         }
@@ -156,8 +247,193 @@ struct RootView: View {
         case .solo:
             showSetup = true
         case .battle:
-            battleDoorNotice = true
+            // Battle is the one mode that genuinely needs an identity, so it
+            // is the only place sign-in is ever insisted on (§7.1).
+            if gameCenter.battleBlockedReason != nil {
+                battleDoorNotice = true
+            } else {
+                battleError = nil
+                partyCode = nil
+                route = .battleEntry
+            }
         }
+    }
+
+    /// The Daily Deal row. Its explainer is shown once, like a door's; after
+    /// that the row leads straight to today's puzzle — or, once it's been
+    /// played, to what the player scored.
+    private func chooseDaily() {
+        let status = settings.dailyStatus()
+        daily = status
+        guard status.canPlay else {
+            // One attempt a day: the row becomes a way back to the result.
+            // Deliberately *not* by re-dealing and finishing the game — that
+            // would run the finish funnel again and file a phantom Solo score.
+            dailyResult = status.result
+            return
+        }
+        if !settings.hasSeenDailyExplainer() {
+            dailyExplainer = true
+            return
+        }
+        startDaily()
+    }
+
+    private func dailyResultStat(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .foregroundStyle(Ink.ink)
+            Text(label)
+                .font(.caption2.bold())
+                .foregroundStyle(Ink.ink.opacity(0.65))
+        }
+    }
+
+    /// How long until the next puzzle, in whole hours — the honest unit, since
+    /// the reset is a fixed instant and nobody needs it to the second.
+    private var nextDealNote: String {
+        guard let daily else { return "" }
+        let hours = Int(
+            (daily.deal.closesAt.timeIntervalSinceNow / 3_600).rounded(.up))
+        guard hours > 0 else { return "A new deal is ready." }
+        return hours == 1
+            ? "A new deal in about an hour."
+            : "A new deal in about \(hours) hours."
+    }
+
+    private func startDaily() {
+        settings.markDailyExplainerSeen()
+        dailyExplainer = false
+        let status = settings.dailyStatus()
+        daily = status
+        guard status.canPlay else { return }
+        dailyStreak = status.streak
+        settings.save(nil)
+        savedGame = nil
+        model.newDaily(deal: status.deal)
+        route = .game
+    }
+
+    /// Every finished game lands here — Solo's stats, the Daily Deal's result
+    /// and streak, and (phase 3) the Game Center submission that hangs off the
+    /// same funnel.
+    private func recordFinish(_ outcome: GameOutcome) {
+        // Cross-device progress, achievements, and the leaderboard queue —
+        // all of which work signed out and flush when auth arrives (§7.1).
+        let recorded = progression.record(outcome)
+        if !recorded.completed.isEmpty {
+            model.announceAchievements(recorded.completed)
+        }
+        // The tutorial earns a badge but isn't a game, so it stops here.
+        guard outcome.mode != .tutorial else { return }
+        settings.record(score: outcome.score, words: outcome.words)
+        if let deal = outcome.daily {
+            // Recorded against the day the game *started* on, and marked
+            // ineligible if the puzzle rolled over while it was being played
+            // (plan §8.2).
+            let history = settings.recordDaily(
+                DailyResult(
+                    day: deal.day,
+                    date: deal.date,
+                    score: outcome.score,
+                    words: outcome.words,
+                    tilesLeft: outcome.tilesLeft,
+                    bonusEarned: outcome.bonusEarned,
+                    withinDay: dailyDayNumber(at: .now) == deal.day,
+                    at: Date.now.timeIntervalSince1970))
+            dailyStreak = history.streak(today: deal.day)
+            daily = settings.dailyStatus()
+        }
+        // A finished game is not a game to come back to.
+        settings.save(nil)
+    }
+
+    // MARK: Battle (plan §7.3)
+
+    /// Open a room and show its code. The party exists before the match does —
+    /// players join the party, and it becomes a `GKMatch` when we ask.
+    private func hostBattle() {
+        guard #available(iOS 26, macOS 26, *) else { return }
+        runBattleSetup { 
+            let (activity, code) = try await matchmaking.hostParty()
+            partyCode = code
+            let match = try await matchmaking.match(for: activity)
+            return (match, .host)
+        }
+    }
+
+    private func joinBattle(code: String) {
+        guard #available(iOS 26, macOS 26, *) else { return }
+        runBattleSetup {
+            let activity = try await matchmaking.joinParty(code: code)
+            let match = try await matchmaking.match(for: activity)
+            return (match, .client)
+        }
+    }
+
+    /// Game Center's own invite sheet — the road that works on every OS the
+    /// app supports. Whoever sends the invite referees.
+    private func inviteToBattle() {
+        runBattleSetup {
+            let match = try await matchmaking.findMatchByInvite()
+            return (match, .host)
+        }
+    }
+
+    /// The shared shape of every road in: show it's working, form a match,
+    /// build the session, land in the lobby.
+    private func runBattleSetup(
+        _ form: @escaping () async throws -> (GKMatch, BattleSession.Role)
+    ) {
+        battleBusy = true
+        battleError = nil
+        Task {
+            do {
+                let (match, role) = try await form()
+                startBattle(match: match, role: role)
+            } catch let failure as Matchmaking.Failure {
+                partyCode = nil
+                if case .cancelled = failure {
+                    // Backing out of matchmaking isn't an error worth saying.
+                    battleError = nil
+                } else if case let .unavailable(message) = failure {
+                    battleError = message
+                } else if case let .failed(message) = failure {
+                    battleError = message
+                }
+            } catch {
+                partyCode = nil
+                battleError = error.localizedDescription
+            }
+            battleBusy = false
+        }
+    }
+
+    private func startBattle(match: GKMatch, role: BattleSession.Role) {
+        let transport = GameKitTransport(match: match)
+        let session = BattleSession(
+            role: role,
+            transport: transport,
+            model: model,
+            displayName: { transport.displayName(for: $0) })
+        session.onGameStart = { route = .game }
+        session.onReturnToLobby = { route = .battleLobby }
+        session.run()
+        battle = session
+        route = .battleLobby
+    }
+
+    /// Out of a battle by any road — backing out of the entry screen, leaving
+    /// the lobby, or quitting a game.
+    private func leaveBattle() {
+        battle?.leave()
+        battle = nil
+        partyCode = nil
+        battleError = nil
+        battleBusy = false
+        route = .home
+        daily = settings.dailyStatus()
     }
 
     private func startSolo(pace: SoloPace) {
@@ -209,8 +485,16 @@ struct RootView: View {
     /// Done with a game by any road. A first-timer who came through the
     /// tutorial on their way to a door is handed on to it (App.tsx:722–730).
     private func leaveGame() {
+        // A battle's board belongs to its lobby: leaving the game goes back
+        // there, and only leaving the lobby goes home.
+        if battle != nil {
+            route = .battleLobby
+            return
+        }
         persistGame()
         route = .home
+        // The day can have rolled over while a game was open.
+        daily = settings.dailyStatus()
         if let door = doorAfterTutorial {
             doorAfterTutorial = nil
             if settings.hasSeen(door: door) {

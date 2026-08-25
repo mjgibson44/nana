@@ -17,7 +17,9 @@ struct PointerSurface: ViewModifier {
     /// The machine's press-time context, sampled live from the game state.
     var context: () -> GestureMachine.Context
     var dispatch: (GestureMachine.Event) -> Void
-    var kind: GestureMachine.PointerKind = defaultPointerKind
+    /// Sampled at press time, not stored: the player can put the Pencil down
+    /// and pick the trackpad up between one touch and the next.
+    var kind: () -> GestureMachine.PointerKind = { PointerKindTracker.shared.current }
 
     @State private var pointerID: Int?
     @GestureState private var pressed = false
@@ -37,7 +39,7 @@ struct PointerSurface: ViewModifier {
                             guard let target = target(value.startLocation) else { return }
                             dispatch(
                                 .down(
-                                    id: pointerSerial, kind: kind,
+                                    id: pointerSerial, kind: kind(),
                                     location: value.startLocation, target: target,
                                     time: time, context: context()))
                         }
@@ -76,13 +78,6 @@ extension View {
     }
 }
 
-/// SwiftUI gestures don't say what produced them; the platform is the best
-/// available guess (Apple Pencil intentionally lands in the touch bucket —
-/// the web treats pen like touch everywhere, ui.md §3.9).
-var defaultPointerKind: GestureMachine.PointerKind {
-    #if os(macOS)
-    return .mouse
-    #else
-    return .touch
-    #endif
-}
+// SwiftUI gestures still don't say what produced them — `PointerKindTracker`
+// (fed by `BoardInputBridge`) is where the answer now comes from, so an iPad
+// trackpad gets the mouse rules instead of the touch ones.

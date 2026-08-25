@@ -7,7 +7,13 @@ import WordCore
 /// explained once, in the card that fronts its first game.
 struct HomeScreen: View {
     var hasSavedGame: Bool
+    /// Shows Game Center's own access point over the home screen. Off in
+    /// snapshot tests and previews — it's a UIKit/AppKit overlay the renderer
+    /// can't draw, and it needs a signed-in player to say anything.
+    var showsGameCenter = false
+    var daily: DailyStatus?
     var onResume: () -> Void
+    var onDaily: () -> Void
     var onChoose: (GameDoor) -> Void
     var onTutorial: () -> Void
     var onStats: () -> Void
@@ -16,11 +22,22 @@ struct HomeScreen: View {
     /// `ScrollView` (same reason `SoloSummaryView` carries this flag).
     var scrollable = true
 
+    /// What the home screen asks a window to be, at minimum.
+    ///
+    /// It scrolls, so its *content* height must not become the window's floor
+    /// — that is the same failure the board caused (`WindowSizingTests`), just
+    /// slower: every row added here would ratchet the minimum window up until
+    /// one day it didn't fit a screen. Declaring an ideal decouples the two,
+    /// and content taller than the window does what a ScrollView is for.
+    private static let idealHeight: CGFloat = 360
+
     @ViewBuilder
     var body: some View {
         if scrollable {
             ScrollView { content }
+                .frame(idealHeight: Self.idealHeight)
                 .background(Ink.bg.ignoresSafeArea())
+                .modifier(GameCenterAccessPoint(active: showsGameCenter))
         } else {
             content.background(Ink.bg)
         }
@@ -29,7 +46,7 @@ struct HomeScreen: View {
     private var content: some View {
         VStack(spacing: 26) {
                 VStack(spacing: 6) {
-                    Text("Word")
+                    Text("Time Tiles")
                         .font(.system(size: 46, weight: .heavy, design: .rounded))
                         .foregroundStyle(Ink.ink)
                     Text("Race to weave every tile into one crossword.")
@@ -62,6 +79,13 @@ struct HomeScreen: View {
                     .background(RoundedRectangle(cornerRadius: 14).fill(Ink.ink))
                 }
 
+                // The Daily Deal is a row rather than a third door card: it's
+                // the one mode with state to report — today's date, whether
+                // it's been played, and the streak riding on it.
+                if let daily {
+                    dailyRow(daily)
+                }
+
                 HStack(spacing: 12) {
                     doorCard(.solo, icon: "person.fill")
                     doorCard(.battle, icon: "crown.fill")
@@ -77,6 +101,69 @@ struct HomeScreen: View {
         .padding(.horizontal, 22)
         .padding(.vertical, 28)
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func dailyRow(_ daily: DailyStatus) -> some View {
+        Button(action: onDaily) {
+            HStack(spacing: 12) {
+                VStack(spacing: 1) {
+                    Text(daily.deal.monthLabel.uppercased())
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Ink.ink.opacity(0.65))
+                    Text(daily.deal.dayOfMonthLabel)
+                        .font(.system(size: 21, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Ink.ink)
+                }
+                .frame(width: 46)
+                .padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Ink.surfaceAlt))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Ink.line, lineWidth: 2))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(DAILY_DEAL_INFO.name)
+                        .font(.callout.bold())
+                        .foregroundStyle(Ink.ink)
+                    // One line, truncating: this row sits on a screen that has
+                    // to survive a small window, and a wrapping tagline drives
+                    // the whole home screen's minimum height up with it.
+                    Text(subtitle(for: daily))
+                        .font(.caption)
+                        .foregroundStyle(Ink.ink.opacity(0.7))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if daily.streak > 1 {
+                    Text("\(daily.streak)-day streak")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Ink.okBg))
+                        .foregroundStyle(Ink.okInk)
+                        .accessibilityLabel("\(daily.streak) day streak")
+                }
+
+                Image(systemName: daily.isPlayed ? "checkmark.circle.fill" : "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Ink.ink.opacity(daily.isPlayed ? 0.85 : 0.5))
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Ink.surface))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Ink.ink, lineWidth: 3))
+        .accessibilityLabel("\(DAILY_DEAL_INFO.name), \(daily.deal.date)")
+        .accessibilityHint(subtitle(for: daily))
+    }
+
+    private func subtitle(for daily: DailyStatus) -> String {
+        if let result = daily.result {
+            return "Played · \(result.score) points"
+        }
+        return DAILY_DEAL_INFO.tagline
     }
 
     private func doorCard(_ door: GameDoor, icon: String) -> some View {

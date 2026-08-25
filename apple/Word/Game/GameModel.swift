@@ -96,6 +96,22 @@ enum SoloGaugeTone: Equatable {
     case over
 }
 
+/// A finished game, frozen — what the stats funnel, and later Game Center,
+/// are handed. Carrying the mode and the daily identity (rather than just a
+/// score) is what lets one funnel serve Solo, the Daily Deal and whatever
+/// phase 3 hangs off it.
+struct GameOutcome: Equatable {
+    /// What the game saw, in the shape the achievement evaluator wants.
+    var report: GameReport
+    var words: Int
+    var tilesLeft: Int
+    var bonusEarned: Bool
+    var daily: DailyDeal?
+
+    var mode: GameMode { report.mode }
+    var score: Int { report.score }
+}
+
 /// How many seconds of an Endless round tick down to the tiles landing. Three
 /// beats is long enough to be a warning and short enough not to be a metronome
 /// (App.tsx:102–106).
@@ -121,6 +137,8 @@ final class GameModel {
     private(set) var solo = SoloSession(pace: .regular, now: .distantPast)
     private(set) var bankedBonus = 0
     private(set) var finalScore = 0
+    private(set) var finalTilesLeft = 0
+    private(set) var finalBonusEarned = false
     private(set) var finalWords: [ScoredWord] = []
     private(set) var showSummary = false
     /// Bumped per deal so the viewport knows to re-center.
@@ -130,6 +148,32 @@ final class GameModel {
     /// Which mode is being played. Battle joins in phase 4; the tutorial runs
     /// the scripted lesson with no clock and no score.
     private(set) var mode: GameMode = .endless
+    /// Which day's Daily Deal this is, captured when the game *starts*.
+    ///
+    /// Held for the length of the game on purpose (plan §8.2): the puzzle can
+    /// roll over mid-game, and the result belongs to the day it was begun on,
+    /// not the day it happened to end on.
+    private(set) var daily: DailyDeal?
+
+    /// The battle's clock and deal position, while `mode == .battle`.
+    private(set) var battle: BattleRun?
+    /// Which round the battle is in, refreshed by the clock tick. Held rather
+    /// than computed so `commit` — which has no clock of its own — values a
+    /// word by the round it actually landed in.
+    private(set) var battleRound = 1
+    /// Watching rather than playing: buried already, or joined mid-game and
+    /// waiting for the next start (App.tsx:1605–1609). A dead board takes no
+    /// drips and can't be buried twice.
+    var spectating = false
+    /// The shared deal. Every player's stream is seeded identically, so drip
+    /// *k* is the same letters on every screen.
+    private var battleStream: TileStream?
+    /// This player's private attack stream, seeded `<seed>/attacks/<selfID>`.
+    /// Only counts cross the wire; the letters are drawn locally.
+    private var attackStream: TileStream?
+
+    /// A word landed and owes the field tiles. The session splits and sends it.
+    var onBattleAttack: ((Int) -> Void)?
     /// The lesson's progress while `mode == .tutorial`.
     private(set) var tutorial: TutorialRun?
 
@@ -152,6 +196,15 @@ final class GameModel {
     private(set) var wordsByCell: [CellKey: [WordRun]] = [:]
     private(set) var tileBounds: Bounds?
     private(set) var cellFeedback: [CellKey: CellFeedback] = [:]
+
+    // What this game has seen, for the achievement evaluator (plan §8.3).
+    // All of it falls out of funnels that already exist — `commit`,
+    // `claimBoardClear`, and the overflow alarm — so nothing here changes how
+    // the game plays.
+    private(set) var usedGapTile = false
+    private(set) var longestWordPlaced = 0
+    private(set) var boardClears = 0
+    private(set) var recoveredFromOverLimit = false
 
     private var toastSerial = 0
     private var dealSerial = 0
@@ -309,6 +362,24 @@ final class GameModel {
     var showsClock: Bool { mode == .endless }
 
     var isTutorial: Bool { mode == .tutorial }
+    var isDaily: Bool { mode == .daily }
+    var isBattle: Bool { mode == .battle }
+
+    /// Battle's pile gauge counts tiles in hand against a hard limit — unlike
+    /// Solo's, which counts anything loose and treats the limit as a deadline.
+    var battlePileTone: SoloGaugeTone {
+        guard mode == .battle else { return .ok }
+        if rack.count >= BATTLE_PILE_URGENT { return .over }
+        if rack.count >= BATTLE_PILE_WARN { return .warn }
+        return .ok
+    }
+
+    /// The Daily Deal's pressure isn't a clock, it's the pile: a fixed deal,
+    /// and every tile you can't place costs you the bonus.
+    var showsTilesLeft: Bool { mode == .daily }
+
+    /// A daily can be handed in at any point; there's nothing to run out of.
+    var canFinishDaily: Bool { mode == .daily && !isComplete }
 
     /// The tutorial's step counter takes the score's corner (App.tsx:3070–3077).
     var tutorialProgress: (step: Int, of: Int)? {
@@ -361,6 +432,8 @@ final class GameModel {
         self.seed = seed
         mode = .endless
         tutorial = nil
+        daily = nil
+        clearBattle()
         solo = SoloSession(pace: pace, now: now)
         gameSerial += 1
         setBoard(TileMap())
@@ -370,18 +443,108 @@ final class GameModel {
         resetPlayState()
     }
 
+    /// The host said go. Grow the shared deal from the seed and dive in.
+    ///
+    /// Battle's board is **locked**: a word placed is permanent, so only real
+    /// words may land (the `boardLocked` branch of `commit` already enforces
+    /// that). The opening batch is `BATTLE_START_TILES` for everyone, which is
+    /// what keeps the shared stream in step — every client asks the stream for
+    /// the same first number.
+    func newBattle(
+        seed: String, selfID: String, spectating: Bool = false, now: Date = .now
+    ) {
+        self.seed = seed
+        mode = .battle
+        tutorial = nil
+        daily = nil
+        self.spectating = spectating
+        boardLocked = true
+        battle = BattleRun(startedAt: now)
+        battleRound = 1
+        let stream = TileStream(seed: seed)
+        battleStream = stream
+        attackStream = TileStream(seed: "\(seed)/attacks/\(selfID)")
+        solo = SoloSession(battleAt: now)
+        gameSerial += 1
+        setBoard(TileMap())
+        rack = spectating ? [] : stream.next(BATTLE_START_TILES)
+        resetPlayState()
+    }
+
+    /// Our share of a rival's word. Only the count crossed the wire; the
+    /// letters come off this player's private stream (App.tsx:803–819).
+    func receiveAttack(_ count: Int) {
+        guard mode == .battle, !isComplete, !spectating, count > 0,
+            let attackStream
+        else { return }
+        let letters = attackStream.next(count)
+        guard !letters.isEmpty else { return }
+        appendDealtTiles(letters)
+        // Sent tiles get their own voice — lower and falling, so incoming
+        // trouble never sounds like tiles you earned.
+        cues?.play(.attack)
+        rejectToast(
+            "Incoming! +\(letters.count) tile\(letters.count == 1 ? "" : "s") from a rival")
+        checkBattleBurial()
+    }
+
+    /// Battle's one loss rule: let the pile past the limit, for any reason at
+    /// any moment, and you're out on the spot (App.tsx:1636–1639).
+    private func checkBattleBurial() {
+        guard mode == .battle, !isComplete, !spectating else { return }
+        if rack.count > BATTLE_PILE_LIMIT { finishGame(reason: .buried) }
+    }
+
+    /// Deal today's puzzle.
+    ///
+    /// The letters come from `TileStream` — battle's hidden-board deal — and
+    /// not from Solo's `extendPuzzle(board:)` path, which grows tiles off the
+    /// player's *live* board and so would deal everyone something different
+    /// the moment they made a move (plan §8.2).
+    func newDaily(deal: DailyDeal, now: Date = .now) {
+        seed = deal.seed
+        mode = .daily
+        tutorial = nil
+        clearBattle()
+        daily = deal
+        solo = SoloSession(dailyAt: now)
+        gameSerial += 1
+        setBoard(TileMap())
+        rack = TileStream(seed: deal.seed).next(DailyRules.tileCount)
+        resetPlayState()
+    }
+
+    /// Hand today's board in. Unlike Solo there is no losing condition to
+    /// trip — the player decides when they're done with the letters.
+    func finishDaily() {
+        guard canFinishDaily else { return }
+        finishGame(reason: .dailyDone)
+    }
+
     /// Start the guided lesson. Its first word is dealt spelled out in a row
     /// rather than shuffled — step one is about getting a word down at all
     /// (App.tsx:527–530) — and there is no clock to run out.
     func newTutorial(now: Date = .now) {
         seed = "tutorial"
         mode = .tutorial
+        daily = nil
+        clearBattle()
         tutorial = TutorialRun()
         solo = SoloSession(tutorialAt: now)
         gameSerial += 1
         setBoard(TileMap())
         rack = tutorialScript[0].tiles
         resetPlayState()
+    }
+
+    /// Leave battle behind — every other mode deals its own way.
+    private func clearBattle() {
+        battle = nil
+        battleStream = nil
+        attackStream = nil
+        battleRound = 1
+        spectating = false
+        boardLocked = false
     }
 
     /// Everything a fresh board resets, whatever dealt it.
@@ -393,6 +556,8 @@ final class GameModel {
         toast = nil
         bankedBonus = 0
         finalScore = 0
+        finalTilesLeft = 0
+        finalBonusEarned = false
         finalWords = []
         showSummary = false
         dealSerial = 0
@@ -403,6 +568,10 @@ final class GameModel {
         future = []
         tickedKey = nil
         overflowing = false
+        usedGapTile = false
+        longestWordPlaced = 0
+        boardClears = 0
+        recoveredFromOverLimit = false
         // Pre-anchor the middle cell so typing previews immediately
         // (App.tsx:536–539).
         let middle = keyOf(BOARD_SIZE / 2, BOARD_SIZE / 2)
@@ -425,6 +594,10 @@ final class GameModel {
     /// Called by the UI heartbeat. The session machine changes its deadline
     /// before emitting, so the same expiry can never deal twice.
     func advanceClock(at now: Date = .now) {
+        if mode == .battle {
+            advanceBattle(at: now)
+            return
+        }
         switch solo.advance(at: now, looseTiles: looseTiles) {
         case .none:
             break
@@ -435,6 +608,24 @@ final class GameModel {
         }
         soundTick(at: now)
         soundOverflow()
+    }
+
+    /// The battle's tick: keep the round current, land a drip when one is due.
+    private func advanceBattle(at now: Date) {
+        guard var run = battle else { return }
+        battleRound = run.round(at: now)
+        guard !isComplete, !spectating else {
+            battle = run
+            return
+        }
+        if let tiles = run.advance(at: now), let stream = battleStream {
+            let letters = stream.next(tiles)
+            appendDealtTiles(letters)
+            rejectToast("+\(letters.count) tile\(letters.count == 1 ? "" : "s")")
+            cues?.play(.deal)
+        }
+        battle = run
+        checkBattleBurial()
     }
 
     /// The last few seconds of an Endless round tick, once a second, so the
@@ -463,6 +654,8 @@ final class GameModel {
         }
         let over = looseTiles > ENDLESS_LOOSE_LIMIT
         guard over != overflowing else { return }
+        // Crossing back *under* is the comeback the badge is for.
+        if overflowing, !over { recoveredFromOverLimit = true }
         overflowing = over
         if over { cues?.play(.overflow) }
     }
@@ -472,6 +665,7 @@ final class GameModel {
     func claimBoardClear() {
         guard boardClearReady else { return }
         bankedBonus += ENDLESS_CONNECT_BONUS
+        boardClears += 1
         dealBonusTiles(
             ENDLESS_CLEAR_TILES,
             message:
@@ -487,6 +681,8 @@ final class GameModel {
         guard !finishRecorded else { return }
         finishRecorded = true
         finalScore = runningScore
+        finalTilesLeft = rack.count
+        finalBonusEarned = boardScore.bonusEarned
         finalWords = (validation?.runs ?? [])
             .filter(\.valid)
             .map { ScoredWord(word: $0.word, points: wordScore($0.word)) }
@@ -494,26 +690,46 @@ final class GameModel {
         showSummary = true
         clearTransientInput()
         clearFocus()
-        // Buried, or out of time: the game beat you (App.tsx:1370).
-        cues?.play(.lose)
+        switch reason {
+        case .buried:
+            // Buried, or out of time: the game beat you (App.tsx:1370).
+            cues?.play(.lose)
+        case .dailyDone:
+            // Nobody loses a daily — you hand in whatever you built.
+            cues?.play(.win)
+        }
         // One funnel for every ending, so stats are recorded exactly once.
-        onFinish?(finalScore, finalWords.count)
+        onFinish?(outcome)
     }
 
-    /// Called once per finished game, with the frozen score and word count —
-    /// the single stats/leaderboard funnel every game end flows through
-    /// (plan §8.1 hangs Game Center submission here in phase 3).
-    var onFinish: ((Int, Int) -> Void)?
+    /// Everything a finished game is worth knowing about, frozen.
+    ///
+    /// The battle fields stay at their defaults until phase 4 fills them, at
+    /// which point six achievements light up with no change here.
+    var outcome: GameOutcome {
+        GameOutcome(
+            report: GameReport(
+                mode: mode,
+                pace: pace,
+                score: finalScore,
+                longestWord: longestWordPlaced,
+                usedGapTile: usedGapTile,
+                boardClears: boardClears,
+                recoveredFromOverLimit: recoveredFromOverLimit,
+                tutorialFinished: tutorialFinished),
+            words: finalWords.count,
+            tilesLeft: finalTilesLeft,
+            bonusEarned: finalBonusEarned,
+            daily: daily)
+    }
+
+    /// Called once per finished game — the single stats/leaderboard funnel
+    /// every game end flows through (plan §8.1 hangs Game Center submission
+    /// here in phase 3).
+    var onFinish: ((GameOutcome) -> Void)?
 
     func loadDictionary() async {
-        guard dictionary == nil,
-            let url = Bundle.main.url(forResource: "dictionary", withExtension: "txt")
-        else { return }
-        let parsed = await Task.detached(priority: .utility) { () -> Set<String>? in
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-            return parseDictionary(text)
-        }.value
-        guard let parsed else { return }
+        guard dictionary == nil, let parsed = await WordDictionary.shared() else { return }
         dictionary = parsed
         refreshBoardCaches()
     }
@@ -781,6 +997,20 @@ final class GameModel {
 
         // Battle attacks join this funnel in phase 4 — it stays the one road
         // every landing takes.
+        // Noted before the board changes: "place an 8-letter word" is about
+        // what went down, not what survives on the board at the end.
+        if picksToPlace.contains(where: { $0.letter == nil }) { usedGapTile = true }
+        if let dictionary {
+            let placedLengths = newRuns
+                .filter { $0.word.count >= MIN_WORD_LENGTH && dictionary.contains($0.word) }
+                .map(\.word.count)
+            longestWordPlaced = max(longestWordPlaced, placedLengths.max() ?? 0)
+        }
+
+        // Captured before the board changes: an attack is priced against the
+        // words that were already down.
+        let oldRuns = mode == .battle ? extractRuns(board) : []
+
         remember()
         setBoard(next)
         let spent = Set(result.steps.map(\.rackIndex))
@@ -789,6 +1019,31 @@ final class GameModel {
         clearFocus()
         cues?.play(.commit)
         soundOverflow()
+
+        // Battle: the word that just landed hits the field. Only the growth
+        // counts — a word extended or bridged from words already down is
+        // worth the difference, not the whole word again — and the
+        // best-paying word the placement made is the one that counts
+        // (App.tsx:2098–2122).
+        if mode == .battle, !spectating {
+            let attack = newRuns.reduce(0) { top, run in
+                let cells = Set(run.cells)
+                // The runs this word swallowed: same direction, every cell now
+                // inside it. Anything merely crossed keeps its cells outside.
+                let grewFrom = oldRuns
+                    .filter { $0.direction == run.direction && $0.cells.allSatisfy(cells.contains) }
+                    .map { $0.word.count }
+                return max(
+                    top,
+                    battleAttackTiles(
+                        wordLength: run.word.count, round: battleRound, grewFrom: grewFrom))
+            }
+            if attack > 0 {
+                onBattleAttack?(attack)
+                rejectToast(
+                    "Sent \(attack) tile\(attack == 1 ? "" : "s") across your rivals!")
+            }
+        }
 
         // The step's word is on the board — deal the next one's tiles.
         if madeStepWord { advanceTutorial(placedDir: dir) }
@@ -814,9 +1069,24 @@ final class GameModel {
             return true
         }
         if let done { rejectToast(done) }
-        guard let deal else { return true }
+        guard let deal else {
+            // The lesson is finished. It has no score and no summary, so it
+            // never goes through `finishGame` — but it is the one thing that
+            // earns the tutorial badge, so it reports through the same funnel.
+            reportTutorialFinished()
+            return true
+        }
         appendDealtTiles(deal)
         return false
+    }
+
+    /// A completed lesson, down the one funnel every ending uses. Guarded by
+    /// the same flag as `finishGame`, so walking out and back can't report it
+    /// twice.
+    private func reportTutorialFinished() {
+        guard mode == .tutorial, tutorialFinished, !finishRecorded else { return }
+        finishRecorded = true
+        onFinish?(outcome)
     }
 
     /// Skip the step in hand: the tutorial plays the step's word itself, so
@@ -1069,6 +1339,17 @@ final class GameModel {
         toast = GameToast(text: text, serial: toastSerial)
     }
 
+    /// Say so when a game earns something. The toast is the game's only
+    /// "well done" channel, and it's the right one here: Game Center's own
+    /// achievement banner needs an account, and this has to work without one.
+    func announceAchievements(_ ids: [AchievementID]) {
+        guard let first = ids.first else { return }
+        rejectToast(
+            ids.count == 1
+                ? "Achievement: \(first.title)"
+                : "Achievement: \(first.title) +\(ids.count - 1) more")
+    }
+
     func clearToast(serial: Int) {
         if toast?.serial == serial { toast = nil }
     }
@@ -1117,10 +1398,17 @@ final class GameModel {
     /// nothing worth restoring (a finished game, an untouched opening board,
     /// or the tutorial — which is a lesson, not a run to lose).
     func savedGame(at now: Date = .now) -> SavedSoloGame? {
-        guard mode == .endless, !isComplete else { return nil }
-        guard !board.isEmpty || bankedBonus > 0 || phase == .drip else { return nil }
+        guard mode == .endless || mode == .daily, !isComplete else { return nil }
+        // A daily is worth saving from the moment it's dealt: it's one attempt
+        // a day, so losing an untouched board to a phone call would cost the
+        // player the whole day.
+        guard mode == .daily || !board.isEmpty || bankedBonus > 0 || phase == .drip else {
+            return nil
+        }
         return SavedSoloGame(
             seed: seed,
+            mode: mode.rawValue,
+            dailyDay: daily?.day,
             pace: pace.rawValue,
             board: board,
             rack: rack,
@@ -1138,13 +1426,18 @@ final class GameModel {
     /// away, nor resume already expired.
     func restore(_ saved: SavedSoloGame, now: Date = .now) {
         seed = saved.seed
-        mode = .endless
+        mode = saved.gameMode
         tutorial = nil
-        solo = SoloSession(
-            restoring: saved.soloPace,
-            phase: saved.soloPhase,
-            dripsElapsed: saved.dripsElapsed,
-            remaining: saved.remainingSeconds)
+        daily = saved.deal
+        // A daily has no clock to come back held, so it comes back straight
+        // onto the board — there is nothing a resume card would be holding.
+        solo = mode == .daily
+            ? SoloSession(dailyAt: now)
+            : SoloSession(
+                restoring: saved.soloPace,
+                phase: saved.soloPhase,
+                dripsElapsed: saved.dripsElapsed,
+                remaining: saved.remainingSeconds)
         gameSerial += 1
         setBoard(saved.board)
         rack = saved.rack

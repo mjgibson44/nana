@@ -3,6 +3,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Per-developer signing settings. Kept out of git and out of the generated
+# project, because `xcodegen generate` would wipe a team picked in Xcode's UI.
+if [ ! -f "$(dirname "$0")/Local.xcconfig" ]; then
+  cp "$(dirname "$0")/Local.xcconfig.example" "$(dirname "$0")/Local.xcconfig"
+  echo "Created apple/Local.xcconfig — add your Apple Developer Team ID to it."
+fi
+
 if ! command -v xcodegen >/dev/null 2>&1; then
   echo "Installing XcodeGen (via Homebrew)…"
   brew install xcodegen

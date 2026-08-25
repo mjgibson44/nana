@@ -11,8 +11,12 @@
 ///    standing wins.
 ///  - Tutorial: a guided walk through placing words, at your own pace.
 
-public enum GameMode: String {
+public enum GameMode: String, Sendable {
     case endless, battle, tutorial
+    /// New on Apple platforms, with no counterpart in `modes.ts`: one fixed
+    /// deal a day, identical for every player (plan §8.2, `DailyDeal.swift`).
+    /// A deliberate product divergence, not a porting slip.
+    case daily
 }
 
 /// How hard Solo leans on the player. Both paces are the same game — same
@@ -24,7 +28,7 @@ public enum GameMode: String {
 ///    tightening to 30, and batches that grow to seven.
 ///  - `fast`: one minute to open, then a 15-second round forever, starting at
 ///    three tiles and growing by one every eight rounds up to ten.
-public enum SoloPace: String, CaseIterable {
+public enum SoloPace: String, CaseIterable, Sendable {
     case regular, fast
 }
 
@@ -96,6 +100,19 @@ public let TUTORIAL_INFO = ModeInfo(
         "Place your first word",
         "Cross it on a shared letter",
         "Borrow a letter with the gap tile",
+    ]
+)
+
+/// The Daily Deal's card. It leads with the thing that makes the mode work —
+/// everyone gets the same letters — because that's the reason to come back
+/// tomorrow, and the reason a score is worth comparing.
+public let DAILY_DEAL_INFO = ModeInfo(
+    name: "Daily Deal",
+    tagline: "One deal a day. Same letters for everyone.",
+    details: [
+        "\(DailyRules.tileCount) tiles, no clock — take as long as you like",
+        "Everybody in the world plays the same letters today",
+        "One go per day; place every tile for a \(ALL_TILES_BONUS)-point bonus",
     ]
 )
 

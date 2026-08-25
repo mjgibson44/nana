@@ -1,6 +1,7 @@
 import SwiftUI
 import WordBoard
 import WordCore
+import WordNet
 import XCTest
 
 @testable import Word
@@ -31,9 +32,90 @@ final class ScreenSnapshotTests: XCTestCase {
     func testHomeScreenRenders() throws {
         try render(
             HomeScreen(
-                hasSavedGame: true, onResume: {}, onChoose: { _ in }, onTutorial: {},
+                hasSavedGame: true,
+                daily: DailyStatus(
+                    deal: dailyDeal(at: .now), result: nil, streak: 12),
+                onResume: {}, onDaily: {}, onChoose: { _ in }, onTutorial: {},
                 onStats: {}, onSettings: {}, scrollable: false),
             name: "home", size: CGSize(width: 420, height: 640))
+    }
+
+    func testHomeScreenWithAPlayedDailyRenders() throws {
+        let deal = dailyDeal(at: .now)
+        let played = DailyResult(
+            day: deal.day, date: deal.date, score: 214, words: 9, tilesLeft: 0,
+            bonusEarned: true, withinDay: true, at: Date.now.timeIntervalSince1970)
+        try render(
+            HomeScreen(
+                hasSavedGame: false,
+                daily: DailyStatus(deal: deal, result: played, streak: 6),
+                onResume: {}, onDaily: {}, onChoose: { _ in }, onTutorial: {},
+                onStats: {}, onSettings: {}, scrollable: false),
+            name: "home-daily-played", size: CGSize(width: 420, height: 640))
+    }
+
+    func testDailySummaryRenders() throws {
+        try render(
+            SoloSummaryView(
+                words: [
+                    ScoredWord(word: "orbit", points: 10),
+                    ScoredWord(word: "tin", points: 3),
+                ],
+                score: 214,
+                onPlayAgain: {}, onSeeBoard: {}, scrollable: false,
+                daily: SoloSummaryView.DailySummary(
+                    date: "Aug 24", tilesLeft: 0, bonusEarned: true, streak: 6)),
+            name: "summary-daily", size: CGSize(width: 420, height: 720))
+    }
+
+    func testBattleLobbyRenders() throws {
+        let state = BattleState(
+            phase: .lobby,
+            players: [
+                BattlePlayer(id: "a", name: "Ada", host: true),
+                BattlePlayer(id: "b", name: "Grace"),
+                BattlePlayer(id: "c", name: "Katherine", connected: false),
+                BattlePlayer(id: "d", name: "Dorothy", waiting: true),
+            ],
+            game: 1,
+            winnerId: nil)
+        try render(
+            BattleLobbyScreen(
+                state: state, selfID: "b", hostID: "a", isHost: false, canStart: false,
+                isReconnecting: false, rejection: nil,
+                onStart: {}, onLeave: {}, scrollable: false),
+            name: "battle-lobby", size: CGSize(width: 420, height: 760))
+    }
+
+    func testBattleLobbyRendersForTheHost() throws {
+        let state = BattleState(
+            phase: .lobby,
+            players: [BattlePlayer(id: "a", name: "Ada", host: true)],
+            game: 0,
+            winnerId: nil)
+        try render(
+            BattleLobbyScreen(
+                state: state, selfID: "a", hostID: "a", isHost: true, canStart: false,
+                isReconnecting: true, rejection: nil,
+                onStart: {}, onLeave: {}, scrollable: false),
+            name: "battle-lobby-host", size: CGSize(width: 420, height: 700))
+    }
+
+    func testBattleEntryRendersWithAPartyCode() throws {
+        try render(
+            BattleEntryScreen(
+                supportsPartyCodes: true, partyCode: "ABC-DEF", isBusy: false, error: nil,
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onClose: {}, scrollable: false),
+            name: "battle-entry-hosting", size: CGSize(width: 420, height: 620))
+    }
+
+    func testBattleEntryRendersWithoutPartyCodeSupport() throws {
+        try render(
+            BattleEntryScreen(
+                supportsPartyCodes: false, partyCode: nil, isBusy: false,
+                error: "Game Center couldn’t open matchmaking.",
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onClose: {}, scrollable: false),
+            name: "battle-entry-invites", size: CGSize(width: 420, height: 620))
     }
 
     func testTutorialChromeRenders() throws {
@@ -59,8 +141,17 @@ final class ScreenSnapshotTests: XCTestCase {
         withStats.record(score: 128, words: 11, at: Date(timeIntervalSince1970: 1_760_000_000))
         withStats.record(score: 64, words: 6, at: Date(timeIntervalSince1970: 1_760_100_000))
         try render(
-            StatsScreen(stats: withStats.stats(), onClose: {}, scrollable: false),
-            name: "stats", size: CGSize(width: 420, height: 640))
+            StatsScreen(
+                stats: withStats.stats(),
+                progress: MergedProgress(
+                    gamesPlayed: 24, bestScore: 512, dailyDays: [
+                        dailyDayNumber(at: .now), dailyDayNumber(at: .now) - 1,
+                        dailyDayNumber(at: .now) - 2,
+                    ], bestDailyScore: 268),
+                earned: [.firstSoloGame, .gapTile, .tutorialDone, .eightLetterWord],
+                dailyStreak: 3,
+                onClose: {}, scrollable: false),
+            name: "stats", size: CGSize(width: 420, height: 1500))
     }
 
     func testCardsRender() throws {

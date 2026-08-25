@@ -17,10 +17,15 @@ struct GameScreen: View {
     /// Raise the settings page over the game (the router owns it, so one page
     /// serves both home and game).
     var onShowSettings: () -> Void = {}
+    /// The streak this game landed on, read back after it was recorded.
+    var dailyStreak = 0
 
     @State private var camera = BoardCamera()
     @State private var machine = GestureMachine()
     @State private var holdTask: Task<Void, Never>?
+    /// The fingers' current midpoint, sensed outside SwiftUI's gesture
+    /// vocabulary (`BoardInputBridge`); nil when nothing is pinching.
+    @State private var pinchMidpoint: CGPoint?
     @State private var rackFrame: CGRect = .zero
     @State private var clockNow = Date.now
     @FocusState private var gameFocused: Bool
@@ -84,7 +89,8 @@ struct GameScreen: View {
                     words: model.finalWords,
                     score: model.score,
                     onPlayAgain: startNewGame,
-                    onSeeBoard: { model.setSummaryPresented(false) })
+                    onSeeBoard: { model.setSummaryPresented(false) },
+                    daily: dailySummary)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
 
@@ -183,6 +189,7 @@ struct GameScreen: View {
             seconds: model.remainingSeconds(at: clockNow),
             timerLabel: model.phase == .drip ? "Next tiles" : "Time",
             looseTiles: model.showsLooseGauge ? model.looseTiles : nil,
+            tilesLeft: model.showsTilesLeft ? model.rack.count : nil,
             gaugeTone: model.gaugeTone,
             bonusEarned: model.boardScore.bonusEarned,
             canPause: model.canPause,
@@ -192,7 +199,9 @@ struct GameScreen: View {
             pace: model.pace,
             onChoosePace: startNewGame(pace:),
             onShowSettings: onShowSettings,
-            onReturnHome: onLeave)
+            onReturnHome: onLeave,
+            onFinish: model.canFinishDaily ? { model.finishDaily() } : nil,
+            allowsReplay: !model.isDaily)
     }
 
     // MARK: The board viewport
@@ -237,6 +246,14 @@ struct GameScreen: View {
                         }
                     }
                     .allowsHitTesting(model.canAcceptInput)
+            }
+            // Laid out over the same rectangle as the input plane, so the
+            // points it reports are already viewport coordinates.
+            .overlay {
+                BoardInputBridge(
+                    onMidpoint: { pinchMidpoint = $0 },
+                    onScroll: { camera.pan(by: $0) },
+                    isEnabled: model.canAcceptInput)
             }
             .overlay(alignment: .topLeading) { wordControls }
             .background(Ink.boardBg)
@@ -292,6 +309,16 @@ struct GameScreen: View {
         return (anchor, dir)
     }
 
+    /// The daily's extra summary lines, or nil for any other mode.
+    private var dailySummary: SoloSummaryView.DailySummary? {
+        guard let daily = model.daily else { return nil }
+        return SoloSummaryView.DailySummary(
+            date: daily.shortLabel,
+            tilesLeft: model.finalTilesLeft,
+            bonusEarned: model.finalBonusEarned,
+            streak: dailyStreak)
+    }
+
     private var machineContext: GestureMachine.Context {
         GestureMachine.Context(
             boardLocked: model.boardLocked,
@@ -319,14 +346,17 @@ struct GameScreen: View {
         return .boardEmpty(cell: cell)
     }
 
+    /// SwiftUI recognizes the pinch and reports its scale; the live midpoint
+    /// comes from `BoardInputBridge`, because `MagnifyGesture` only ever
+    /// offers the anchor it started at.
     private var pinchGesture: some Gesture {
         MagnifyGesture(minimumScaleDelta: 0.02)
             .onChanged { value in
                 if !camera.pinchActive {
                     dispatch(.pinchBegan)
-                    camera.beginPinch(startAnchor: value.startAnchor)
+                    camera.beginPinch(startAnchor: value.startAnchor, midpoint: pinchMidpoint)
                 }
-                camera.updatePinch(scale: value.magnification)
+                camera.updatePinch(scale: value.magnification, midpoint: pinchMidpoint)
             }
             .onEnded { _ in
                 camera.endPinch()
