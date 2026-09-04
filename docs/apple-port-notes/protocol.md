@@ -184,3 +184,6 @@ All of the following exists solely for signaling/NAT traversal and would be dele
 - State broadcasts include every player's data to everyone (full BattleState, battleSession.ts:629-633); harmless here, but note names are the only user content and are sanitized host-side only (battleSession.ts:245-251)
 - The visibilitychange/wake healing paths (battleSession.ts:307-310, 777-786) are browser-specific; iOS backgrounding suspends GKMatch sessions entirely — the resume-from-background story must be redesigned, not ported
 - TURN credentials are deliberately committed in .env.production (Metered free tier) and ship in the JS bundle; if any web build remains alongside the GameKit port, rotating/retiring them is a manual dashboard task (.env.production:1-14, infra/README.md:96-100)
+
+## iOS ADDITIONS (not in the web protocol above)
+The Apple port speaks a superset of the v5 wire format described here. v6 added the `host` announcement and v7 an optional `countdown` on the `state` snapshot, for random matches that deal themselves; both are documented in `docs/apple-port-plan.md` §7.2 and §7.3, and pinned by `apple/Packages/WordNet/Tests/WordNetTests/ProtocolTests.swift`.

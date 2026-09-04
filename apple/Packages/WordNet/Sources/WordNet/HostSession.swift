@@ -18,6 +18,29 @@ public let STALE_LINK_SECONDS: TimeInterval = 25
 /// The largest volley the host will pass on, however big a client claims.
 public let ATTACK_CLAMP = 50
 
+/// How often the host repeats "I am the referee" to a connected player who
+/// still hasn't taken a seat. A player whose first hello landed before the
+/// host session existed — or whose copy of the announcement was lost in a
+/// hand-off — is picked up on the next repeat rather than never.
+public let HOST_REANNOUNCE_SECONDS: TimeInterval = 1
+
+/// How a random match deals itself: nobody in a lobby of strangers presses
+/// START, so the host's session watches the roster and starts on a rule.
+public enum AutoStartRule: Equatable {
+    /// Two players, dealt the moment the second is seated.
+    case duel
+    /// Three or more asked for; dealt once the door has been quiet for
+    /// `PARTY_IDLE_SECONDS` — and with two if a third came and went, rather
+    /// than stranding the pair.
+    case party
+}
+
+/// How long a party's door stays open after the last arrival.
+public let PARTY_IDLE_SECONDS: TimeInterval = 20
+
+/// The countdown every screen shows once a self-starting lobby is decided.
+public let START_COUNTDOWN_SECONDS = 5
+
 /// What the host tells its own game layer. The host plays too, so its own
 /// attacks and state arrive through callbacks rather than the wire.
 public struct HostEvents {
@@ -26,17 +49,22 @@ public struct HostEvents {
     public var onStop: (() -> Void)?
     /// The host's own share of a rival's volley.
     public var onAttack: ((Int) -> Void)?
+    /// Another player with a *lower* id is also refereeing. Lowest id wins,
+    /// so this session should stand down and become that player's client.
+    public var onYield: ((PlayerID) -> Void)?
 
     public init(
         onState: ((BattleState) -> Void)? = nil,
         onStart: ((String) -> Void)? = nil,
         onStop: (() -> Void)? = nil,
-        onAttack: ((Int) -> Void)? = nil
+        onAttack: ((Int) -> Void)? = nil,
+        onYield: ((PlayerID) -> Void)? = nil
     ) {
         self.onState = onState
         self.onStart = onStart
         self.onStop = onStop
         self.onAttack = onAttack
+        self.onYield = onYield
     }
 }
 
@@ -68,17 +96,42 @@ public final class HostSession {
     /// Seats holding open for a dropped player, and when their grace runs out.
     private var graceUntil: [PlayerID: Date] = [:]
     private var lastPing: Date?
+    /// When each unseated player was last told who referees, for the repeat.
+    private var announcedAt: [PlayerID: Date] = [:]
+    /// Players this lobby turned away: not worth announcing to again.
+    private var rejected: Set<PlayerID> = []
+
+    /// The rule this lobby deals itself by, if it does.
+    public let autoStart: AutoStartRule?
+    /// How long a dropped mid-game seat is held. The web's 30 seconds by
+    /// default; a match of strangers holds for less, since there is no road
+    /// back in for them anyway.
+    public let graceSeconds: TimeInterval
+    /// Whether a player who arrives mid-game is seated to spectate until the
+    /// next deal. True for friends; a random match turns them away instead,
+    /// since a stranger shouldn't sit through a game they never saw start.
+    public let admitsMidGame: Bool
+    /// When the roster last grew — the party door's clock.
+    private var lastArrival: Date
+    /// When the running countdown deals, if one is running.
+    private var countdownEndsAt: Date?
 
     public init(
         transport: BattleTransport,
         displayName: @escaping (PlayerID) -> String,
         makeSeed: @escaping () -> String = { randomSeed() },
-        clock: @escaping () -> Date = { .now }
+        clock: @escaping () -> Date = { .now },
+        autoStart: AutoStartRule? = nil,
+        graceSeconds: TimeInterval = RECONNECT_GRACE_SECONDS,
+        admitsMidGame: Bool = true
     ) {
         self.transport = transport
         self.displayName = displayName
         self.makeSeed = makeSeed
         self.clock = clock
+        self.autoStart = autoStart
+        self.graceSeconds = graceSeconds
+        self.admitsMidGame = admitsMidGame
         state = BattleState(
             phase: .lobby,
             players: [
@@ -89,7 +142,9 @@ public final class HostSession {
             ],
             game: 0,
             winnerId: nil)
-        lastPing = clock()
+        let now = clock()
+        lastPing = now
+        lastArrival = now
 
         transport.onReceive = { [weak self] data, sender in
             self?.receive(data, from: sender)
@@ -110,10 +165,13 @@ public final class HostSession {
     /// later-connecting player (plan §7.2).
     public func announceHost(to players: [PlayerID]? = nil) {
         guard let data = Wire.encode(HostMessage.host(proto: PROTOCOL_VERSION)) else { return }
+        let now = clock()
         if let players {
             transport.send(data, to: players)
+            for player in players { announcedAt[player] = now }
         } else {
             transport.broadcast(data)
+            for player in transport.remotePlayerIDs { announcedAt[player] = now }
         }
     }
 
@@ -122,7 +180,17 @@ public final class HostSession {
     private func receive(_ data: Data, from sender: PlayerID) {
         // Any traffic at all proves the link is alive.
         lastSeen[sender] = clock()
-        guard let message = Wire.decode(ClientMessage.self, from: data) else { return }
+        guard let message = Wire.decode(ClientMessage.self, from: data) else {
+            // Not a client speaking: perhaps another referee. Two hosts can
+            // only meet in a match with no natural owner, and the rule every
+            // client already applies settles it — the lowest id referees.
+            if case let .host(proto)? = Wire.decode(HostMessage.self, from: data),
+                proto == PROTOCOL_VERSION, sender < selfID
+            {
+                events.onYield?(sender)
+            }
+            return
+        }
 
         switch message {
         case let .hello(proto):
@@ -167,6 +235,11 @@ public final class HostSession {
             reject(sender, reason: "That battle is full.")
             return
         }
+        // A stranger who lands after the deal has nothing to watch for.
+        guard admitsMidGame || state.phase == .lobby else {
+            reject(sender, reason: "That battle already started.")
+            return
+        }
 
         state.players.append(
             BattlePlayer(
@@ -175,6 +248,8 @@ public final class HostSession {
                 host: false,
                 // Joining mid-game means spectating until the next deal.
                 waiting: state.phase == .playing))
+        announcedAt[sender] = nil
+        lastArrival = clock()
         publish()
     }
 
@@ -245,6 +320,8 @@ public final class HostSession {
         state.phase = .playing
         state.game += 1
         state.winnerId = nil
+        countdownEndsAt = nil
+        state.countdown = nil
 
         // `start` before `state`, relying on per-sender ordering — which
         // `.reliable` guarantees (spec §6).
@@ -271,6 +348,11 @@ public final class HostSession {
         attackSpread = 0
         state.phase = .lobby
         state.winnerId = nil
+        countdownEndsAt = nil
+        state.countdown = nil
+        // Reopening the lobby gives a party its breather again rather than
+        // dealing the instant everyone is back.
+        lastArrival = clock()
 
         if let data = Wire.encode(HostMessage.stop) {
             transport.broadcast(data)
@@ -334,10 +416,75 @@ public final class HostSession {
             }
         }
 
+        // Anyone connected but still standing in the doorway is told again
+        // who referees: their hello may have beaten this session into
+        // existence, or their copy of the announcement may have been lost.
+        let seated = Set(state.players.map(\.id))
+        let unseated = transport.remotePlayerIDs.filter {
+            !seated.contains($0) && !rejected.contains($0)
+        }
+        let due = unseated.filter { player in
+            guard let last = announcedAt[player] else { return true }
+            return now.timeIntervalSince(last) >= HOST_REANNOUNCE_SECONDS
+        }
+        if !due.isEmpty {
+            announceHost(to: due)
+        }
+
         if changed {
             checkOver()
             publish()
         }
+
+        if autoStart != nil {
+            advanceAutoStart(at: now)
+        }
+    }
+
+    // MARK: Dealing itself
+
+    /// The random-match rule: decide, count down, deal. Runs on the host's
+    /// tick, in the lobby only, off the injected clock.
+    private func advanceAutoStart(at now: Date) {
+        guard let autoStart, state.phase == .lobby else { return }
+        let seated = state.players.filter { $0.connected && !$0.left }.count
+
+        if let endsAt = countdownEndsAt {
+            // Counting down. A field that shrinks below a battle stops it;
+            // nobody is dealt a game against no one.
+            guard seated >= BATTLE_MIN_PLAYERS else {
+                countdownEndsAt = nil
+                state.countdown = nil
+                publish()
+                return
+            }
+            let remaining = endsAt.timeIntervalSince(now)
+            guard remaining > 0 else {
+                start()
+                return
+            }
+            let shown = Int(remaining.rounded(.up))
+            if state.countdown != shown {
+                state.countdown = shown
+                publish()
+            }
+            return
+        }
+
+        let ready: Bool
+        switch autoStart {
+        case .duel:
+            ready = seated >= BATTLE_MIN_PLAYERS
+        case .party:
+            // The door has been quiet long enough, and there's a battle's
+            // worth of people behind it — two if a third came and went.
+            ready = seated >= BATTLE_MIN_PLAYERS
+                && now.timeIntervalSince(lastArrival) >= PARTY_IDLE_SECONDS
+        }
+        guard ready else { return }
+        countdownEndsAt = now.addingTimeInterval(TimeInterval(START_COUNTDOWN_SECONDS))
+        state.countdown = START_COUNTDOWN_SECONDS
+        publish()
     }
 
     // MARK: Roster mechanics
@@ -345,6 +492,8 @@ public final class HostSession {
     /// A link went down. Mid-game the seat is held; anywhere else the player
     /// simply leaves the roster (spec §5).
     private func drop(_ player: PlayerID, at now: Date) {
+        announcedAt[player] = nil
+        rejected.remove(player)
         guard let index = state.players.firstIndex(where: { $0.id == player }) else { return }
         lastSeen[player] = nil
 
@@ -354,7 +503,7 @@ public final class HostSession {
         }
 
         state.players[index].connected = false
-        graceUntil[player] = now.addingTimeInterval(RECONNECT_GRACE_SECONDS)
+        graceUntil[player] = now.addingTimeInterval(graceSeconds)
         publish()
     }
 
@@ -394,6 +543,7 @@ public final class HostSession {
     }
 
     private func reject(_ player: PlayerID, reason: String) {
+        rejected.insert(player)
         guard let data = Wire.encode(HostMessage.reject(reason: reason)) else { return }
         transport.send(data, to: [player])
     }

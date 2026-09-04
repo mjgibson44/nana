@@ -13,6 +13,8 @@ public protocol BattleTransport: AnyObject {
 
     func send(_ data: Data, to players: [PlayerID])
     func broadcast(_ data: Data)
+    /// Leave the match for good: everyone else sees this player drop.
+    func disconnect()
 
     var onReceive: ((Data, PlayerID) -> Void)? { get set }
     var onPlayerConnected: ((PlayerID) -> Void)? { get set }
@@ -58,6 +60,12 @@ public final class MemoryTransport: BattleTransport {
 
     public func broadcast(_ data: Data) {
         send(data, to: remotePlayerIDs)
+    }
+
+    public func disconnect() {
+        connected = []
+        isConnectedToMesh = false
+        mesh?.drop(localPlayerID)
     }
 
     func attach(to mesh: MemoryMesh) {

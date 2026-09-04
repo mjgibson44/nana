@@ -1,6 +1,7 @@
 import Foundation
 import GameKit
 import WordCore
+import WordNet
 
 #if os(iOS)
 import UIKit
@@ -8,10 +9,10 @@ import UIKit
 import AppKit
 #endif
 
-/// Forming a battle: getting from "I want to play with my friends" to a live
-/// `GKMatch` (plan §7.3).
+/// Forming a battle: getting from "I want to play" to a live `GKMatch`
+/// (plan §7.3).
 ///
-/// Two roads, ranked by what the player's OS can do:
+/// Three roads. Two are for friends, ranked by what the player's OS can do:
 ///
 ///  1. **Party codes (26+)** — `GKGameActivity` generates a short shareable
 ///     code and URL that the system understands, and `findMatch` turns the
@@ -23,6 +24,16 @@ import AppKit
 ///  2. **Invites (everywhere)** — `GKMatchmakerViewController` in invite-only
 ///     mode: friends, Messages threads, nearby players. Ships on every OS the
 ///     app supports, and stays the fallback below 26.
+///
+/// The third is for strangers:
+///
+///  3. **Random matches** — Game Center's rules-free automatch, headless, so
+///     the search is drawn in the game's own tiles rather than Apple's sheet.
+///     Duel and Party are separate pools (`MatchPool`), and so is every
+///     protocol version: with no sandbox, a newer build must never be paired
+///     with an older one. Nobody opens a random room, so nobody is its host
+///     until the sessions elect one (`BattleSession.becomeHost`), and nobody
+///     presses START: the host session deals on a rule (`AutoStartRule`).
 ///
 /// Everything the web game needed a broker, STUN and TURN for is Apple's
 /// problem from here.
@@ -37,6 +48,78 @@ import AppKit
 /// of it lives.
 private struct UncheckedBox<T>: @unchecked Sendable {
     let value: T
+}
+
+/// The two random matches on offer. A duel is exactly two; a party asks
+/// Game Center for at least three and holds its door open for more.
+enum RandomMatchKind: String, CaseIterable, Equatable {
+    case duel
+    case party
+
+    /// What the automatch request asks for. A party's floor is three
+    /// (`PARTY_MIN_PLAYERS`), though once formed it will still start with two
+    /// if a third came and went.
+    var minPlayers: Int {
+        switch self {
+        case .duel: return 2
+        case .party: return PARTY_MIN_PLAYERS
+        }
+    }
+
+    var maxPlayers: Int {
+        switch self {
+        case .duel: return 2
+        case .party: return BATTLE_MAX_PLAYERS
+        }
+    }
+
+    /// The rule the host session deals by.
+    var rule: AutoStartRule {
+        switch self {
+        case .duel: return .duel
+        case .party: return .party
+        }
+    }
+
+    /// The word the screens spell it as.
+    var word: String { rawValue.uppercased() }
+}
+
+/// How many a party asks Game Center to find before it forms at all.
+let PARTY_MIN_PLAYERS = 3
+
+/// Which automatch pool a search goes into. Game Center only ever pairs
+/// requests with the same `playerGroup`, so the group is the whole of the
+/// segregation: duel never meets party, and version 8 never meets version 7.
+enum MatchPool {
+    static func key(_ kind: RandomMatchKind, version: Int = PROTOCOL_VERSION) -> String {
+        "timetiles/\(kind.rawValue)/v\(version)"
+    }
+
+    /// FNV-1a, 32 bits. Not `hashValue`, which is seeded per process and
+    /// would put every device in a pool of its own. Never zero, which
+    /// GameKit reads as "no group at all".
+    static func stableHash(_ text: String) -> Int {
+        var hash: UInt32 = 0x811C_9DC5
+        for byte in text.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* 0x0100_0193
+        }
+        return Int(hash == 0 ? 1 : hash)
+    }
+
+    static func group(for kind: RandomMatchKind, version: Int = PROTOCOL_VERSION) -> Int {
+        stableHash(key(kind, version: version))
+    }
+
+    static func request(for kind: RandomMatchKind) -> GKMatchRequest {
+        let request = GKMatchRequest()
+        request.minPlayers = kind.minPlayers
+        request.maxPlayers = kind.maxPlayers
+        request.defaultNumberOfPlayers = kind.maxPlayers
+        request.playerGroup = group(for: kind)
+        return request
+    }
 }
 
 @MainActor
@@ -57,8 +140,93 @@ final class Matchmaking: NSObject {
     /// identifier configured there, the same way `LeaderboardID` must.
     static let battleActivityID = "battle"
 
+    /// How long a random match may spend connecting the players GameKit
+    /// found, and how long the roster must be quiet to count as formed.
+    static let formingCapSeconds: TimeInterval = 10
+    static let formingSettleSeconds: TimeInterval = 2
+
     private var continuation: CheckedContinuation<UncheckedBox<GKMatch>, Error>?
     private var presented: GKMatchmakerViewController?
+    /// Counts searches, so a match that lands for one the player already
+    /// backed out of is recognised and let go.
+    private var searchGeneration = 0
+
+    // MARK: Random matches — strangers
+
+    /// Find strangers to play. Returns a transport whose peers are connected
+    /// and ready for the sessions; cancelling the task cancels the search.
+    /// `onProgress` gets one line at a time for the search screen.
+    func findRandomMatch(
+        _ kind: RandomMatchKind,
+        onProgress: @escaping @MainActor (String) -> Void
+    ) async throws -> GameKitTransport {
+        searchGeneration += 1
+        let generation = searchGeneration
+        onProgress("Finding players…")
+
+        let request = MatchPool.request(for: kind)
+        let box: UncheckedBox<GKMatch> = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                GKMatchmaker.shared().findMatch(for: request) { match, error in
+                    if let match {
+                        continuation.resume(returning: UncheckedBox(value: match))
+                    } else {
+                        continuation.resume(throwing: Self.failure(from: error))
+                    }
+                }
+            }
+        } onCancel: {
+            GKMatchmaker.shared().cancel()
+        }
+        let match = box.value
+
+        // A search the player backed out of, or that another replaced.
+        guard generation == searchGeneration, !Task.isCancelled else {
+            match.disconnect()
+            throw Failure.cancelled
+        }
+
+        let transport = GameKitTransport(match: match)
+        do {
+            try await transport.awaitPeers(
+                atLeast: kind.minPlayers - 1,
+                settle: Self.formingSettleSeconds,
+                cap: Self.formingCapSeconds,
+                onProgress: onProgress)
+        } catch {
+            transport.disconnect()
+            throw error
+        }
+        return transport
+    }
+
+    /// Stop looking. Safe to call with nothing pending.
+    func cancelSearch() {
+        searchGeneration += 1
+        GKMatchmaker.shared().cancel()
+    }
+
+    /// A party's host asks GameKit to keep seating searchers from the same
+    /// pool while the door is open. Whether GameKit does this on its own
+    /// after `findMatch` returns is undocumented, so it is asked outright;
+    /// if nobody arrives the party starts regardless once its door goes quiet.
+    func keepFilling(_ transport: GameKitTransport, kind: RandomMatchKind) {
+        let request = MatchPool.request(for: kind)
+        GKMatchmaker.shared().addPlayers(to: transport.match, matchRequest: request) { _ in }
+    }
+
+    /// The door closes: no more players for this match. Every device says so
+    /// as its countdown begins.
+    func stopFilling(_ transport: GameKitTransport) {
+        GKMatchmaker.shared().finishMatchmaking(for: transport.match)
+    }
+
+    private static func failure(from error: Error?) -> Failure {
+        if let error = error as? GKError, error.code == .cancelled {
+            return .cancelled
+        }
+        return .failed(error?.localizedDescription ?? "Game Center couldn't find a match.")
+    }
 
     // MARK: Invites — the road that works everywhere
 

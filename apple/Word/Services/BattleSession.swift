@@ -12,6 +12,11 @@ import WordNet
 /// transport rather than making one: a `MemoryMesh` here makes a whole battle
 /// playable in tests, and the GameKit adapter becomes a drop-in that changes
 /// nothing below this line (plan §7.5 — only the adapter needs devices).
+///
+/// The role can change. A match of strangers has no natural host, so everyone
+/// starts as a client and the lowest id is told to take the chair
+/// (`becomeHost`); if two ever claim it, the higher one stands down
+/// (`yield`). A friends' lobby never does either — its host opened the room.
 @Observable @MainActor
 final class BattleSession {
     /// Who this player is in the match.
@@ -20,7 +25,17 @@ final class BattleSession {
         case client
     }
 
-    let role: Role
+    /// How long a random lobby's host sits with nobody else in it before the
+    /// app is told to look for another match instead.
+    static let aloneSeconds: TimeInterval = 10
+    /// How long a random match holds a dropped mid-game seat. Strangers have
+    /// no road back in, so a shorter grace than friends get.
+    static let strangerGraceSeconds: TimeInterval = 10
+
+    /// The rule a random match deals itself by; nil for a friends' lobby,
+    /// where the host presses START.
+    let autoStart: AutoStartRule?
+    private(set) var role: Role
     private(set) var state: BattleState?
     private(set) var hostID: PlayerID?
     /// Set when the host refuses us — a version mismatch or a full lobby.
@@ -31,18 +46,34 @@ final class BattleSession {
 
     private let clock: () -> Date
     private let transport: BattleTransport
-    private let host: HostSession?
-    private let client: ClientSession?
+    private let displayName: (PlayerID) -> String
+    private let makeSeed: () -> String
+    private let announceTimeout: TimeInterval
+    private var host: HostSession?
+    private var client: ClientSession?
     private weak var model: GameModel?
     private var ticker: Task<Void, Never>?
     /// The phase the last snapshot was in, so the finish is handled once, on
     /// the way in, rather than on every broadcast after it.
     private var lastPhase: BattlePhase?
+    /// Likewise for the countdown: its beginning is an event, its ticks are not.
+    private var lastCountdown: Int?
+    /// Since when this random lobby has had nobody in it but its host.
+    private var aloneSince: Date?
+    private var abandonedReported = false
 
     /// Told when a game starts, so the router can show the board.
     var onGameStart: (() -> Void)?
     /// Told when the host gathers everyone back to the lobby.
     var onReturnToLobby: (() -> Void)?
+    /// Told the moment a self-starting lobby begins counting down — the door
+    /// closes here, on every device.
+    var onCountdownBegin: (() -> Void)?
+    /// Told when this player takes the chair in a match nobody opened.
+    var onBecameHost: (() -> Void)?
+    /// Told when a random lobby has been empty but for us for a while: the
+    /// door is shut, so the only way on is another search.
+    var onAbandoned: (() -> Void)?
 
     init(
         role: Role,
@@ -53,25 +84,28 @@ final class BattleSession {
         /// One clock for the whole battle — the sessions' graces and pings,
         /// and the board's drip. Injectable so a test can play a three-minute
         /// battle without waiting three minutes.
-        clock: @escaping () -> Date = { .now }
+        clock: @escaping () -> Date = { .now },
+        autoStart: AutoStartRule? = nil,
+        announceTimeout: TimeInterval = HOST_ANNOUNCE_TIMEOUT_SECONDS
     ) {
         self.role = role
         self.transport = transport
         self.model = model
+        self.displayName = displayName
+        self.makeSeed = makeSeed
         self.clock = clock
+        self.autoStart = autoStart
+        self.announceTimeout = announceTimeout
 
         switch role {
         case .host:
-            let session = HostSession(
-                transport: transport, displayName: displayName, makeSeed: makeSeed,
-                clock: clock)
+            let session = makeHostSession()
             host = session
             client = nil
             hostID = session.selfID
             state = session.state
         case .client:
-            let session = ClientSession(transport: transport, clock: clock)
-            client = session
+            client = makeClientSession()
             host = nil
         }
 
@@ -86,6 +120,10 @@ final class BattleSession {
 
     var selfID: PlayerID { transport.localPlayerID }
     var isHost: Bool { role == .host }
+    /// Whether this match deals itself rather than waiting on a START.
+    var dealsItself: Bool { autoStart != nil }
+    /// Seconds until a self-starting lobby deals, while it's counting down.
+    var countdown: Int? { state?.countdown }
 
     /// This player's seat in the roster, if the host has told us about it.
     var selfSeat: BattlePlayer? {
@@ -100,7 +138,7 @@ final class BattleSession {
     }
 
     var canStart: Bool {
-        guard isHost, let state, state.phase == .lobby else { return false }
+        guard isHost, !dealsItself, let state, state.phase == .lobby else { return false }
         return state.players.filter { !$0.left }.count >= BATTLE_MIN_PLAYERS
     }
 
@@ -166,10 +204,16 @@ final class BattleSession {
     }
 
     func tick(at now: Date) {
+        // Taken before ticking: a tick can swap the role underneath itself
+        // (a client told to host, a host told to yield), and the session
+        // that was just replaced must not be driven again this pass.
+        let host = host
+        let client = client
         host?.tick(at: now)
         client?.tick(at: now)
-        if let client { isReconnecting = client.isReconnecting }
+        if let client = self.client { isReconnecting = client.isReconnecting }
         reportProgress()
+        watchForAbandonment(at: now)
     }
 
     func start() {
@@ -193,17 +237,34 @@ final class BattleSession {
         ticker?.cancel()
         ticker = nil
         client?.leave()
+        // Say so to the match as well as to the host: everyone else sees the
+        // seat empty now rather than when the transport notices on its own.
+        transport.disconnect()
         model?.onBattleAttack = nil
     }
 
     // MARK: Wiring
+
+    private func makeHostSession() -> HostSession {
+        HostSession(
+            transport: transport, displayName: displayName, makeSeed: makeSeed,
+            clock: clock, autoStart: autoStart,
+            graceSeconds: dealsItself ? Self.strangerGraceSeconds : RECONNECT_GRACE_SECONDS,
+            // A stranger who lands after the deal has nothing to watch for.
+            admitsMidGame: !dealsItself)
+    }
+
+    private func makeClientSession() -> ClientSession {
+        ClientSession(transport: transport, clock: clock, announceTimeout: announceTimeout)
+    }
 
     private func bind() {
         host?.events = HostEvents(
             onState: { [weak self] state in self?.adopt(state) },
             onStart: { [weak self] seed in self?.beginGame(seed: seed) },
             onStop: { [weak self] in self?.endGame() },
-            onAttack: { [weak self] count in self?.model?.receiveAttack(count) })
+            onAttack: { [weak self] count in self?.model?.receiveAttack(count) },
+            onYield: { [weak self] lower in self?.yield(to: lower) })
 
         client?.events = ClientEvents(
             onState: { [weak self] state in self?.adopt(state) },
@@ -211,16 +272,63 @@ final class BattleSession {
             onStop: { [weak self] in self?.endGame() },
             onAttack: { [weak self] count in self?.model?.receiveAttack(count) },
             onRejected: { [weak self] reason in self?.rejection = reason },
-            onHostElected: { [weak self] id in self?.hostID = id })
+            onHostElected: { [weak self] id in self?.hostID = id },
+            onShouldHost: { [weak self] in self?.becomeHost() })
     }
 
-    /// The host's latest snapshot. The one transition that reaches the board
-    /// is into `finished`: whoever is still standing is finished there too.
+    /// Nobody announced and we have the lowest id: take the chair. The
+    /// client session is dropped and a host session stood up on the same
+    /// transport, which re-takes the transport's handlers as it's built.
+    private func becomeHost() {
+        guard role == .client else { return }
+        client?.events = ClientEvents()
+        client = nil
+        let session = makeHostSession()
+        host = session
+        role = .host
+        hostID = session.selfID
+        rejection = nil
+        isReconnecting = false
+        lastPhase = nil
+        lastCountdown = nil
+        state = session.state
+        bind()
+        session.announceHost()
+        onBecameHost?()
+    }
+
+    /// Another referee with a lower id is out there: stand down and follow
+    /// them. Lowest id wins, on every device, so the two lobbies fold into
+    /// one without anyone talking about it.
+    private func yield(to lower: PlayerID) {
+        guard role == .host else { return }
+        host?.events = HostEvents()
+        host = nil
+        let session = makeClientSession()
+        client = session
+        role = .client
+        hostID = nil
+        lastPhase = nil
+        lastCountdown = nil
+        state = nil
+        aloneSince = nil
+        bind()
+        session.follow(host: lower)
+    }
+
+    /// The host's latest snapshot. Two transitions reach past the roster:
+    /// into `finished` (whoever is still standing is finished there too),
+    /// and into a countdown (the door closes).
     private func adopt(_ state: BattleState) {
-        let previous = lastPhase
+        let previousPhase = lastPhase
+        let previousCountdown = lastCountdown
         self.state = state
         lastPhase = state.phase
-        guard state.phase == .finished, previous != .finished else { return }
+        lastCountdown = state.countdown
+        if previousCountdown == nil, state.countdown != nil {
+            onCountdownBegin?()
+        }
+        guard state.phase == .finished, previousPhase != .finished else { return }
         model?.finishBattle(won: state.winnerId == selfID, players: contestants.count)
     }
 
@@ -252,5 +360,28 @@ final class BattleSession {
         let buried = model.isComplete && model.endReason == .buried
         host?.reportSelf(score: model.score, buried: buried, tiles: model.rack.count)
         client?.reportProgress(score: model.score, buried: buried, tiles: model.rack.count)
+    }
+
+    /// A random lobby whose host has been alone too long — the opponent
+    /// left, or never arrived — is reported once, so the app can search
+    /// again instead of leaving them staring at an empty room.
+    private func watchForAbandonment(at now: Date) {
+        guard dealsItself, isHost, !abandonedReported, let state, state.phase == .lobby else {
+            aloneSince = nil
+            return
+        }
+        let seated = state.players.filter { $0.connected && !$0.left }.count
+        guard seated < BATTLE_MIN_PLAYERS else {
+            aloneSince = nil
+            return
+        }
+        guard let since = aloneSince else {
+            aloneSince = now
+            return
+        }
+        if now.timeIntervalSince(since) >= Self.aloneSeconds {
+            abandonedReported = true
+            onAbandoned?()
+        }
     }
 }

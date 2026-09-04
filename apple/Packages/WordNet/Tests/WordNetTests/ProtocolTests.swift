@@ -26,8 +26,12 @@ struct WireProtocolTests {
             players: [BattlePlayer(id: "a", name: "Ann", host: true, score: 12, tiles: 3)],
             game: 2,
             winnerId: nil)
+        var countingDown = state
+        countingDown.phase = .lobby
+        countingDown.countdown = 3
         let messages: [HostMessage] = [
             .state(state),
+            .state(countingDown),
             .start(seed: "abc123def456"),
             .stop,
             .reject(reason: "full"),
@@ -60,8 +64,27 @@ struct WireProtocolTests {
         #expect(Wire.decode(ClientMessage.self, from: Data(#"{"t":"hello"}"#.utf8)) == nil)
     }
 
-    @Test func versionIsSixForTheHostAnnouncement() {
-        // v5 was the web's; the announcement is the one addition (plan §7.2).
-        #expect(PROTOCOL_VERSION == 6)
+    @Test func aSnapshotWithoutACountdownStillDecodes() throws {
+        // The countdown is an optional addition to the web's snapshot shape:
+        // a v6-shaped `state` — no `countdown` key at all — must decode to
+        // "no countdown", not fail.
+        let json = #"""
+            {"t":"state","state":{"phase":"lobby","game":0,"winnerId":null,
+             "players":[{"id":"a","name":"Ann","host":true,"score":0,"buried":false,
+                         "connected":true,"left":false,"waiting":false,"tiles":0}]}}
+            """#
+        let message = try #require(Wire.decode(HostMessage.self, from: Data(json.utf8)))
+        guard case let .state(state) = message else {
+            Issue.record("decoded as \(message), not a snapshot")
+            return
+        }
+        #expect(state.countdown == nil)
+        #expect(state.players.map(\.id) == ["a"])
+    }
+
+    @Test func versionIsSevenForTheCountdown() {
+        // v5 was the web's; v6 added the host announcement (plan §7.2); v7
+        // put the countdown in the snapshot.
+        #expect(PROTOCOL_VERSION == 7)
     }
 }

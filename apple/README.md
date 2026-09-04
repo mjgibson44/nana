@@ -157,7 +157,7 @@ actually play:
   so a held seat has to read as held, not gone.
 
 `GameKitTransport` implements `BattleTransport` over a real `GKMatch`, and
-`Matchmaking` forms one. Two roads in, ranked by what the OS can do (§7.3):
+`Matchmaking` forms one. Two roads in for friends, ranked by what the OS can do (§7.3):
 
 - **Party codes (26+)** — `GKGameActivity` issues a short shareable code and URL, and
   `findMatch` turns the party into a `GKMatch`. Worth knowing the code *format* is
@@ -165,6 +165,45 @@ actually play:
   letters don't apply here.
 - **Invites (everywhere)** — `GKMatchmakerViewController` in invite-only mode: friends,
   Messages threads, nearby players. The only road below 26, and the fallback above it.
+
+And a third for strangers — **random matches**, two buttons on the Battle screen:
+
+- **DUEL** is exactly two players; **PARTY** asks Game Center for at least three and
+  takes up to eight. Both go through Game Center's rules-free automatch, headless
+  (`GKMatchmaker.findMatch`), so the search is drawn in the game's own tiles and
+  CANCEL is `GKMatchmaker.cancel`. `GKMatchRequest.playerGroup` is the whole of the
+  pooling: a stable hash of `timetiles/<duel|party>/v<PROTOCOL_VERSION>` (`MatchPool`),
+  so a duel never meets a party and — with no sandbox — a newer build never meets an
+  older one.
+- **Nobody opened the room, so nobody is its host.** Everyone enters as a client; if no
+  `host` announcement arrives within a two-second claim window, the lowest
+  `gamePlayerID` stands up a host session in its client's place
+  (`BattleSession.becomeHost`, off `ClientEvents.onShouldHost`). Lowest id wins if two
+  ever claim: a client trades its host only for a lower announcer, and a host that
+  hears a lower one yields (`HostEvents.onYield`). The host repeats its announcement
+  once a second to anyone connected but unseated, and a client re-greets on any
+  announcement while the snapshot has no seat for it, so a hello that beat the host
+  session into existence is retried rather than lost. In the lobby a lost host simply
+  triggers another election; mid-game the lobby still dies with its host.
+- **Nobody presses START either.** The rule lives in `HostSession` (`AutoStartRule`):
+  a duel deals the moment its second seat fills; a party once `PARTY_IDLE_SECONDS`
+  (20) pass with nobody new arriving — and with two if a third came and went, rather
+  than stranding the pair. Either way a `START_COUNTDOWN_SECONDS` (5) countdown rides
+  the `state` snapshot (`BattleState.countdown`, the v7 wire change) so every screen
+  counts the same seconds; a field that shrinks below two cancels it. As the countdown
+  begins every device calls `finishMatchmaking`, closing the door; a party's host had
+  held it open with `addPlayers` until then. A random lobby whose host is left alone
+  for ten seconds is searched again automatically (`onAbandoned`).
+- Strangers get a shorter mid-game seat grace (10 s, not 30) and a lobby that turns
+  away anyone who lands after the deal, since there is no road back in for them.
+
+All of it above the adapter plays out over `MemoryMesh` in CI (`BattlePlayTests`,
+`SessionTests`). What only devices can answer: whether `findMatch` returns a party at
+three or waits to fill, whether GameKit keeps filling after it returns and whether
+`addPlayers` pairs with fresh searchers, how `expectedPlayerCount` behaves for a player
+who never connects (forming is settle-timer based, so it only affects the "N of M"
+line), whether `match.players` shrinks on a disconnect (the transport keeps its own
+set either way), and how the two-second claim plus five-second countdown feel.
 
 Everything the web game ran a broker, STUN and TURN for is Apple's problem from here.
 

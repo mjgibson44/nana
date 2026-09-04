@@ -1,6 +1,7 @@
 import Foundation
 import GameKit
 import WordCore
+import WordNet
 import XCTest
 
 @testable import Word
@@ -138,5 +139,52 @@ final class MatchmakingTests: XCTestCase {
         // Must match the activity configured in the GameKit bundle, the same
         // way the leaderboard ids must.
         XCTAssertEqual(Matchmaking.battleActivityID, "battle")
+    }
+
+    // MARK: Random matches
+
+    func testDuelAndPartyNeverShareAPool() {
+        XCTAssertNotEqual(MatchPool.group(for: .duel), MatchPool.group(for: .party))
+    }
+
+    func testThePoolChangesWithTheProtocolVersion() {
+        // No sandbox: a prerelease build meets released ones (TN2417). The
+        // version gate would refuse the pairing, but better never to be paired.
+        XCTAssertNotEqual(
+            MatchPool.group(for: .duel, version: PROTOCOL_VERSION),
+            MatchPool.group(for: .duel, version: PROTOCOL_VERSION + 1))
+        XCTAssertEqual(MatchPool.key(.party, version: 7), "timetiles/party/v7")
+    }
+
+    func testThePoolKeyIsStableAcrossLaunches() {
+        // FNV-1a's published vectors; `hashValue` would be seeded per process
+        // and put every device in a pool of its own.
+        XCTAssertEqual(MatchPool.stableHash(""), 0x811C_9DC5)
+        XCTAssertEqual(MatchPool.stableHash("a"), 0xE40C_292C)
+        XCTAssertEqual(MatchPool.stableHash("foobar"), 0xBF9C_F968)
+    }
+
+    func testAPoolKeyIsNeverZero() {
+        // Zero is "no group" to GameKit — every pool must be a real one.
+        for kind in RandomMatchKind.allCases {
+            XCTAssertNotEqual(MatchPool.group(for: kind), 0)
+        }
+        XCTAssertNotEqual(MatchPool.stableHash(""), 0)
+    }
+
+    func testTheRequestsCarryTheRightSizes() {
+        // A GKMatchRequest is a plain value; no account needed to read it.
+        let duel = MatchPool.request(for: .duel)
+        XCTAssertEqual(duel.minPlayers, 2)
+        XCTAssertEqual(duel.maxPlayers, 2)
+        XCTAssertNotEqual(duel.playerGroup, 0)
+
+        let party = MatchPool.request(for: .party)
+        XCTAssertEqual(party.minPlayers, PARTY_MIN_PLAYERS)
+        XCTAssertEqual(party.maxPlayers, BATTLE_MAX_PLAYERS)
+        XCTAssertEqual(party.playerGroup, MatchPool.group(for: .party))
+        XCTAssertEqual(RandomMatchKind.duel.rule, .duel)
+        XCTAssertEqual(RandomMatchKind.party.rule, .party)
+        XCTAssertEqual(RandomMatchKind.party.word, "PARTY")
     }
 }

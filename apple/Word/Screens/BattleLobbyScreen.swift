@@ -3,7 +3,8 @@ import WordCore
 import WordNet
 
 /// The room a battle is organised in: who's here, who referees, and the one
-/// button that starts it.
+/// button that starts it — or, in a match of strangers, the countdown that
+/// starts it by itself.
 ///
 /// The roster is the host's snapshot, so it is the same list on every screen —
 /// including the seats being *held* for someone whose connection dropped. A
@@ -17,6 +18,10 @@ struct BattleLobbyScreen: View {
     var isReconnecting: Bool
     /// Set when the host refused us — a version mismatch or a full lobby.
     var rejection: String?
+    /// Non-nil for a random match, which deals itself on this rule.
+    var autoStart: AutoStartRule? = nil
+    /// Seconds until a random match deals, while it's counting down.
+    var countdown: Int? = nil
     var onStart: () -> Void
     var onLeave: () -> Void
 
@@ -44,7 +49,21 @@ struct BattleLobbyScreen: View {
                 roster
                     .padding(.vertical, Spacing.tileGap)
 
-                if isHost {
+                if let countdown {
+                    // Decided: everyone's here, and the deal is seconds away.
+                    BigTile(text: "\(countdown)")
+                        .accessibilityLabel("Starting in \(countdown)")
+                    note("Starting…")
+                } else if let autoStart {
+                    switch autoStart {
+                    case .duel:
+                        note(
+                            players.count < BATTLE_MIN_PLAYERS
+                                ? "Waiting for an opponent…" : "Starting…")
+                    case .party:
+                        note("Starts \(Int(PARTY_IDLE_SECONDS)) seconds after the last player arrives.")
+                    }
+                } else if isHost {
                     TileWordButton(
                         text: "START", style: canStart ? .accentButton : .plain,
                         disabled: !canStart, action: onStart)

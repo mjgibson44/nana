@@ -1,15 +1,16 @@
 import GameKit
 import SwiftUI
 import WordCore
+import WordNet
 
 /// The app's one router state, plus the overlays each screen raises.
 enum Route: Equatable {
     case home
     /// Picking a Solo game's speed, on the way in.
     case soloSetup
-    /// Getting into a battle: opening a room or joining one.
+    /// Getting into a battle: finding strangers, opening a room, or joining one.
     case battleEntry
-    /// In a battle's lobby, waiting for the host to start.
+    /// In a battle's lobby, waiting for the host — or the countdown — to start it.
     case battleLobby
     case game
 }
@@ -32,6 +33,13 @@ struct RootView: View {
     @State private var partyCode: String?
     @State private var battleDoorNotice = false
     @State private var savedGame: SavedSoloGame?
+    /// The random match being looked for, while one is.
+    @State private var searching: RandomMatchKind?
+    @State private var searchStatus: String?
+    /// The road into a battle that's underway, so backing out can cancel it —
+    /// and a match that lands for an abandoned attempt is recognised as such.
+    @State private var setupTask: Task<Void, Never>?
+    @State private var setupGeneration = 0
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -56,11 +64,16 @@ struct RootView: View {
                 BattleEntryScreen(
                     supportsPartyCodes: Matchmaking.supportsPartyCodes,
                     partyCode: partyCode,
+                    searching: searching,
+                    searchStatus: searchStatus,
                     isBusy: battleBusy,
                     error: battleError,
                     onHost: hostBattle,
                     onJoin: joinBattle(code:),
                     onInvite: inviteToBattle,
+                    onDuel: { findRandom(.duel) },
+                    onParty: { findRandom(.party) },
+                    onCancelSearch: cancelSearch,
                     onClose: leaveBattle)
 
             case .battleLobby:
@@ -71,6 +84,8 @@ struct RootView: View {
                     canStart: battle?.canStart ?? false,
                     isReconnecting: battle?.isReconnecting ?? false,
                     rejection: battle?.rejection,
+                    autoStart: battle?.autoStart,
+                    countdown: battle?.countdown,
                     onStart: { battle?.start() },
                     onLeave: leaveBattle)
 
@@ -164,7 +179,7 @@ struct RootView: View {
             let (activity, code) = try await matchmaking.hostParty()
             partyCode = code
             let match = try await matchmaking.match(for: activity)
-            return (match, .host)
+            return (GameKitTransport(match: match), .host, nil)
         }
     }
 
@@ -173,7 +188,7 @@ struct RootView: View {
         runBattleSetup {
             let activity = try await matchmaking.joinParty(code: code)
             let match = try await matchmaking.match(for: activity)
-            return (match, .client)
+            return (GameKitTransport(match: match), .client, nil)
         }
     }
 
@@ -182,48 +197,115 @@ struct RootView: View {
     private func inviteToBattle() {
         runBattleSetup {
             let match = try await matchmaking.findMatchByInvite()
-            return (match, .host)
+            return (GameKitTransport(match: match), .host, nil)
         }
+    }
+
+    /// Strangers. Nobody opened this room, so everyone enters as a client and
+    /// the sessions elect a referee among themselves; the match then deals
+    /// itself on the kind's rule.
+    private func findRandom(_ kind: RandomMatchKind) {
+        searching = kind
+        searchStatus = "Finding players…"
+        runBattleSetup {
+            let transport = try await matchmaking.findRandomMatch(kind) { status in
+                searchStatus = status
+            }
+            return (transport, .client, kind)
+        }
+    }
+
+    /// Back out of a search, staying on the entry screen.
+    private func cancelSearch() {
+        abandonSetup()
+        matchmaking.cancelSearch()
+        searching = nil
+        searchStatus = nil
+        battleBusy = false
+    }
+
+    /// The room emptied out around us and its door is shut: look again for
+    /// the same kind of match rather than leave the player in an empty lobby.
+    private func searchAgain(_ kind: RandomMatchKind) {
+        battle?.leave()
+        battle = nil
+        route = .battleEntry
+        battleError = "Nobody else is here any more."
+        findRandom(kind)
     }
 
     /// The shared shape of every road in: show it's working, form a match,
-    /// build the session, land in the lobby.
+    /// build the session, land in the lobby. Only the newest attempt gets to
+    /// touch the screen — an older one that finishes late is let go.
     private func runBattleSetup(
-        _ form: @escaping () async throws -> (GKMatch, BattleSession.Role)
+        _ form: @escaping () async throws -> (GameKitTransport, BattleSession.Role, RandomMatchKind?)
     ) {
+        abandonSetup()
+        let generation = setupGeneration
         battleBusy = true
-        battleError = nil
-        Task {
+        setupTask = Task {
             do {
-                let (match, role) = try await form()
-                startBattle(match: match, role: role)
+                let (transport, role, kind) = try await form()
+                guard generation == setupGeneration else {
+                    transport.disconnect()
+                    return
+                }
+                startBattle(transport: transport, role: role, kind: kind)
             } catch let failure as Matchmaking.Failure {
+                guard generation == setupGeneration else { return }
                 partyCode = nil
-                if case .cancelled = failure {
+                switch failure {
+                case .cancelled:
                     // Backing out of matchmaking isn't an error worth saying.
-                    battleError = nil
-                } else if case let .unavailable(message) = failure {
-                    battleError = message
-                } else if case let .failed(message) = failure {
+                    break
+                case let .unavailable(message), let .failed(message):
                     battleError = message
                 }
+            } catch is CancellationError {
+                // Backed out; the state was reset by whoever cancelled.
+                return
             } catch {
+                guard generation == setupGeneration else { return }
                 partyCode = nil
                 battleError = error.localizedDescription
             }
+            guard generation == setupGeneration else { return }
             battleBusy = false
+            searching = nil
+            searchStatus = nil
         }
     }
 
-    private func startBattle(match: GKMatch, role: BattleSession.Role) {
-        let transport = GameKitTransport(match: match)
+    /// Cancel whatever road in is underway, and make sure it can't land later.
+    private func abandonSetup() {
+        setupTask?.cancel()
+        setupTask = nil
+        setupGeneration += 1
+        battleError = nil
+    }
+
+    private func startBattle(
+        transport: GameKitTransport, role: BattleSession.Role, kind: RandomMatchKind?
+    ) {
         let session = BattleSession(
             role: role,
             transport: transport,
             model: model,
-            displayName: { transport.displayName(for: $0) })
+            displayName: { transport.displayName(for: $0) },
+            autoStart: kind?.rule,
+            announceTimeout: kind == nil
+                ? HOST_ANNOUNCE_TIMEOUT_SECONDS : HOST_CLAIM_TIMEOUT_SECONDS)
         session.onGameStart = { route = .game }
         session.onReturnToLobby = { route = .battleLobby }
+        if let kind {
+            // The door closes on every device as the countdown begins; a
+            // party's host holds it open until then.
+            session.onCountdownBegin = { matchmaking.stopFilling(transport) }
+            session.onBecameHost = {
+                if kind == .party { matchmaking.keepFilling(transport, kind: kind) }
+            }
+            session.onAbandoned = { searchAgain(kind) }
+        }
         session.run()
         battle = session
         route = .battleLobby
@@ -232,11 +314,15 @@ struct RootView: View {
     /// Out of a battle by any road — backing out of the entry screen, leaving
     /// the lobby, or quitting a game.
     private func leaveBattle() {
+        abandonSetup()
+        matchmaking.cancelSearch()
         battle?.leave()
         battle = nil
         partyCode = nil
         battleError = nil
         battleBusy = false
+        searching = nil
+        searchStatus = nil
         route = .home
     }
 

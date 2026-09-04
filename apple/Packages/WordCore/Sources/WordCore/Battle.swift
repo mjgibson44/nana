@@ -65,12 +65,21 @@ public struct BattleState: Codable, Equatable {
     public var game: Int
     /// Who won, once the phase is 'finished'. Nil for a draw.
     public var winnerId: String?
+    /// Seconds until a self-starting lobby deals — a random match counting
+    /// down once everyone is here. Nil whenever no countdown is running. An
+    /// Apple-side addition (the web's snapshot has no such field); optional,
+    /// so a snapshot without it decodes exactly as before.
+    public var countdown: Int?
 
-    public init(phase: BattlePhase, players: [BattlePlayer], game: Int, winnerId: String?) {
+    public init(
+        phase: BattlePhase, players: [BattlePlayer], game: Int, winnerId: String?,
+        countdown: Int? = nil
+    ) {
         self.phase = phase
         self.players = players
         self.game = game
         self.winnerId = winnerId
+        self.countdown = countdown
     }
 }
 

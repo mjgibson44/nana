@@ -4,17 +4,21 @@ import WordCore
 /// The wire protocol, ported from `src/net/battleSession.ts` (spec:
 /// `docs/apple-port-notes/protocol.md` §1).
 ///
-/// **Version 6**, up from the web's 5, for exactly one addition: `host`.
-/// On the web the join code *is* the host's address, so a client always knows
-/// whom to `hello`. A GKMatch formed from a party code is a mesh with no marked
-/// owner, so the lobby's creator announces itself and late joiners are told
-/// again; clients that hear nothing fall back to the lowest player id
-/// (plan §7.2).
+/// **Version 7.** Two steps up from the web's 5:
+///
+///  - v6 added `host`. On the web the join code *is* the host's address, so a
+///    client always knows whom to `hello`. A GKMatch formed from a party code
+///    is a mesh with no marked owner, so the lobby's creator announces itself
+///    and late joiners are told again; clients that hear nothing fall back to
+///    the lowest player id (plan §7.2).
+///  - v7 added `countdown` to the `state` snapshot: a random match deals
+///    itself once everyone is here, and the seconds left ride the snapshot
+///    every screen already shows rather than a message of their own.
 ///
 /// The version gate is load-bearing rather than ceremonial: there has been no
 /// Game Center sandbox since 2016 (TN2417), so a prerelease build can and will
 /// meet a released one.
-public let PROTOCOL_VERSION = 6
+public let PROTOCOL_VERSION = 7
 
 /// Who a message is from or to. Maps to `GKPlayer.gamePlayerID` — the stable
 /// per-game identity that replaces the web's sessionStorage `playerKey`.

@@ -158,25 +158,64 @@ final class ScreenSnapshotTests: XCTestCase {
                 state: state, selfID: "a", isHost: true, canStart: true,
                 isReconnecting: false, rejection: nil, onStart: {}, onLeave: {}),
             name: "battle-lobby-host")
+
+        // A match of strangers: no START for anyone, the door's rule instead,
+        // and then the countdown.
+        let party = BattleState(
+            phase: .lobby,
+            players: [
+                BattlePlayer(id: "a", name: "Ada", host: true),
+                BattlePlayer(id: "b", name: "Grace"),
+                BattlePlayer(id: "c", name: "Katherine"),
+            ],
+            game: 0,
+            winnerId: nil)
+        try render(
+            BattleLobbyScreen(
+                state: party, selfID: "a", isHost: true, canStart: false,
+                isReconnecting: false, rejection: nil, autoStart: .party, countdown: nil,
+                onStart: {}, onLeave: {}),
+            name: "battle-lobby-party")
+        var counting = party
+        counting.countdown = 3
+        try render(
+            BattleLobbyScreen(
+                state: counting, selfID: "b", isHost: false, canStart: false,
+                isReconnecting: false, rejection: nil, autoStart: .party, countdown: 3,
+                onStart: {}, onLeave: {}),
+            name: "battle-lobby-countdown")
     }
 
     func testBattleEntryRenders() throws {
         try render(
             BattleEntryScreen(
-                supportsPartyCodes: true, partyCode: "ABC-DEF", isBusy: true, error: nil,
-                onHost: {}, onJoin: { _ in }, onInvite: {}, onClose: {}),
+                supportsPartyCodes: true, partyCode: "ABC-DEF", searching: nil,
+                searchStatus: nil, isBusy: true, error: nil,
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
+                onCancelSearch: {}, onClose: {}),
             name: "battle-entry-hosting")
         try render(
             BattleEntryScreen(
-                supportsPartyCodes: true, partyCode: nil, isBusy: false, error: nil,
-                onHost: {}, onJoin: { _ in }, onInvite: {}, onClose: {}),
+                supportsPartyCodes: true, partyCode: nil, searching: nil,
+                searchStatus: nil, isBusy: false, error: nil,
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
+                onCancelSearch: {}, onClose: {}),
             name: "battle-entry")
         try render(
             BattleEntryScreen(
-                supportsPartyCodes: false, partyCode: nil, isBusy: false,
+                supportsPartyCodes: false, partyCode: nil, searching: nil,
+                searchStatus: nil, isBusy: false,
                 error: "Game Center couldn’t open matchmaking.",
-                onHost: {}, onJoin: { _ in }, onInvite: {}, onClose: {}),
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
+                onCancelSearch: {}, onClose: {}),
             name: "battle-entry-invites")
+        try render(
+            BattleEntryScreen(
+                supportsPartyCodes: true, partyCode: nil, searching: .party,
+                searchStatus: "Connecting 2 of 3…", isBusy: true, error: nil,
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
+                onCancelSearch: {}, onClose: {}),
+            name: "battle-entry-searching")
     }
 
     func testOverlaysRender() throws {

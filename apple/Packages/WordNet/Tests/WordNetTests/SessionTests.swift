@@ -40,13 +40,21 @@ final class Lobby {
         set { simulated.now = newValue }
     }
 
-    init(hostID: PlayerID = "host", seed: String = "seedseedseed") {
+    init(
+        hostID: PlayerID = "host", seed: String = "seedseedseed",
+        autoStart: AutoStartRule? = nil,
+        graceSeconds: TimeInterval = RECONNECT_GRACE_SECONDS,
+        admitsMidGame: Bool = true
+    ) {
         hostTransport = mesh.add(hostID)
         host = HostSession(
             transport: hostTransport,
             displayName: { "Player \($0)" },
             makeSeed: { seed },
-            clock: { [simulated] in simulated.now })
+            clock: { [simulated] in simulated.now },
+            autoStart: autoStart,
+            graceSeconds: graceSeconds,
+            admitsMidGame: admitsMidGame)
         host.events.onAttack = { [weak self] count in self?.hostAttacks.append(count) }
         host.events.onStart = { [weak self] seed in self?.hostSeeds.append(seed) }
         mesh.connect(hostID)
@@ -81,6 +89,14 @@ final class Lobby {
 
     func seat(_ id: PlayerID) -> BattlePlayer? {
         host.state.players.first { $0.id == id }
+    }
+
+    /// How many times the host has told `player` who referees.
+    func announcements(to player: PlayerID) -> Int {
+        hostTransport.sentMessages(HostMessage.self).filter {
+            if case .host = $0.message { return $0.to == [player] }
+            return false
+        }.count
     }
 }
 
@@ -444,6 +460,33 @@ struct GraceTests {
         #expect(lobby.host.gracedSeats.contains("ann"))
     }
 
+    @Test func aRandomMatchHoldsADroppedSeatForLess() {
+        // Strangers have no road back in, so their seat is held for a shorter
+        // grace than friends get — an init parameter, not a second constant.
+        let lobby = Lobby(graceSeconds: 10)
+        lobby.addClient("ann")
+        lobby.addClient("bea")
+        lobby.host.start()
+        lobby.mesh.drop("ann")
+
+        lobby.advance(9)
+        #expect(lobby.seat("ann")?.left == false)
+        lobby.advance(2)
+        #expect(lobby.seat("ann")?.left == true)
+    }
+
+    @Test func disconnectingDropsAPlayerFromTheMesh() {
+        // Leaving for good is a transport-level act: everyone else sees the
+        // player go, the way GKMatch.disconnect shows a departure.
+        let lobby = Lobby()
+        let client = lobby.addClient("ann")
+        client.leave()
+        lobby.clientTransports["ann"]?.disconnect()
+
+        #expect(lobby.host.state.players.map(\.id) == ["host"])
+        #expect(lobby.hostTransport.remotePlayerIDs.contains("ann") == false)
+    }
+
     @Test func theHeartbeatDrawsPongsThatKeepASeatAlive() {
         let lobby = Lobby()
         lobby.addClient("ann")
@@ -554,6 +597,293 @@ struct HostElectionTests {
             (lobby.clientTransports["ann"]?.sent ?? []).dropFirst(sentBeforeHostDeath).map(\.to)
         let addressedTheDeadHost = sentAfterHostDeath.contains { $0.contains("host") }
         #expect(addressedTheDeadHost == false)
+    }
+
+    @Test func aMidGameHostLossStillHoldsTheSeatAndElectsNobody() {
+        let lobby = Lobby()
+        let ann = lobby.addClient("ann")
+        lobby.addClient("bea")
+        var askedToHost = false
+        ann.events.onShouldHost = { askedToHost = true }
+        lobby.host.start()
+
+        lobby.mesh.drop("host")
+        #expect(ann.isReconnecting)
+        // Long past any election window: a game in progress never elects.
+        for _ in 0..<10 { lobby.advance(1) }
+        #expect(ann.hostID == nil)
+        #expect(askedToHost == false)
+    }
+
+    // MARK: A match nobody opened
+
+    @Test func theLowestIDIsToldToHost() {
+        // Automatch pairs strangers with no natural host: everyone starts as
+        // a client, and after the claim window the lowest id is told to
+        // stand up a host session — once, and only that one.
+        let mesh = MemoryMesh()
+        let clock = SimulatedClock(Date(timeIntervalSince1970: 500))
+        var asked: [PlayerID] = []
+        let ids: [PlayerID] = ["cal", "ann", "bea"]
+        var clients: [PlayerID: ClientSession] = [:]
+        for id in ids {
+            let client = ClientSession(
+                transport: mesh.add(id), clock: { clock.now },
+                announceTimeout: HOST_CLAIM_TIMEOUT_SECONDS)
+            client.events.onShouldHost = { asked.append(id) }
+            clients[id] = client
+        }
+        for id in ids { mesh.connect(id) }
+
+        clock.now = clock.now.addingTimeInterval(HOST_CLAIM_TIMEOUT_SECONDS - 0.1)
+        for client in clients.values { client.tick(at: clock.now) }
+        #expect(asked.isEmpty, "the announcement might still be coming")
+
+        clock.now = clock.now.addingTimeInterval(0.1)
+        for client in clients.values { client.tick(at: clock.now) }
+        #expect(asked == ["ann"])
+        #expect(clients["bea"]?.hostID == "ann")
+        #expect(clients["cal"]?.hostID == "ann")
+
+        clock.now = clock.now.addingTimeInterval(1)
+        for client in clients.values { client.tick(at: clock.now) }
+        #expect(asked == ["ann"], "told once per election, not once per tick")
+    }
+
+    @Test func aHelloThatBeatTheHostIsRetriedOnReannounce() {
+        // Bea elects Ann and says hello before Ann's device has stood up its
+        // host session — the hello lands on nothing. The host's repeat to
+        // whoever hasn't sat down, and the client's re-greet on hearing it,
+        // heal that within a tick.
+        let mesh = MemoryMesh()
+        let clock = SimulatedClock(Date(timeIntervalSince1970: 500))
+        let annTransport = mesh.add("ann")
+        let bea = ClientSession(
+            transport: mesh.add("bea"), clock: { clock.now },
+            announceTimeout: HOST_CLAIM_TIMEOUT_SECONDS)
+        mesh.connect("ann")
+        mesh.connect("bea")
+
+        clock.now = clock.now.addingTimeInterval(HOST_CLAIM_TIMEOUT_SECONDS)
+        bea.tick(at: clock.now)
+        #expect(bea.hostID == "ann")
+        #expect(bea.state == nil, "the hello went into the void")
+
+        let ann = HostSession(
+            transport: annTransport, displayName: { $0 }, makeSeed: { "s" },
+            clock: { clock.now })
+        ann.tick(at: clock.now)
+        #expect(ann.state.players.map(\.id) == ["ann", "bea"])
+        #expect(bea.state?.players.count == 2)
+    }
+
+    @Test func theHostKeepsAnnouncingToWhoeverHasNotSatDown() {
+        let lobby = Lobby()
+        // A connected player that never says hello.
+        lobby.mesh.join("mute")
+        #expect(lobby.announcements(to: "mute") == 1, "told on arrival")
+
+        // Half-second ticks for three seconds: once a second, not once a tick.
+        for _ in 0..<6 { lobby.advance(0.5) }
+        let repeats = lobby.announcements(to: "mute")
+        #expect(repeats >= 3 && repeats <= 5, "was \(repeats)")
+
+        // Seated players are left alone.
+        lobby.addClient("ann")
+        let toAnn = lobby.announcements(to: "ann")
+        lobby.advance(3)
+        #expect(lobby.announcements(to: "ann") == toAnn)
+    }
+
+    @Test func aRejectedPeerIsNotNagged() throws {
+        let lobby = Lobby()
+        let transport = lobby.mesh.join("oldbuild")
+        transport.send(
+            try #require(Wire.encode(ClientMessage.hello(proto: PROTOCOL_VERSION - 1))),
+            to: ["host"])
+        let told = lobby.announcements(to: "oldbuild")
+        lobby.advance(3)
+        #expect(lobby.announcements(to: "oldbuild") == told)
+    }
+
+    @Test func aClientOnlySwitchesToALowerAnnouncer() throws {
+        // Two referees can only meet in a match nobody opened; the lowest
+        // id wins, so a live host is traded for a lower one and never a
+        // higher one.
+        let lobby = Lobby(hostID: "mmm")
+        let client = lobby.addClient("ppp")
+        #expect(client.hostID == "mmm")
+        let announcement = try #require(Wire.encode(HostMessage.host(proto: PROTOCOL_VERSION)))
+
+        lobby.mesh.join("zzz").send(announcement, to: ["ppp"])
+        #expect(client.hostID == "mmm")
+
+        lobby.mesh.join("aaa").send(announcement, to: ["ppp"])
+        #expect(client.hostID == "aaa")
+    }
+
+    @Test func aHostYieldsToALowerAnnouncer() throws {
+        let lobby = Lobby(hostID: "mmm")
+        var yieldedTo: [PlayerID] = []
+        lobby.host.events.onYield = { yieldedTo.append($0) }
+        let announcement = try #require(Wire.encode(HostMessage.host(proto: PROTOCOL_VERSION)))
+
+        lobby.mesh.join("zzz").send(announcement, to: ["mmm"])
+        #expect(yieldedTo.isEmpty, "a higher id yields to us, not the other way round")
+
+        lobby.mesh.join("aaa").send(announcement, to: ["mmm"])
+        #expect(yieldedTo == ["aaa"])
+    }
+
+    @Test func aLobbyHostLeavingTriggersAFreshElection() {
+        // Nothing is lost by choosing again in the lobby, and for strangers
+        // the alternative is a room that reads "reconnecting" forever.
+        let lobby = Lobby()
+        let ann = lobby.addClient("ann")
+        let bea = lobby.addClient("bea")
+        var askedToHost = false
+        ann.events.onShouldHost = { askedToHost = true }
+
+        lobby.mesh.drop("host")
+        #expect(ann.hostID == nil)
+        #expect(ann.isReconnecting == false, "a lobby loss is not a reconnection")
+        #expect(bea.isReconnecting == false)
+
+        lobby.advance(HOST_ANNOUNCE_TIMEOUT_SECONDS)
+        #expect(askedToHost)
+        #expect(bea.hostID == "ann")
+    }
+}
+
+@Suite("Auto-start: duel and party")
+@MainActor
+struct AutoStartTests {
+    @Test func aLobbyWithNoRuleNeverDealsItself() {
+        let lobby = Lobby()
+        lobby.addClient("ann")
+        for _ in 0..<12 { lobby.advance(5) }
+        #expect(lobby.host.state.phase == .lobby)
+        #expect(lobby.host.state.countdown == nil)
+    }
+
+    @Test func aDuelCountsDownTheMomentTheSecondSeatFills() {
+        let lobby = Lobby(autoStart: .duel)
+        lobby.advance(5)
+        #expect(lobby.host.state.countdown == nil, "one player is not a duel")
+
+        let client = lobby.addClient("ann")
+        lobby.advance(0.5)
+        #expect(lobby.host.state.countdown == START_COUNTDOWN_SECONDS)
+        #expect(client.state?.countdown == START_COUNTDOWN_SECONDS, "the countdown rides the snapshot")
+    }
+
+    @Test func theCountdownTicksOncePerSecondThenDeals() {
+        let lobby = Lobby(autoStart: .duel)
+        let client = lobby.addClient("ann")
+        lobby.advance(0.5)
+
+        var shown: [Int?] = []
+        for _ in 0..<4 {
+            lobby.advance(1)
+            shown.append(lobby.host.state.countdown)
+        }
+        #expect(shown == [4, 3, 2, 1])
+        #expect(lobby.host.state.phase == .lobby)
+
+        lobby.advance(1)
+        #expect(lobby.host.state.phase == .playing)
+        #expect(lobby.host.state.countdown == nil)
+        #expect(lobby.hostSeeds.count == 1)
+        #expect(lobby.seedsReceived["ann"]?.count == 1)
+        #expect(client.state?.countdown == nil)
+    }
+
+    @Test func aDropBelowTwoCancelsTheCountdown() {
+        let lobby = Lobby(autoStart: .duel)
+        lobby.addClient("ann")
+        lobby.advance(0.5)
+        #expect(lobby.host.state.countdown != nil)
+
+        lobby.mesh.drop("ann")
+        lobby.advance(0.5)
+        #expect(lobby.host.state.countdown == nil)
+        #expect(lobby.host.state.phase == .lobby)
+
+        // Long after the countdown would have dealt: still nothing.
+        lobby.advance(10)
+        #expect(lobby.host.state.phase == .lobby)
+        #expect(lobby.hostSeeds.isEmpty)
+    }
+
+    @Test func aPartyWaitsForTheDoorToGoQuiet() {
+        let lobby = Lobby(autoStart: .party)
+        lobby.addClient("ann")
+        lobby.addClient("bea")
+        lobby.advance(PARTY_IDLE_SECONDS - 1)
+        #expect(lobby.host.state.countdown == nil, "the door is still open")
+
+        // A fourth arrival resets the clock.
+        lobby.addClient("cal")
+        lobby.advance(PARTY_IDLE_SECONDS - 1)
+        #expect(lobby.host.state.countdown == nil)
+
+        lobby.advance(2)
+        #expect(lobby.host.state.countdown == START_COUNTDOWN_SECONDS)
+        lobby.advance(Double(START_COUNTDOWN_SECONDS))
+        #expect(lobby.host.state.phase == .playing)
+        #expect(lobby.host.state.players.count == 4)
+    }
+
+    @Test func aPartyStartsWithTwoIfSomeoneBailed() {
+        // Three asked for, but a departure neither resets the door's clock
+        // nor strands the pair left behind.
+        let lobby = Lobby(autoStart: .party)
+        lobby.addClient("ann")
+        lobby.addClient("bea")
+        lobby.advance(15)
+        lobby.mesh.drop("bea")
+        #expect(lobby.host.state.players.count == 2)
+
+        lobby.advance(4)
+        #expect(lobby.host.state.countdown == nil)
+        lobby.advance(1.5)
+        #expect(lobby.host.state.countdown == START_COUNTDOWN_SECONDS)
+    }
+
+    @Test func aPartyWithOneSeatKeepsWaiting() {
+        let lobby = Lobby(autoStart: .party)
+        for _ in 0..<12 { lobby.advance(5) }
+        #expect(lobby.host.state.countdown == nil)
+        #expect(lobby.host.state.phase == .lobby)
+    }
+
+    @Test func stopGivesAPartyItsBreatherAgain() {
+        let lobby = Lobby(autoStart: .party)
+        lobby.addClient("ann")
+        lobby.advance(PARTY_IDLE_SECONDS + 0.5)
+        lobby.advance(Double(START_COUNTDOWN_SECONDS))
+        #expect(lobby.host.state.phase == .playing)
+
+        lobby.host.stop()
+        #expect(lobby.host.state.phase == .lobby)
+        #expect(lobby.host.state.countdown == nil)
+        lobby.advance(PARTY_IDLE_SECONDS - 1)
+        #expect(lobby.host.state.countdown == nil, "back in the lobby, the door reopens for a while")
+        lobby.advance(2)
+        #expect(lobby.host.state.countdown == START_COUNTDOWN_SECONDS)
+    }
+
+    @Test func aRandomLobbyTurnsAwayAMidGameArrival() {
+        let lobby = Lobby(autoStart: .duel, admitsMidGame: false)
+        lobby.addClient("ann")
+        lobby.advance(0.5)
+        lobby.advance(Double(START_COUNTDOWN_SECONDS))
+        #expect(lobby.host.state.phase == .playing)
+
+        let late = lobby.addClient("late")
+        #expect(late.isRejected)
+        #expect(lobby.rejections["late"]?.count == 1)
+        #expect(lobby.host.state.players.map(\.id) == ["host", "ann"])
     }
 }
 
