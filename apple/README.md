@@ -246,6 +246,15 @@ three distribution certificates to go around. Note that `.release/` is otherwise
 output: `release.sh` only clears the archive and export directories inside it, but a
 blanket `rm -rf apple/.release` takes the key with it.
 
+The export signs **manually** on the runner. Under automatic signing, an API key with
+no Apple ID behind it makes Xcode reach for Apple's *cloud-managed* distribution
+certificate, and the export dies with "Cloud signing permission error" when the key
+isn't allowed one — then finds no App Store profile to fall back on. So
+[`tools/ensure-profile.py`](tools/ensure-profile.py) finds or creates an App Store
+provisioning profile through the API, paired with whichever distribution certificate
+is actually in the keychain, installs it, and `release.sh` names it in the export
+options. A laptop signed into Xcode with no API key still exports automatically.
+
 Two things the runner can't do:
 
 - **The Mac build.** A `.pkg` needs a Mac Installer Distribution certificate as well as

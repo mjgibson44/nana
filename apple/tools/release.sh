@@ -95,6 +95,29 @@ xcodebuild archive \
   ${AUTH[@]+"${AUTH[@]}"} \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
+# How the export signs. With an API key and no Apple ID signed into Xcode,
+# automatic signing reaches for Apple's cloud-managed distribution certificate
+# and fails if the key isn't allowed one ("Cloud signing permission error") —
+# which is the runner's situation. So on iOS the export signs *manually*, with
+# the distribution certificate in the keychain and an App Store profile that
+# ensure-profile.py finds or creates through the API. If that can't be done
+# (no API key, no matching certificate — a laptop signed into Xcode, say),
+# automatic signing is left to work the way it always has.
+SIGNING=""
+if [ "$PLATFORM" = "ios" ] && [ ${#AUTH[@]} -gt 0 ]; then
+  if PROFILE="$("${HERE}/ensure-profile.py" ios)"; then
+    echo "==> Signing with the keychain's distribution certificate and profile \"${PROFILE}\""
+    SIGNING="	<key>signingStyle</key><string>manual</string>
+	<key>signingCertificate</key><string>Apple Distribution</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>dev.nana.TimeTiles</key><string>${PROFILE}</string>
+	</dict>"
+  else
+    echo "==> No App Store profile could be ensured; exporting with automatic signing."
+  fi
+fi
+
 cat > "${BUILD_DIR}/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -104,6 +127,7 @@ cat > "${BUILD_DIR}/ExportOptions.plist" <<PLIST
 	<key>teamID</key><string>${TEAM}</string>
 	<key>uploadSymbols</key><true/>
 	<key>destination</key><string>export</string>
+${SIGNING}
 </dict>
 </plist>
 PLIST
