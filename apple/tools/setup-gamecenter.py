@@ -3,12 +3,11 @@
 
 The plan (§12) wants this config reviewable in the repo rather than clicked
 into a web form, and it has to stay in lockstep with the identifiers the app
-submits against — `LeaderboardID`, `AchievementID` and
-`Matchmaking.battleActivityID`. A drifted identifier doesn't fail loudly; the
+submits against — `LeaderboardID` and `Matchmaking.battleActivityID`. A drifted identifier doesn't fail loudly; the
 score just silently never appears.
 
 Idempotent: anything already present is left alone, so it's safe to re-run
-after adding a leaderboard or an achievement.
+after adding a leaderboard.
 
     ./apple/tools/setup-gamecenter.py            # create what's missing
     ./apple/tools/setup-gamecenter.py --dry-run  # just report
@@ -55,30 +54,6 @@ LEADERBOARDS = [
     {"id": "battle.wins", "name": "Battle Wins", "ref": "Battle Wins"},
 ]
 
-# --- Achievements (AchievementID) -------------------------------------------
-#
-# Points must total <= 1000 across at most 100 achievements. Fifteen at
-# varying weights, leaning heavier on the ones that take a while.
-
-ACHIEVEMENTS = [
-    ("first.solo", "First Deal", "Finish your first Solo game.", 10),
-    ("tutorial.done", "Shown the Ropes", "Finish the tutorial.", 10),
-    ("gap.tile", "Borrowed Letter", "Play a word through a gap tile.", 20),
-    ("word.eight", "Eight Across", "Place an eight-letter word.", 40),
-    ("pile.clearer", "Clean Sweep", "Clear the board 3 times in one Solo game.", 50),
-    ("comeback", "Dug Out", "Come back from over the limit in Solo.", 30),
-    ("fast.500", "Quick Study", "Score 500 in Solo Fast.", 50),
-    ("games.100", "Regular", "Finish 100 games.", 100),
-    ("daily.week", "Seven Days", "Play 7 Daily Deals in a row.", 75),
-    ("battle.first", "Last One Standing", "Win a battle.", 40),
-    ("battle.backtoback", "Back to Back", "Win two battles in a row.", 60),
-    ("battle.fullfield", "Full House", "Win a battle with a full field of 8.", 75),
-    ("battle.finalround", "Down to Two", "Survive to a battle's final round.", 30),
-    ("battle.clean", "Never Flustered", "Win a battle without ever passing 15 pile tiles.", 60),
-    ("battle.attack", "Heavy Weather", "Send 25 attack tiles in one game.", 50),
-]
-
-
 def main():
     app_id = asc.app_id()
     if not app_id:
@@ -97,7 +72,6 @@ def main():
 
     ensure_activity(gc)
     ensure_leaderboards(gc)
-    ensure_achievements(gc)
 
 
 def existing(gc, kind, key="vendorIdentifier"):
@@ -186,36 +160,6 @@ def ensure_leaderboards(gc):
                          "attributes": {"locale": "en-US", "name": board["name"]},
                          "relationships": {"gameCenterLeaderboard": {
                              "data": {"type": "gameCenterLeaderboards",
-                                      "id": made["data"]["id"]}}}}})
-
-
-def ensure_achievements(gc):
-    total = sum(points for *_, points in ACHIEVEMENTS)
-    print(f"\nAchievements ({len(ACHIEVEMENTS)}, {total} points)")
-    assert total <= 1000, "Game Center caps achievement points at 1000"
-    have = existing(gc, "gameCenterAchievements")
-    for identifier, name, description, points in ACHIEVEMENTS:
-        if identifier in have:
-            print(f"  = {identifier}")
-            continue
-        print(f"  + {identifier}  ({points})")
-        if DRY:
-            continue
-        made = call("POST", "/v1/gameCenterAchievements", {
-            "data": {"type": "gameCenterAchievements",
-                     "attributes": {"referenceName": name, "vendorIdentifier": identifier,
-                                    "points": points, "showBeforeEarned": True,
-                                    "repeatable": False},
-                     "relationships": {"gameCenterDetail": {
-                         "data": {"type": "gameCenterDetails", "id": gc}}}}})
-        if made:
-            call("POST", "/v1/gameCenterAchievementLocalizations", {
-                "data": {"type": "gameCenterAchievementLocalizations",
-                         "attributes": {"locale": "en-US", "name": name,
-                                        "beforeEarnedDescription": description,
-                                        "afterEarnedDescription": description},
-                         "relationships": {"gameCenterAchievement": {
-                             "data": {"type": "gameCenterAchievements",
                                       "id": made["data"]["id"]}}}}})
 
 

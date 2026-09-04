@@ -3,9 +3,11 @@ import SwiftUI
 /// How a tile is dressed. The game has exactly these looks, and every screen
 /// — home, board, pile, results — is built from them.
 enum TileStyle {
-    /// A word: amber on dark amber.
+    /// A word: green on dark green.
     case accent
-    /// The confirm button: the same amber, a step brighter behind it.
+    /// A word that isn't one: red on dark red.
+    case bad
+    /// A tile-word button: the same green, a step brighter behind it.
     case accentButton
     /// A neutral tile: light letter on dark grey.
     case plain
@@ -19,7 +21,8 @@ enum TileStyle {
     var fill: Color {
         switch self {
         case .accent: Palette.accentBg
-        case .accentButton: Palette.accentButton
+        case .bad: Palette.badBg
+        case .accentButton: Palette.accentRaised
         case .plain, .dim: Palette.surface
         case .raised: Palette.surfaceRaised
         case .slot: Palette.slot
@@ -29,6 +32,7 @@ enum TileStyle {
     var ink: Color {
         switch self {
         case .accent, .accentButton: Palette.accent
+        case .bad: Palette.badInk
         case .plain, .raised: Palette.ink
         case .dim: Palette.inkSoft
         case .slot: .clear

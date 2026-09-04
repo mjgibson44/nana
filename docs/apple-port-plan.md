@@ -422,7 +422,7 @@ The message set survives; the transport plumbing is replaced:
 | `state` full snapshot, `start {seed}`, `stop`, `reject`, `attack {count}` | Identical `Codable` structs over `send(_:to:dataMode:.reliable)`. `start` before `state` relies on per-sender ordering — guaranteed by `.reliable`; add the `game` counter check anyway (cheap belt-and-braces). The snapshot holds the roster: 8 seats plus any departed players still holding a standings entry — still well under a KB. |
 | `ping`/`pong` every 10s, 25s staleness | Mostly replaced by `match(_:player:didChange:)`. Keep a slow app-level heartbeat (~15s) anyway — the delegate's timeliness for half-dead links isn't documented, and the heartbeat is 10 lines. |
 | Host = code owner (peer id = code) | **New message: `host {proto}`** — on the web the code *is* the host's address, but a GKMatch formed from a party code is a mesh with no marked owner, and clients can't `hello` a host they can't identify. So: the party/lobby creator broadcasts `host` on match formation and re-broadcasts it to every later-connecting player; clients that see no announcement within a short timeout fall back to lowest `gamePlayerID`; pre-26 invite flows already know the host — it's the `GKInvite` sender. This is the one genuinely new protocol element (hence v6). `chooseBestHostingPlayer` is optional polish, not correctness — the host role here is referee, not relay. |
-| — | **v7: `state.countdown`** (optional `Int`) — a random match (§7.3 road 4) has no host to press START, so the host session deals on a rule and the seconds left ride the snapshot every screen already shows. Built as of 2026-09-04, alongside three election rules that need no wire change: everyone in a random match starts as a client and the lowest id claims after a 2 s window (`ClientEvents.onShouldHost`); lowest id wins if two claim (a client trades its host only for a lower announcer, a host yields to one — `HostEvents.onYield`); the host re-announces once a second to connected-but-unseated peers and a client re-greets on any announcement while unseated, so a hello that beat the host session into existence is retried. In the lobby a lost host re-elects; mid-game the lobby still dies with it. |
+| — | **v8: `state.countdown`** (optional `Int`; v7 was Occupy) — a random match (§7.3 road 4) has no host to press START, so the host session deals on a rule and the seconds left ride the snapshot every screen already shows. Built as of 2026-09-04, alongside three election rules that need no wire change: everyone in a random match starts as a client and the lowest id claims after a 2 s window (`ClientEvents.onShouldHost`); lowest id wins if two claim (a client trades its host only for a lower announcer, a host yields to one — `HostEvents.onYield`); the host re-announces once a second to connected-but-unseated peers and a client re-greets on any announcement while unseated, so a hello that beat the host session into existence is retried. In the lobby a lost host re-elects; mid-game the lobby still dies with it. |
 | Star topology enforced by dialing | GKMatch is a full mesh, so enforce the star by *convention*: clients send only to the host player; host sends `state` to all and attack shares point-to-point. (Mesh delivery being available changes nothing about authority.) |
 | Broker/ICE/TURN machinery, dial budgets, `unavailable-id` retries | Deleted. |
 
@@ -451,8 +451,9 @@ Ranked UX per OS generation:
    matters in practice; invites likely cover it.
 4. **Random matches (built 2026-09-04)** — strangers, via rules-free automatch,
    headless (`GKMatchmaker.findMatch`) so the search is the game's own screen.
-   **Duel** (2/2) and **Party** (min 3, max 8) are separate `playerGroup` pools, keyed
-   `timetiles/<kind>/v<PROTOCOL_VERSION>` through a stable FNV-1a hash (never
+   **Duel** (2/2) and **Party** (min 3, max 8 — max 4 in Occupy, which offers the same
+   two buttons) are separate `playerGroup` pools per game, keyed
+   `timetiles/<mode>/<kind>/v<PROTOCOL_VERSION>` through a stable FNV-1a hash (never
    `hashValue`, which is per-process; never 0, which is "no group"), so builds on
    different versions are never paired. Forming waits for the matched players to
    connect, treating `expectedPlayerCount` as advisory (done at 0, or at ≥1 peer and
@@ -580,6 +581,10 @@ Why this earns its place in an Apple-platform plan specifically:
   in Game Center).
 
 ### 8.3 Achievements
+
+**Cut.** The launch set was built and then removed along with Game Center's floating
+access point (see `apple/README.md`); the app posts scores and nothing else. The rest of
+this section is what was planned, kept for the record.
 
 Cap: 100 achievements / 1,000 points. Launch set (~15, all detectable from existing
 core events — `finishGame`, `commit`, referee outputs, stats):

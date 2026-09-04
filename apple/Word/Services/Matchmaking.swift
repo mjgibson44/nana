@@ -50,8 +50,9 @@ private struct UncheckedBox<T>: @unchecked Sendable {
     let value: T
 }
 
-/// The two random matches on offer. A duel is exactly two; a party asks
-/// Game Center for at least three and holds its door open for more.
+/// The two random matches on offer, in either game. A duel is exactly two; a
+/// party asks Game Center for at least three and holds its door open for
+/// more — up to eight in a Battle, four in Occupy.
 enum RandomMatchKind: String, CaseIterable, Equatable {
     case duel
     case party
@@ -59,17 +60,17 @@ enum RandomMatchKind: String, CaseIterable, Equatable {
     /// What the automatch request asks for. A party's floor is three
     /// (`PARTY_MIN_PLAYERS`), though once formed it will still start with two
     /// if a third came and went.
-    var minPlayers: Int {
+    func minPlayers(for mode: GameMode) -> Int {
         switch self {
         case .duel: return 2
         case .party: return PARTY_MIN_PLAYERS
         }
     }
 
-    var maxPlayers: Int {
+    func maxPlayers(for mode: GameMode) -> Int {
         switch self {
         case .duel: return 2
-        case .party: return BATTLE_MAX_PLAYERS
+        case .party: return mode == .occupy ? OCCUPY_MAX_PLAYERS : BATTLE_MAX_PLAYERS
         }
     }
 
@@ -90,10 +91,13 @@ let PARTY_MIN_PLAYERS = 3
 
 /// Which automatch pool a search goes into. Game Center only ever pairs
 /// requests with the same `playerGroup`, so the group is the whole of the
-/// segregation: duel never meets party, and version 8 never meets version 7.
+/// segregation: a Battle never meets an Occupy game, a duel never meets a
+/// party, and version 8 never meets version 7.
 enum MatchPool {
-    static func key(_ kind: RandomMatchKind, version: Int = PROTOCOL_VERSION) -> String {
-        "timetiles/\(kind.rawValue)/v\(version)"
+    static func key(
+        _ kind: RandomMatchKind, mode: GameMode = .battle, version: Int = PROTOCOL_VERSION
+    ) -> String {
+        "timetiles/\(mode.rawValue)/\(kind.rawValue)/v\(version)"
     }
 
     /// FNV-1a, 32 bits. Not `hashValue`, which is seeded per process and
@@ -108,16 +112,18 @@ enum MatchPool {
         return Int(hash == 0 ? 1 : hash)
     }
 
-    static func group(for kind: RandomMatchKind, version: Int = PROTOCOL_VERSION) -> Int {
-        stableHash(key(kind, version: version))
+    static func group(
+        for kind: RandomMatchKind, mode: GameMode = .battle, version: Int = PROTOCOL_VERSION
+    ) -> Int {
+        stableHash(key(kind, mode: mode, version: version))
     }
 
-    static func request(for kind: RandomMatchKind) -> GKMatchRequest {
+    static func request(for kind: RandomMatchKind, mode: GameMode = .battle) -> GKMatchRequest {
         let request = GKMatchRequest()
-        request.minPlayers = kind.minPlayers
-        request.maxPlayers = kind.maxPlayers
-        request.defaultNumberOfPlayers = kind.maxPlayers
-        request.playerGroup = group(for: kind)
+        request.minPlayers = kind.minPlayers(for: mode)
+        request.maxPlayers = kind.maxPlayers(for: mode)
+        request.defaultNumberOfPlayers = kind.maxPlayers(for: mode)
+        request.playerGroup = group(for: kind, mode: mode)
         return request
     }
 }
@@ -158,13 +164,14 @@ final class Matchmaking: NSObject {
     /// `onProgress` gets one line at a time for the search screen.
     func findRandomMatch(
         _ kind: RandomMatchKind,
+        mode: GameMode = .battle,
         onProgress: @escaping @MainActor (String) -> Void
     ) async throws -> GameKitTransport {
         searchGeneration += 1
         let generation = searchGeneration
         onProgress("Finding players…")
 
-        let request = MatchPool.request(for: kind)
+        let request = MatchPool.request(for: kind, mode: mode)
         let box: UncheckedBox<GKMatch> = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 GKMatchmaker.shared().findMatch(for: request) { match, error in
@@ -189,7 +196,7 @@ final class Matchmaking: NSObject {
         let transport = GameKitTransport(match: match)
         do {
             try await transport.awaitPeers(
-                atLeast: kind.minPlayers - 1,
+                atLeast: kind.minPlayers(for: mode) - 1,
                 settle: Self.formingSettleSeconds,
                 cap: Self.formingCapSeconds,
                 onProgress: onProgress)
@@ -210,8 +217,8 @@ final class Matchmaking: NSObject {
     /// pool while the door is open. Whether GameKit does this on its own
     /// after `findMatch` returns is undocumented, so it is asked outright;
     /// if nobody arrives the party starts regardless once its door goes quiet.
-    func keepFilling(_ transport: GameKitTransport, kind: RandomMatchKind) {
-        let request = MatchPool.request(for: kind)
+    func keepFilling(_ transport: GameKitTransport, kind: RandomMatchKind, mode: GameMode = .battle) {
+        let request = MatchPool.request(for: kind, mode: mode)
         GKMatchmaker.shared().addPlayers(to: transport.match, matchRequest: request) { _ in }
     }
 
@@ -231,12 +238,14 @@ final class Matchmaking: NSObject {
     // MARK: Invites — the road that works everywhere
 
     /// Raise Game Center's own matchmaker, invite-only. Returns once the
-    /// player has a match, or throws if they backed out.
-    func findMatchByInvite() async throws -> GKMatch {
+    /// player has a match, or throws if they backed out. The room is sized
+    /// for the game being played — eight for a Battle, four for Occupy.
+    func findMatchByInvite(mode: GameMode = .battle) async throws -> GKMatch {
         let request = GKMatchRequest()
-        request.minPlayers = BATTLE_MIN_PLAYERS
-        request.maxPlayers = BATTLE_MAX_PLAYERS
-        request.inviteMessage = "Come play a battle of Time Tiles."
+        request.minPlayers = mode == .occupy ? OCCUPY_MIN_PLAYERS : BATTLE_MIN_PLAYERS
+        request.maxPlayers = mode == .occupy ? OCCUPY_MAX_PLAYERS : BATTLE_MAX_PLAYERS
+        request.inviteMessage =
+            mode == .occupy ? "Come play Occupy in Time Tiles." : "Come play a battle of Time Tiles."
 
         guard let controller = GKMatchmakerViewController(matchRequest: request) else {
             throw Failure.unavailable("Game Center couldn't open matchmaking.")

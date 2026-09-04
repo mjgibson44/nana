@@ -5,7 +5,7 @@ import XCTest
 @testable import Word
 
 /// The progression service: what a finished game accumulates, and what
-/// happens to a score with nobody to submit it to (plan §7.1, §8.3, §9.1).
+/// happens to a score with nobody to submit it to (plan §7.1, §9.1).
 @MainActor
 final class ProgressionTests: XCTestCase {
 
@@ -29,17 +29,12 @@ final class ProgressionTests: XCTestCase {
     private actor FakeSubmitter: ProgressionSubmitter {
         private var accepts: Bool
         private(set) var submitted: [PendingScore] = []
-        private(set) var reported: [AchievementProgress] = []
 
         init(accepts: Bool = true) { self.accepts = accepts }
         func setAccepts(_ value: Bool) { accepts = value }
 
         func submit(_ score: PendingScore) async -> Bool {
             submitted.append(score)
-            return accepts
-        }
-        func report(_ achievement: AchievementProgress) async -> Bool {
-            reported.append(achievement)
             return accepts
         }
     }
@@ -76,12 +71,11 @@ final class ProgressionTests: XCTestCase {
         XCTAssertEqual(progression.merged.recent.count, 3)
     }
 
-    func testTheTutorialEarnsABadgeButIsNotAGame() {
+    func testTheTutorialIsNotAGame() {
         let progression = Progression(store: MemoryStore())
-        let recorded = progression.record(outcome(mode: .tutorial, tutorialFinished: true))
+        progression.record(outcome(mode: .tutorial, tutorialFinished: true))
 
         XCTAssertEqual(progression.merged.gamesPlayed, 0, "a lesson isn't a game")
-        XCTAssertEqual(recorded.completed, [.tutorialDone])
     }
 
     func testADailyRecordsItsDayForTheStreak() {
@@ -130,31 +124,6 @@ final class ProgressionTests: XCTestCase {
         XCTAssertEqual(phone.merged.bestScore, 400)
     }
 
-    // MARK: Achievements
-
-    func testAchievementsAreEarnedFromOrdinaryPlay() {
-        let progression = Progression(store: MemoryStore())
-        let recorded = progression.record(
-            outcome(score: 100, longestWord: 8, usedGapTile: true, recovered: true))
-        XCTAssertTrue(recorded.completed.contains(.eightLetterWord))
-        XCTAssertTrue(recorded.completed.contains(.gapTile))
-        XCTAssertTrue(recorded.completed.contains(.comeback))
-        XCTAssertTrue(recorded.completed.contains(.firstSoloGame))
-        XCTAssertTrue(progression.earned.contains(.gapTile))
-    }
-
-    func testEarnedAchievementsSurviveARelaunch() {
-        let store = MemoryStore()
-        Progression(store: store).record(outcome(usedGapTile: true))
-        XCTAssertTrue(Progression(store: store).earned.contains(.gapTile))
-    }
-
-    func testABattleBadgeIsNeverEarnedBySolo() {
-        let progression = Progression(store: MemoryStore())
-        let recorded = progression.record(outcome(score: 9_999, longestWord: 8))
-        XCTAssertTrue(recorded.completed.allSatisfy { !$0.needsBattle })
-    }
-
     // MARK: Signed out — the designed state (§7.1)
 
     func testScoresAreHeldWhileSignedOut() {
@@ -165,7 +134,6 @@ final class ProgressionTests: XCTestCase {
 
         XCTAssertFalse(progression.pendingScores.isEmpty, "held, not lost")
         XCTAssertEqual(progression.pendingScores.scores.first?.board, .soloFast)
-        XCTAssertFalse(progression.pendingAchievements.isEmpty)
     }
 
     func testHeldScoresSurviveARelaunchStillSignedOut() {
@@ -193,11 +161,8 @@ final class ProgressionTests: XCTestCase {
         await progression.signedIn(as: submitter)
 
         XCTAssertTrue(progression.pendingScores.isEmpty)
-        XCTAssertTrue(progression.pendingAchievements.isEmpty)
         let boards = await Set(submitter.submitted.map(\.board))
         XCTAssertEqual(boards, [.soloFast, .soloRegular])
-        let reported = await submitter.reported
-        XCTAssertFalse(reported.isEmpty)
     }
 
     func testARefusedSubmissionStaysQueued() async {
@@ -293,6 +258,5 @@ final class ProgressionTests: XCTestCase {
         let progression = Progression(store: MemoryStore())
         progression.record(outcome(mode: .tutorial, tutorialFinished: true))
         XCTAssertTrue(progression.pendingScores.isEmpty)
-        XCTAssertFalse(progression.pendingAchievements.isEmpty, "but it does earn a badge")
     }
 }

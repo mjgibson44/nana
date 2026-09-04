@@ -64,7 +64,6 @@ final class GameCenterTests: XCTestCase {
                 submitted.append(score)
                 return true
             }
-            func report(_ achievement: AchievementProgress) async -> Bool { true }
         }
 
         let progression = Progression(store: MemoryStore())
@@ -83,14 +82,12 @@ final class GameCenterTests: XCTestCase {
 
     // MARK: Config the GameKit bundle has to agree with
 
-    func testLeaderboardAndAchievementIDsAreStable() {
+    func testLeaderboardIDsAreStable() {
         // These strings are the contract with App Store Connect. Changing one
-        // silently orphans a board or a badge.
+        // silently orphans a board.
         XCTAssertEqual(
             Set(LeaderboardID.allCases.map(\.rawValue)),
             ["solo.regular", "solo.fast", "daily.deal", "battle.wins"])
-        XCTAssertEqual(AchievementID.allCases.count, 15)
-        XCTAssertEqual(Set(AchievementID.allCases.map(\.rawValue)).count, 15)
     }
 
     func testTheEntitlementsDeclareGameCenterAndICloud() throws {
@@ -147,13 +144,21 @@ final class MatchmakingTests: XCTestCase {
         XCTAssertNotEqual(MatchPool.group(for: .duel), MatchPool.group(for: .party))
     }
 
+    func testBattleAndOccupyNeverShareAPool() {
+        for kind in RandomMatchKind.allCases {
+            XCTAssertNotEqual(
+                MatchPool.group(for: kind, mode: .battle), MatchPool.group(for: kind, mode: .occupy))
+        }
+        XCTAssertEqual(MatchPool.key(.duel, mode: .occupy, version: 8), "timetiles/occupy/duel/v8")
+    }
+
     func testThePoolChangesWithTheProtocolVersion() {
         // No sandbox: a prerelease build meets released ones (TN2417). The
         // version gate would refuse the pairing, but better never to be paired.
         XCTAssertNotEqual(
             MatchPool.group(for: .duel, version: PROTOCOL_VERSION),
             MatchPool.group(for: .duel, version: PROTOCOL_VERSION + 1))
-        XCTAssertEqual(MatchPool.key(.party, version: 7), "timetiles/party/v7")
+        XCTAssertEqual(MatchPool.key(.party, version: 7), "timetiles/battle/party/v7")
     }
 
     func testThePoolKeyIsStableAcrossLaunches() {
@@ -183,6 +188,15 @@ final class MatchmakingTests: XCTestCase {
         XCTAssertEqual(party.minPlayers, PARTY_MIN_PLAYERS)
         XCTAssertEqual(party.maxPlayers, BATTLE_MAX_PLAYERS)
         XCTAssertEqual(party.playerGroup, MatchPool.group(for: .party))
+
+        // Occupy seats four at most, and its duel is the same two.
+        let occupyParty = MatchPool.request(for: .party, mode: .occupy)
+        XCTAssertEqual(occupyParty.minPlayers, PARTY_MIN_PLAYERS)
+        XCTAssertEqual(occupyParty.maxPlayers, OCCUPY_MAX_PLAYERS)
+        XCTAssertEqual(occupyParty.playerGroup, MatchPool.group(for: .party, mode: .occupy))
+        let occupyDuel = MatchPool.request(for: .duel, mode: .occupy)
+        XCTAssertEqual(occupyDuel.minPlayers, 2)
+        XCTAssertEqual(occupyDuel.maxPlayers, 2)
         XCTAssertEqual(RandomMatchKind.duel.rule, .duel)
         XCTAssertEqual(RandomMatchKind.party.rule, .party)
         XCTAssertEqual(RandomMatchKind.party.word, "PARTY")

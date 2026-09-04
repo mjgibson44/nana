@@ -291,30 +291,33 @@ final class BattlePlayTests: XCTestCase {
     }
 
     private func field(
-        _ rule: AutoStartRule, ids: [PlayerID], seed: String = "random-seed"
+        _ rule: AutoStartRule, ids: [PlayerID], mode: GameMode = .battle,
+        seed: String = "random-seed"
     ) -> Field {
         var field = Field(
             mesh: MemoryMesh(), clock: TestClock(), sessions: [:], models: [:],
             starts: [:], countdowns: [:], abandoned: [:])
         // The order of `ids` is the order of arrival; the mesh is connected
         // in that order too, once every session exists.
-        for id in ids { seat(id, in: &field, rule: rule, seed: seed) }
+        for id in ids { seat(id, in: &field, rule: rule, mode: mode, seed: seed) }
         for id in ids { field.mesh.connect(id) }
         return field
     }
 
     /// A session that arrives at an existing field — a party's late arrival.
     private func arrive(_ id: PlayerID, in field: inout Field, rule: AutoStartRule) {
-        seat(id, in: &field, rule: rule, seed: "random-seed")
+        seat(id, in: &field, rule: rule, mode: .battle, seed: "random-seed")
         field.mesh.connect(id)
     }
 
-    private func seat(_ id: PlayerID, in field: inout Field, rule: AutoStartRule, seed: String) {
+    private func seat(
+        _ id: PlayerID, in field: inout Field, rule: AutoStartRule, mode: GameMode, seed: String
+    ) {
         let transport = field.mesh.add(id)
         let model = GameModel()
         let clock = field.clock
         let session = BattleSession(
-            role: .client, transport: transport, model: model,
+            role: .client, mode: mode, transport: transport, model: model,
             displayName: { $0.capitalized }, makeSeed: { seed },
             clock: { clock.now }, autoStart: rule,
             announceTimeout: HOST_CLAIM_TIMEOUT_SECONDS)
@@ -390,6 +393,28 @@ final class BattlePlayTests: XCTestCase {
             field.models["ann"]?.rack, field.models["bea"]?.rack,
             "one seed, one shared stream")
         XCTAssertNil(field["ann"].countdown)
+    }
+
+    func testAnOccupyDuelFoundAmongStrangersDealsItsSharedBoard() {
+        // The same road into Occupy: no host, no START, one board dealt on
+        // the countdown to two strangers.
+        let field = field(.duel, ids: ["bea", "ann"], mode: .occupy)
+        let tally = tally(field)
+
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+        XCTAssertEqual(field.hosts, ["ann"])
+        XCTAssertEqual(field["ann"].state?.mode, .occupy)
+        XCTAssertEqual(field["bea"].countdown, START_COUNTDOWN_SECONDS)
+        XCTAssertFalse(field["ann"].canStart, "nobody presses START in a random match")
+
+        advance(field, by: Double(START_COUNTDOWN_SECONDS))
+        XCTAssertEqual(field["ann"].state?.phase, .playing)
+        XCTAssertNotNil(field["ann"].state?.occupy, "the shared board was dealt")
+        XCTAssertEqual(field["ann"].state?.occupy?.seats.sorted(), ["ann", "bea"])
+        XCTAssertEqual(tally.starts["ann"], 1)
+        XCTAssertEqual(tally.starts["bea"], 1)
+        XCTAssertEqual(field.models["ann"]?.isOccupy, true)
+        XCTAssertEqual(field.models["bea"]?.isOccupy, true)
     }
 
     func testCountdownBeginFiresOnceOnEveryDevice() {

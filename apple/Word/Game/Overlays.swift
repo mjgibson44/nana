@@ -142,7 +142,7 @@ struct ToastView: View {
             .padding(.horizontal, 10)
             .transition(.opacity)
             .task(id: toast.serial) {
-                // Tiles landing, a refusal, an achievement: things the board
+                // Tiles landing, a refusal, an attack sent: things the board
                 // can't show. The web's toast is an aria-live region; this is
                 // its announcement (plan §6.6).
                 AccessibilityNotification.Announcement(toast.text).post()

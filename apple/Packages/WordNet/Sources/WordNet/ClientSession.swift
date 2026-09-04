@@ -23,6 +23,9 @@ public struct ClientEvents {
     public var onRejected: ((String) -> Void)?
     /// Which player is refereeing, once known.
     public var onHostElected: ((PlayerID) -> Void)?
+    /// Occupy: our word numbered `serial` is down, or isn't.
+    public var onPlaced: ((Int) -> Void)?
+    public var onRefused: ((Int, String) -> Void)?
     /// Nobody announced and this player has the lowest id: it should be the
     /// one refereeing. The app stands up a host session in this one's place.
     public var onShouldHost: (() -> Void)?
@@ -34,6 +37,8 @@ public struct ClientEvents {
         onAttack: ((Int) -> Void)? = nil,
         onRejected: ((String) -> Void)? = nil,
         onHostElected: ((PlayerID) -> Void)? = nil,
+        onPlaced: ((Int) -> Void)? = nil,
+        onRefused: ((Int, String) -> Void)? = nil,
         onShouldHost: (() -> Void)? = nil
     ) {
         self.onState = onState
@@ -42,6 +47,8 @@ public struct ClientEvents {
         self.onAttack = onAttack
         self.onRejected = onRejected
         self.onHostElected = onHostElected
+        self.onPlaced = onPlaced
+        self.onRefused = onRefused
         self.onShouldHost = onShouldHost
     }
 }
@@ -180,6 +187,14 @@ public final class ClientSession {
         case let .reject(reason):
             guard sender == hostID else { return }
             fail(reason)
+
+        case let .placed(serial):
+            guard sender == hostID else { return }
+            events.onPlaced?(serial)
+
+        case let .refused(serial, reason):
+            guard sender == hostID else { return }
+            events.onRefused?(serial, reason)
         }
     }
 
@@ -262,6 +277,12 @@ public final class ClientSession {
     public func sendAttack(_ count: Int) {
         guard count > 0 else { return }
         send(.attack(count: count))
+    }
+
+    /// Occupy: a word let go of. The host answers with `placed` or `refused`
+    /// by the same serial — after a snapshot, if it went down.
+    public func sendPlacement(serial: Int, placement: OccupyPlacement) {
+        send(.place(serial: serial, placement: placement))
     }
 
     public func leave() {

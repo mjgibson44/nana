@@ -8,7 +8,8 @@ enum Route: Equatable {
     case home
     /// Picking a Solo game's speed, on the way in.
     case soloSetup
-    /// Getting into a battle: finding strangers, opening a room, or joining one.
+    /// Getting into a battle (or an Occupy game): finding strangers, opening
+    /// a room, or joining one.
     case battleEntry
     /// In a battle's lobby, waiting for the host — or the countdown — to start it.
     case battleLobby
@@ -28,11 +29,15 @@ struct RootView: View {
     @State private var gameCenter = GameCenter()
     @State private var matchmaking = Matchmaking()
     @State private var battle: BattleSession?
+    /// Which game the room being opened, joined or searched for plays.
+    @State private var battleMode: GameMode = .battle
     @State private var battleBusy = false
     @State private var battleError: String?
     @State private var partyCode: String?
     @State private var battleDoorNotice = false
     @State private var savedGame: SavedSoloGame?
+    /// The stand-in rival of a `WORD_AUTOSTART=occupy` game.
+    @State private var localRival: BattleSession?
     /// The random match being looked for, while one is.
     @State private var searching: RandomMatchKind?
     @State private var searchStatus: String?
@@ -49,10 +54,10 @@ struct RootView: View {
             case .home:
                 HomeScreen(
                     hasSavedGame: savedGame != nil,
-                    showsGameCenter: gameCenter.isSignedIn,
                     onResume: resumeSavedGame,
                     onSolo: { route = .soloSetup },
-                    onBattle: chooseBattle)
+                    onBattle: { chooseBattle(mode: .battle) },
+                    onOccupy: { chooseBattle(mode: .occupy) })
 
             case .soloSetup:
                 SoloSetupScreen(
@@ -62,6 +67,7 @@ struct RootView: View {
 
             case .battleEntry:
                 BattleEntryScreen(
+                    mode: battleMode,
                     supportsPartyCodes: Matchmaking.supportsPartyCodes,
                     partyCode: partyCode,
                     searching: searching,
@@ -78,6 +84,7 @@ struct RootView: View {
 
             case .battleLobby:
                 BattleLobbyScreen(
+                    mode: battleMode,
                     state: battle?.state,
                     selfID: battle?.selfID ?? "",
                     isHost: battle?.isHost ?? false,
@@ -108,8 +115,8 @@ struct RootView: View {
         .task {
             savedGame = settings.loadSavedGame()
             // Kicked off at launch and never blocking: Solo plays signed out
-            // (§7.1), and anything earned meanwhile is held by Progression
-            // and flushed if this succeeds.
+            // (§7.1), and any score made meanwhile is held by Progression and
+            // flushed if this succeeds.
             gameCenter.authenticate(feeding: progression)
             model.cues = audio
             audio.isSoundEnabled = { [settings] in settings.soundEnabled }
@@ -120,8 +127,10 @@ struct RootView: View {
             // A development hook: `WORD_AUTOSTART=solo` in the launch
             // environment opens straight onto a game, so a simulator can be
             // screenshotted without a finger on it. Ignored otherwise.
-            if ProcessInfo.processInfo.environment["WORD_AUTOSTART"] == "solo" {
-                startSolo(pace: settings.pace)
+            switch ProcessInfo.processInfo.environment["WORD_AUTOSTART"] {
+            case "solo": startSolo(pace: settings.pace)
+            case "occupy": startLocalOccupy()
+            default: break
             }
         }
         // The OS can kill a backgrounded app at any moment, so the in-progress
@@ -148,26 +157,56 @@ struct RootView: View {
     /// Every finished game lands here — the local stats, and the Game Center
     /// submission that hangs off the same funnel.
     private func recordFinish(_ outcome: GameOutcome) {
-        // Cross-device progress, achievements, and the leaderboard queue —
-        // all of which work signed out and flush when auth arrives (§7.1).
-        let recorded = progression.record(outcome)
-        if !recorded.completed.isEmpty {
-            model.announceAchievements(recorded.completed)
-        }
+        // Cross-device progress and the leaderboard queue — both of which
+        // work signed out and flush when auth arrives (§7.1).
+        progression.record(outcome)
         settings.record(score: outcome.score, words: outcome.words)
         // A finished game is not a game to come back to.
         settings.save(nil)
     }
 
-    // MARK: Battle (plan §7.3)
+    // MARK: Battle and Occupy (plan §7.3)
 
-    private func chooseBattle() {
+    private func chooseBattle(mode: GameMode) {
         if gameCenter.battleBlockedReason != nil {
             battleDoorNotice = true
         } else {
+            battleMode = mode
             battleError = nil
             partyCode = nil
             route = .battleEntry
+            // Occupy's host judges everyone's words, so its dictionary has to
+            // be in before the first one arrives — not when the board appears.
+            if mode == .occupy {
+                Task { await model.loadDictionary() }
+            }
+        }
+    }
+
+    /// A development hook: `WORD_AUTOSTART=occupy` opens straight onto an
+    /// Occupy board against a rival who never plays — two sessions on an
+    /// in-memory mesh — so a simulator can be screenshotted.
+    private func startLocalOccupy() {
+        let mesh = MemoryMesh()
+        let hostTransport = mesh.add("me")
+        let rivalTransport = mesh.add("rival")
+        let rivalModel = GameModel()
+        let host = BattleSession(
+            role: .host, mode: .occupy, transport: hostTransport, model: model,
+            displayName: { $0 == "me" ? "You" : "Rival" })
+        let rival = BattleSession(role: .client, mode: .occupy, transport: rivalTransport, model: rivalModel)
+        mesh.connect("me")
+        mesh.connect("rival")
+        host.onGameStart = { route = .game }
+        host.onReturnToLobby = { route = .battleLobby }
+        host.run()
+        battle = host
+        battleMode = .occupy
+        // Held for the app's lifetime: a dropped session takes its seat with it.
+        localRival = rival
+        Task {
+            await model.loadDictionary()
+            host.start()
         }
     }
 
@@ -195,8 +234,9 @@ struct RootView: View {
     /// Game Center's own invite sheet — the road that works on every OS the
     /// app supports. Whoever sends the invite referees.
     private func inviteToBattle() {
+        let mode = battleMode
         runBattleSetup {
-            let match = try await matchmaking.findMatchByInvite()
+            let match = try await matchmaking.findMatchByInvite(mode: mode)
             return (GameKitTransport(match: match), .host, nil)
         }
     }
@@ -205,10 +245,11 @@ struct RootView: View {
     /// the sessions elect a referee among themselves; the match then deals
     /// itself on the kind's rule.
     private func findRandom(_ kind: RandomMatchKind) {
+        let mode = battleMode
         searching = kind
         searchStatus = "Finding players…"
         runBattleSetup {
-            let transport = try await matchmaking.findRandomMatch(kind) { status in
+            let transport = try await matchmaking.findRandomMatch(kind, mode: mode) { status in
                 searchStatus = status
             }
             return (transport, .client, kind)
@@ -287,8 +328,10 @@ struct RootView: View {
     private func startBattle(
         transport: GameKitTransport, role: BattleSession.Role, kind: RandomMatchKind?
     ) {
+        let mode = battleMode
         let session = BattleSession(
             role: role,
+            mode: mode,
             transport: transport,
             model: model,
             displayName: { transport.displayName(for: $0) },
@@ -302,7 +345,7 @@ struct RootView: View {
             // party's host holds it open until then.
             session.onCountdownBegin = { matchmaking.stopFilling(transport) }
             session.onBecameHost = {
-                if kind == .party { matchmaking.keepFilling(transport, kind: kind) }
+                if kind == .party { matchmaking.keepFilling(transport, kind: kind, mode: mode) }
             }
             session.onAbandoned = { searchAgain(kind) }
         }

@@ -9,6 +9,9 @@ struct BoardScene {
     var tiles: [(key: CellKey, letter: String)]
     /// Letters that would land if the opener were confirmed.
     var preview: [CellKey: String] = [:]
+    /// Whether those letters spell a word. False ghosts them in red, so the
+    /// opener answers on the board as well as in the word row.
+    var previewIsGood = true
     /// The word being held over a board letter by press-and-hold, drawn
     /// solid over everything: every cell it would occupy, borrowed letter
     /// included. Nil when nothing is being aimed.
@@ -18,6 +21,10 @@ struct BoardScene {
     var aimIsGood = true
     /// The words each placed tile reads in, for its spoken label (plan §6.6).
     var wordsAt: [CellKey: [String]] = [:]
+    /// Occupy: which seat holds each tile, and which seat is looking. A tile
+    /// with no owner wears the word green.
+    var owners: [CellKey: Int] = [:]
+    var viewerSeat: Int? = nil
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -49,10 +56,14 @@ struct BoardContentView: View {
             }
 
             // Placed tiles: every one is part of a real word, and wears the
-            // word colour.
+            // word colour — or, in Occupy, its owner's.
             ForEach(scene.tiles, id: \.key) { tile in
                 let rect = metrics.rect(of: parseKey(tile.key))
-                BoardTileView(letter: tile.letter, cellSize: metrics.cellSize)
+                BoardTileView(
+                    letter: tile.letter, cellSize: metrics.cellSize,
+                    colors: scene.owners[tile.key].map {
+                        SeatColors.of(seat: $0, viewer: scene.viewerSeat)
+                    })
                     .frame(width: rect.width, height: rect.height)
                     .position(x: rect.midX, y: rect.midY)
                     .accessibilityElement()
@@ -65,7 +76,9 @@ struct BoardContentView: View {
             ForEach(Array(scene.preview.keys.sorted()), id: \.self) { key in
                 if scene.tiles.first(where: { $0.key == key }) == nil {
                     let rect = metrics.rect(of: parseKey(key))
-                    PreviewTileView(letter: scene.preview[key], cellSize: metrics.cellSize)
+                    PreviewTileView(
+                        letter: scene.preview[key], isGood: scene.previewIsGood,
+                        cellSize: metrics.cellSize)
                         .frame(width: rect.width, height: rect.height)
                         .position(x: rect.midX, y: rect.midY)
                 }
@@ -104,31 +117,37 @@ struct BoardContentView: View {
         if let words = scene.wordsAt[key], !words.isEmpty {
             parts.append("part of \(words.map { $0.uppercased() }.joined(separator: " and "))")
         }
+        if let owner = scene.owners[key] {
+            parts.append(owner == scene.viewerSeat ? "yours" : "a rival’s")
+        }
         parts.append("tap to place your word through it")
         return parts.joined(separator: ", ")
     }
 }
 
-/// A placed tile: the word colour, letter in amber.
+/// A placed tile. Every word on the board got there by reading, so a placed
+/// tile is always a correct one — and wears the green that says so, unless
+/// it's a rival's on an Occupy board.
 struct BoardTileView: View {
     var letter: String
     var cellSize: Double
+    var colors: SeatColors? = nil
 
     var body: some View {
         RoundedRectangle(
             cornerRadius: BoardContentView.cornerRadius(for: cellSize), style: .continuous
         )
-        .fill(Palette.accentBg)
+        .fill(colors?.fill ?? Palette.accentBg)
         .overlay(
             Text(letter.uppercased())
                 .font(.system(size: cellSize * 0.56, weight: .bold))
-                .foregroundStyle(Palette.accent)
+                .foregroundStyle(colors?.ink ?? Palette.accent)
         )
     }
 }
 
 /// A letter of the word being aimed by press-and-hold: solid, so it reads as
-/// a word sitting on the board rather than a hint about one. Amber when it's
+/// a word sitting on the board rather than a hint about one. Green when it's
 /// good to land, red when it isn't.
 struct AimTileView: View {
     var letter: String
@@ -139,7 +158,7 @@ struct AimTileView: View {
         RoundedRectangle(
             cornerRadius: BoardContentView.cornerRadius(for: cellSize), style: .continuous
         )
-        .fill(isGood ? Palette.accentButton : Palette.gaugeBadTrack)
+        .fill(isGood ? Palette.accentRaised : Palette.badBg)
         .overlay(
             Text(letter.uppercased())
                 .font(.system(size: cellSize * 0.56, weight: .bold))
@@ -148,26 +167,30 @@ struct AimTileView: View {
     }
 }
 
-/// A ghost of a letter that would land — dashed and translucent.
+/// A ghost of a letter that would land — dashed and translucent, and in the
+/// same green or red the word row is wearing.
 struct PreviewTileView: View {
     var letter: String?
+    var isGood = true
     var cellSize: Double
 
     var body: some View {
         let radius = BoardContentView.cornerRadius(for: cellSize)
+        let fill = isGood ? Palette.accentBg : Palette.badBg
+        let ink = isGood ? Palette.accent : Palette.badInk
         RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(Palette.accentBg.opacity(0.45))
+            .fill(fill.opacity(0.45))
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(
-                        Palette.accent.opacity(0.7),
+                        ink.opacity(0.7),
                         style: StrokeStyle(lineWidth: max(1, cellSize * 0.06), dash: [4, 3]))
             )
             .overlay {
                 if let letter {
                     Text(letter.uppercased())
                         .font(.system(size: cellSize * 0.56, weight: .bold))
-                        .foregroundStyle(Palette.accent.opacity(0.7))
+                        .foregroundStyle(ink.opacity(0.7))
                 }
             }
     }

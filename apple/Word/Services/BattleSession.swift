@@ -3,8 +3,9 @@ import Observation
 import WordCore
 import WordNet
 
-/// The app's side of a battle: owns whichever `WordNet` session this player
-/// is (host or client), drives its clock, and wires it to the board.
+/// The app's side of a battle — or an Occupy game, which shares the room:
+/// owns whichever `WordNet` session this player is (host or client), drives
+/// its clock, and wires it to the board.
 ///
 /// `WordNet` deliberately knows nothing about transports beyond
 /// `BattleTransport`, and nothing about the game beyond scores and counts.
@@ -32,6 +33,9 @@ final class BattleSession {
     /// no road back in, so a shorter grace than friends get.
     static let strangerGraceSeconds: TimeInterval = 10
 
+    /// Which game this room plays: a Battle, or Occupy. The host's rules and
+    /// the lobby's size follow from it.
+    let mode: GameMode
     /// The rule a random match deals itself by; nil for a friends' lobby,
     /// where the host presses START.
     let autoStart: AutoStartRule?
@@ -77,6 +81,7 @@ final class BattleSession {
 
     init(
         role: Role,
+        mode: GameMode = .battle,
         transport: BattleTransport,
         model: GameModel,
         displayName: @escaping (PlayerID) -> String = { _ in "Player" },
@@ -89,6 +94,7 @@ final class BattleSession {
         announceTimeout: TimeInterval = HOST_ANNOUNCE_TIMEOUT_SECONDS
     ) {
         self.role = role
+        self.mode = mode
         self.transport = transport
         self.model = model
         self.displayName = displayName
@@ -116,6 +122,15 @@ final class BattleSession {
         model.onBattleAttack = { [weak self] count in
             self?.sendAttack(count)
         }
+        model.onOccupyPlace = { [weak self] serial, placement in
+            self?.sendPlacement(serial: serial, placement: placement)
+        }
+    }
+
+    var isOccupy: Bool { mode == .occupy }
+
+    private var minPlayers: Int {
+        mode == .occupy ? OCCUPY_MIN_PLAYERS : BATTLE_MIN_PLAYERS
     }
 
     var selfID: PlayerID { transport.localPlayerID }
@@ -139,7 +154,7 @@ final class BattleSession {
 
     var canStart: Bool {
         guard isHost, !dealsItself, let state, state.phase == .lobby else { return false }
-        return state.players.filter { !$0.left }.count >= BATTLE_MIN_PLAYERS
+        return state.players.filter { !$0.left }.count >= minPlayers
     }
 
     // MARK: Standings
@@ -167,6 +182,10 @@ final class BattleSession {
     /// player has fallen — or the battle is decided — it is their final
     /// placing, which the fall order fixes the moment they go out.
     var position: Int? {
+        if isOccupy {
+            guard let occupy = state?.occupy, let seat = occupy.seat(of: selfID) else { return nil }
+            return occupyRanking(occupy, left: seatsLeft).first { $0.seat == seat }?.rank
+        }
         let field = contestants
         guard let me = field.first(where: { $0.id == selfID }) else { return nil }
         if isFinished || me.outOrder != nil {
@@ -176,10 +195,38 @@ final class BattleSession {
         return ahead + 1
     }
 
+    /// One row of Occupy's standings: the seat, its rank and its value.
+    struct OccupyStandingRow: Identifiable, Equatable {
+        var id: String { player.id }
+        var player: BattlePlayer
+        var seat: Int
+        var rank: Int
+        var value: Int
+    }
+
+    /// Occupy's field ranked by value — the results table, and the live
+    /// order while it plays.
+    var occupyStandings: [OccupyStandingRow] {
+        guard let occupy = state?.occupy else { return [] }
+        return occupyRanking(occupy, left: seatsLeft).compactMap { standing in
+            let id = occupy.seats[standing.seat]
+            guard let player = state?.players.first(where: { $0.id == id }) else { return nil }
+            return OccupyStandingRow(
+                player: player, seat: standing.seat, rank: standing.rank,
+                value: occupy.scores[standing.seat])
+        }
+    }
+
+    /// The seats whose players have walked out, ranked last whatever they own.
+    private var seatsLeft: Set<Int> {
+        guard let occupy = state?.occupy else { return [] }
+        return Set(contestants.filter(\.left).compactMap { occupy.seat(of: $0.id) })
+    }
+
     /// A battle can only go again with enough seats still filled.
     var canRestart: Bool {
         guard isHost, isFinished, let state else { return false }
-        return state.players.filter { $0.connected && !$0.left }.count >= BATTLE_MIN_PLAYERS
+        return state.players.filter { $0.connected && !$0.left }.count >= minPlayers
     }
 
     // MARK: Driving it
@@ -241,17 +288,26 @@ final class BattleSession {
         // seat empty now rather than when the transport notices on its own.
         transport.disconnect()
         model?.onBattleAttack = nil
+        model?.onOccupyPlace = nil
     }
 
     // MARK: Wiring
 
     private func makeHostSession() -> HostSession {
-        HostSession(
+        // Occupy's referee judges words against the host's dictionary. If
+        // it hasn't loaded yet, the client's own check is trusted rather
+        // than every word being called fake.
+        let rules: BattleRules =
+            mode == .occupy
+            ? .occupy(isWord: { [weak model] word in model?.dictionary?.contains(word) ?? true })
+            : .battle
+        return HostSession(
             transport: transport, displayName: displayName, makeSeed: makeSeed,
             clock: clock, autoStart: autoStart,
             graceSeconds: dealsItself ? Self.strangerGraceSeconds : RECONNECT_GRACE_SECONDS,
             // A stranger who lands after the deal has nothing to watch for.
-            admitsMidGame: !dealsItself)
+            admitsMidGame: !dealsItself,
+            rules: rules)
     }
 
     private func makeClientSession() -> ClientSession {
@@ -264,7 +320,11 @@ final class BattleSession {
             onStart: { [weak self] seed in self?.beginGame(seed: seed) },
             onStop: { [weak self] in self?.endGame() },
             onAttack: { [weak self] count in self?.model?.receiveAttack(count) },
-            onYield: { [weak self] lower in self?.yield(to: lower) })
+            onYield: { [weak self] lower in self?.yield(to: lower) },
+            onPlaced: { [weak self] serial in self?.model?.confirmPlacement(serial: serial) },
+            onRefused: { [weak self] serial, reason in
+                self?.model?.refusePlacement(serial: serial, reason: reason)
+            })
 
         client?.events = ClientEvents(
             onState: { [weak self] state in self?.adopt(state) },
@@ -273,6 +333,10 @@ final class BattleSession {
             onAttack: { [weak self] count in self?.model?.receiveAttack(count) },
             onRejected: { [weak self] reason in self?.rejection = reason },
             onHostElected: { [weak self] id in self?.hostID = id },
+            onPlaced: { [weak self] serial in self?.model?.confirmPlacement(serial: serial) },
+            onRefused: { [weak self] serial, reason in
+                self?.model?.refusePlacement(serial: serial, reason: reason)
+            },
             onShouldHost: { [weak self] in self?.becomeHost() })
     }
 
@@ -316,9 +380,11 @@ final class BattleSession {
         session.follow(host: lower)
     }
 
-    /// The host's latest snapshot. Two transitions reach past the roster:
-    /// into `finished` (whoever is still standing is finished there too),
-    /// and into a countdown (the door closes).
+    /// The host's latest snapshot. In Occupy every one carries the board,
+    /// and the board it carries goes straight under this player's own words.
+    /// Two transitions reach past the roster on any board: into `finished`
+    /// (whoever is still standing is finished there too), and into a
+    /// countdown (the door closes).
     private func adopt(_ state: BattleState) {
         let previousPhase = lastPhase
         let previousCountdown = lastCountdown
@@ -328,16 +394,31 @@ final class BattleSession {
         if previousCountdown == nil, state.countdown != nil {
             onCountdownBegin?()
         }
+        if isOccupy, state.phase != .lobby, let occupy = state.occupy, model?.isOccupy == true,
+            model?.seed == seed
+        {
+            model?.adoptOccupy(occupy, now: clock())
+        }
         guard state.phase == .finished, previousPhase != .finished else { return }
-        model?.finishBattle(won: state.winnerId == selfID, players: contestants.count)
+        if isOccupy {
+            model?.finishOccupy(won: state.winnerId == selfID, players: contestants.count)
+        } else {
+            model?.finishBattle(won: state.winnerId == selfID, players: contestants.count)
+        }
     }
 
     private func beginGame(seed: String) {
         self.seed = seed
         // A seat that joined mid-game watches this one out (`waiting`); its
         // board stays empty rather than dealing tiles it can't play.
-        model?.newBattle(
-            seed: seed, selfID: selfID, spectating: selfSeat?.waiting == true, now: clock())
+        if isOccupy {
+            model?.newOccupy(
+                seed: seed, selfID: selfID, state: state?.occupy,
+                spectating: selfSeat?.waiting == true, now: clock())
+        } else {
+            model?.newBattle(
+                seed: seed, selfID: selfID, spectating: selfSeat?.waiting == true, now: clock())
+        }
         onGameStart?()
     }
 
@@ -353,10 +434,17 @@ final class BattleSession {
         client?.sendAttack(count)
     }
 
+    /// An Occupy word: the host judges its own; a client sends it up.
+    private func sendPlacement(serial: Int, placement: OccupyPlacement) {
+        host?.placeSelf(serial: serial, placement: placement)
+        client?.sendPlacement(serial: serial, placement: placement)
+    }
+
     /// Keep the roster's scores and pile gauges current. Both sessions take
     /// the same three facts; the host applies them to its own seat directly.
+    /// Occupy's scores are the board's, which the host already holds.
     private func reportProgress() {
-        guard let model, state?.phase == .playing else { return }
+        guard let model, state?.phase == .playing, !isOccupy else { return }
         let buried = model.isComplete && model.endReason == .buried
         host?.reportSelf(score: model.score, buried: buried, tiles: model.rack.count)
         client?.reportProgress(score: model.score, buried: buried, tiles: model.rack.count)
@@ -371,7 +459,7 @@ final class BattleSession {
             return
         }
         let seated = state.players.filter { $0.connected && !$0.left }.count
-        guard seated < BATTLE_MIN_PLAYERS else {
+        guard seated < minPlayers else {
             aloneSince = nil
             return
         }

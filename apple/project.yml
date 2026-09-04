@@ -55,7 +55,7 @@ targets:
     entitlements:
       path: Word/Word.entitlements
       properties:
-        # Game Center: auth, leaderboards, achievements, GKMatch (§7, §8).
+        # Game Center: auth, leaderboards, GKMatch (§7, §8).
         com.apple.developer.game-center: true
         # iCloud key-value storage for the cross-device progress merge (§9.1).
         # A few KB of stat blobs — well inside the 1 MB / 1,024 key budget,

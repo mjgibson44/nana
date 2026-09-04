@@ -65,6 +65,11 @@ public struct BattleState: Codable, Equatable {
     public var game: Int
     /// Who won, once the phase is 'finished'. Nil for a draw.
     public var winnerId: String?
+    /// Which game this lobby plays. New on Apple platforms — the web's lobby
+    /// only ever holds a Battle, which is what a snapshot without it means.
+    public var mode: GameMode
+    /// The shared board, while the lobby plays Occupy (`Occupy.swift`).
+    public var occupy: OccupyState?
     /// Seconds until a self-starting lobby deals — a random match counting
     /// down once everyone is here. Nil whenever no countdown is running. An
     /// Apple-side addition (the web's snapshot has no such field); optional,
@@ -73,13 +78,41 @@ public struct BattleState: Codable, Equatable {
 
     public init(
         phase: BattlePhase, players: [BattlePlayer], game: Int, winnerId: String?,
-        countdown: Int? = nil
+        mode: GameMode = .battle, occupy: OccupyState? = nil, countdown: Int? = nil
     ) {
         self.phase = phase
         self.players = players
         self.game = game
         self.winnerId = winnerId
+        self.mode = mode
+        self.occupy = occupy
         self.countdown = countdown
+    }
+
+    private enum Key: String, CodingKey {
+        case phase, players, game, winnerId, mode, occupy, countdown
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Key.self)
+        phase = try container.decode(BattlePhase.self, forKey: .phase)
+        players = try container.decode([BattlePlayer].self, forKey: .players)
+        game = try container.decode(Int.self, forKey: .game)
+        winnerId = try container.decodeIfPresent(String.self, forKey: .winnerId)
+        mode = try container.decodeIfPresent(GameMode.self, forKey: .mode) ?? .battle
+        occupy = try container.decodeIfPresent(OccupyState.self, forKey: .occupy)
+        countdown = try container.decodeIfPresent(Int.self, forKey: .countdown)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Key.self)
+        try container.encode(phase, forKey: .phase)
+        try container.encode(players, forKey: .players)
+        try container.encode(game, forKey: .game)
+        try container.encode(winnerId, forKey: .winnerId)
+        try container.encode(mode, forKey: .mode)
+        try container.encodeIfPresent(occupy, forKey: .occupy)
+        try container.encodeIfPresent(countdown, forKey: .countdown)
     }
 }
 

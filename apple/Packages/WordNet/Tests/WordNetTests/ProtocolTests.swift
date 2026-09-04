@@ -11,6 +11,9 @@ struct WireProtocolTests {
             .hello(proto: PROTOCOL_VERSION),
             .progress(score: 42, buried: true, tiles: 7),
             .attack(count: 5),
+            .place(
+                serial: 3,
+                placement: OccupyPlacement(tiles: ["3,3": "c", "3,4": "a"], borrowed: ["3,5"])),
             .pong,
             .leave,
         ]
@@ -38,6 +41,15 @@ struct WireProtocolTests {
             .attack(count: 3),
             .ping,
             .host(proto: PROTOCOL_VERSION),
+            .placed(serial: 3),
+            .refused(serial: 4, reason: "Someone got there first."),
+            .state(
+                BattleState(
+                    phase: .playing, players: [], game: 1, winnerId: nil, mode: .occupy,
+                    occupy: OccupyState(
+                        size: 15, seats: ["a", "b"], board: TileMap([("3,3", "c")]),
+                        owners: ["3,3": 0], opened: [true, false], scores: [1, 0],
+                        settledAt: [5, 0], end: .stall))),
         ]
         for message in messages {
             let data = try #require(Wire.encode(message))
@@ -66,7 +78,7 @@ struct WireProtocolTests {
 
     @Test func aSnapshotWithoutACountdownStillDecodes() throws {
         // The countdown is an optional addition to the web's snapshot shape:
-        // a v6-shaped `state` — no `countdown` key at all — must decode to
+        // an older `state` — no `countdown` key at all — must decode to
         // "no countdown", not fail.
         let json = #"""
             {"t":"state","state":{"phase":"lobby","game":0,"winnerId":null,
@@ -79,12 +91,13 @@ struct WireProtocolTests {
             return
         }
         #expect(state.countdown == nil)
+        #expect(state.mode == .battle)
         #expect(state.players.map(\.id) == ["a"])
     }
 
-    @Test func versionIsSevenForTheCountdown() {
+    @Test func versionIsEightForTheCountdown() {
         // v5 was the web's; v6 added the host announcement (plan §7.2); v7
-        // put the countdown in the snapshot.
-        #expect(PROTOCOL_VERSION == 7)
+        // Occupy; v8 put the countdown in the snapshot.
+        #expect(PROTOCOL_VERSION == 8)
     }
 }
