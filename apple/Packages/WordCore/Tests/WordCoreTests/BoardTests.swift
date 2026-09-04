@@ -14,6 +14,47 @@ private func boardFrom(_ rows: [String]) -> TileMap {
     return tiles
 }
 
+@Suite("Board: runsTouching") struct BoardRunsTouching {
+    /// The whole contract: it is `extractRuns` filtered to the cells asked
+    /// about, only without reading the rest of the board. Checked over a
+    /// pile of seeded random boards, because the interesting cases (a cell
+    /// mid-run, three cells of one word, a lone letter, an empty cell) all
+    /// turn up in a few hundred of them.
+    @Test("matches extractRuns filtered to the cells asked about")
+    func runsTouchingMatchExtractRuns() {
+        let rng = seededRng("runs-touching")
+        for _ in 0..<200 {
+            var tiles = TileMap()
+            for row in 0..<6 {
+                for col in 0..<6 where rng() < 0.5 {
+                    tiles[keyOf(row, col)] = String("abcdefgh"[
+                        String.Index(utf16Offset: Int(rng() * 8), in: "abcdefgh")])
+                }
+            }
+            // Ask about a handful of cells, occupied and empty alike.
+            let asked = (0..<4).map { _ in keyOf(Int(rng() * 6), Int(rng() * 6)) }
+            let want = extractRuns(tiles)
+                .filter { run in run.cells.contains { asked.contains($0) } }
+            let got = runsTouching(asked, in: tiles)
+            #expect(
+                Set(want.map { "\($0.word)/\($0.direction)/\($0.cells)" })
+                    == Set(got.map { "\($0.word)/\($0.direction)/\($0.cells)" }))
+        }
+    }
+
+    @Test("a word touched at three of its letters comes back once")
+    func emitsEachRunOnce() {
+        let tiles = boardFrom(["cat"])
+        let runs = runsTouching([keyOf(0, 0), keyOf(0, 1), keyOf(0, 2)], in: tiles)
+        #expect(runs.map(\.word) == ["cat"])
+    }
+
+    @Test("an empty cell touches nothing")
+    func emptyCellsTouchNothing() {
+        #expect(runsTouching([keyOf(9, 9)], in: boardFrom(["cat"])).isEmpty)
+    }
+}
+
 @Suite("Board: extractRuns") struct BoardExtractRuns {
     @Test("finds across and down words")
     func findsAcrossAndDownWords() {

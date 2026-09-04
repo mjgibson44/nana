@@ -50,8 +50,11 @@ public let ZOOM_EPSILON: Double = 0.03
 public let CELL_BASE_REGULAR: Double = 44
 public let CELL_BASE_COMPACT: Double = 38
 
-/// The hairline gap between cells (the grid's 1px gap; part of the cell step).
-public let CELL_HAIRLINE: Double = 1
+/// The gap between cells, and the minimum space between two board tiles at
+/// any zoom: it is a constant number of points added to the cell step rather
+/// than something the pinch scales, so zooming out never closes the lattice
+/// up into a solid block.
+public let CELL_HAIRLINE: Double = 2
 
 public func clampZoom(_ zoom: Double) -> Double {
     min(MAX_ZOOM, max(MIN_ZOOM, zoom))

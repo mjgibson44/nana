@@ -29,6 +29,9 @@ final class BoardCamera {
 
     /// The start square, for the opening view.
     private var anchor = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2)
+    /// A fixed board opens showing all of it, rather than parked on the
+    /// start square.
+    private var fitWhole = false
     /// A new game asked for the opening view before the viewport had a size.
     private var homePending = true
 
@@ -77,12 +80,28 @@ final class BoardCamera {
     }
 
     /// A fresh board: zoomed out far enough for a long opener, with the start
-    /// square parked near the left edge and centred vertically.
-    func newGame(bounds: Bounds, anchor: Cell = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2)) {
+    /// square parked near the left edge and centred vertically — or, for a
+    /// board that never grows, the whole of it centred on screen.
+    func newGame(
+        bounds: Bounds, anchor: Cell = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2),
+        fitWhole: Bool = false
+    ) {
         self.bounds = bounds
         self.anchor = anchor
+        self.fitWhole = fitWhole
         homePending = true
         goHome()
+    }
+
+    /// The zoom that fits the whole board in the viewport, within the pinch
+    /// limits: a fifteen-wide board fits a phone; a nineteen needs a pinch.
+    var wholeBoardZoom: Double {
+        guard viewport.width > 0, viewport.height > 0 else { return 1 }
+        let cols = Double(bounds.maxCol - bounds.minCol + 1)
+        let rows = Double(bounds.maxRow - bounds.minRow + 1)
+        let fitAcross = (viewport.width / cols - CELL_HAIRLINE) / cellBase
+        let fitDown = (viewport.height / rows - CELL_HAIRLINE) / cellBase
+        return min(AUTO_ZOOM_MAX, max(MIN_ZOOM, min(fitAcross, fitDown)))
     }
 
     /// The zoom that fits `openingColumns` across the viewport — never past
@@ -96,6 +115,11 @@ final class BoardCamera {
     private func goHome() {
         guard viewport != .zero else { return }
         homePending = false
+        if fitWhole {
+            zoom = wholeBoardZoom
+            offset = centeredOffset(contentSize: metrics.contentSize, viewport: viewport)
+            return
+        }
         zoom = openingZoom
         let rect = metrics.rect(of: anchor)
         offset = clamped(

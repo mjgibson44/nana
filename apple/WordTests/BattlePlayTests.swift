@@ -272,6 +272,269 @@ final class BattlePlayTests: XCTestCase {
         XCTAssertNil(table.hostModel.battle)
     }
 
+    // MARK: A match nobody opened
+
+    /// A random match's field: every session starts as a client on one mesh,
+    /// with the rule that will deal it and the short claim window.
+    @MainActor
+    private struct Field {
+        var mesh: MemoryMesh
+        var clock: TestClock
+        var sessions: [PlayerID: BattleSession]
+        var models: [PlayerID: GameModel]
+        var starts: [PlayerID: Int]
+        var countdowns: [PlayerID: Int]
+        var abandoned: [PlayerID: Int]
+
+        var hosts: [PlayerID] { sessions.filter { $0.value.isHost }.map(\.key).sorted() }
+        subscript(_ id: PlayerID) -> BattleSession { sessions[id]! }
+    }
+
+    private func field(
+        _ rule: AutoStartRule, ids: [PlayerID], mode: GameMode = .battle,
+        seed: String = "random-seed"
+    ) -> Field {
+        var field = Field(
+            mesh: MemoryMesh(), clock: TestClock(), sessions: [:], models: [:],
+            starts: [:], countdowns: [:], abandoned: [:])
+        // The order of `ids` is the order of arrival; the mesh is connected
+        // in that order too, once every session exists.
+        for id in ids { seat(id, in: &field, rule: rule, mode: mode, seed: seed) }
+        for id in ids { field.mesh.connect(id) }
+        return field
+    }
+
+    /// A session that arrives at an existing field — a party's late arrival.
+    private func arrive(_ id: PlayerID, in field: inout Field, rule: AutoStartRule) {
+        seat(id, in: &field, rule: rule, mode: .battle, seed: "random-seed")
+        field.mesh.connect(id)
+    }
+
+    private func seat(
+        _ id: PlayerID, in field: inout Field, rule: AutoStartRule, mode: GameMode, seed: String
+    ) {
+        let transport = field.mesh.add(id)
+        let model = GameModel()
+        let clock = field.clock
+        let session = BattleSession(
+            role: .client, mode: mode, transport: transport, model: model,
+            displayName: { $0.capitalized }, makeSeed: { seed },
+            clock: { clock.now }, autoStart: rule,
+            announceTimeout: HOST_CLAIM_TIMEOUT_SECONDS)
+        field.sessions[id] = session
+        field.models[id] = model
+        field.starts[id] = 0
+        field.countdowns[id] = 0
+        field.abandoned[id] = 0
+    }
+
+    /// Wire the counters up. Done after the field is built so the closures
+    /// can write into a box rather than a struct copy.
+    private final class Tally {
+        var starts: [PlayerID: Int] = [:]
+        var countdowns: [PlayerID: Int] = [:]
+        var abandoned: [PlayerID: Int] = [:]
+    }
+
+    private func tally(_ field: Field) -> Tally {
+        let tally = Tally()
+        for (id, session) in field.sessions {
+            session.onGameStart = { tally.starts[id, default: 0] += 1 }
+            session.onCountdownBegin = { tally.countdowns[id, default: 0] += 1 }
+            session.onAbandoned = { tally.abandoned[id, default: 0] += 1 }
+        }
+        return tally
+    }
+
+    /// Run every session's clock forward together in half-second ticks, the
+    /// cadence of the app's heartbeat — the claim window, the re-announce
+    /// and the countdown are all tick-driven.
+    private func advance(_ field: Field, by seconds: Double) {
+        var elapsed = 0.0
+        while elapsed < seconds {
+            let step = min(0.5, seconds - elapsed)
+            elapsed += step
+            let now = field.clock.now.addingTimeInterval(step)
+            field.clock.now = now
+            for id in field.sessions.keys.sorted() {
+                field.sessions[id]?.tick(at: now)
+                field.models[id]?.advanceClock(at: now)
+            }
+        }
+    }
+
+    func testTwoClientsElectAHostWithoutAnAnnouncement() {
+        let field = field(.duel, ids: ["bea", "ann"])
+        XCTAssertTrue(field.hosts.isEmpty, "nobody opened this room")
+
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+
+        XCTAssertEqual(field.hosts, ["ann"], "the lowest id takes the chair")
+        XCTAssertEqual(field["bea"].hostID, "ann")
+        XCTAssertEqual(field["ann"].state?.players.map(\.id).sorted(), ["ann", "bea"])
+        XCTAssertEqual(field["bea"].state?.players.count, 2)
+        XCTAssertFalse(field["ann"].canStart, "a random match has no START")
+    }
+
+    func testADuelDealsItselfAfterTheCountdown() {
+        let field = field(.duel, ids: ["bea", "ann"])
+        let tally = tally(field)
+
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+        XCTAssertEqual(field["ann"].countdown, START_COUNTDOWN_SECONDS)
+        XCTAssertEqual(field["bea"].countdown, START_COUNTDOWN_SECONDS, "both screens count")
+
+        advance(field, by: Double(START_COUNTDOWN_SECONDS))
+        XCTAssertEqual(field["ann"].state?.phase, .playing)
+        XCTAssertEqual(tally.starts["ann"], 1)
+        XCTAssertEqual(tally.starts["bea"], 1)
+        XCTAssertEqual(field.models["ann"]?.mode, .battle)
+        XCTAssertEqual(
+            field.models["ann"]?.rack, field.models["bea"]?.rack,
+            "one seed, one shared stream")
+        XCTAssertNil(field["ann"].countdown)
+    }
+
+    func testAnOccupyDuelFoundAmongStrangersDealsItsSharedBoard() {
+        // The same road into Occupy: no host, no START, one board dealt on
+        // the countdown to two strangers.
+        let field = field(.duel, ids: ["bea", "ann"], mode: .occupy)
+        let tally = tally(field)
+
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+        XCTAssertEqual(field.hosts, ["ann"])
+        XCTAssertEqual(field["ann"].state?.mode, .occupy)
+        XCTAssertEqual(field["bea"].countdown, START_COUNTDOWN_SECONDS)
+        XCTAssertFalse(field["ann"].canStart, "nobody presses START in a random match")
+
+        advance(field, by: Double(START_COUNTDOWN_SECONDS))
+        XCTAssertEqual(field["ann"].state?.phase, .playing)
+        XCTAssertNotNil(field["ann"].state?.occupy, "the shared board was dealt")
+        XCTAssertEqual(field["ann"].state?.occupy?.seats.sorted(), ["ann", "bea"])
+        XCTAssertEqual(tally.starts["ann"], 1)
+        XCTAssertEqual(tally.starts["bea"], 1)
+        XCTAssertEqual(field.models["ann"]?.isOccupy, true)
+        XCTAssertEqual(field.models["bea"]?.isOccupy, true)
+    }
+
+    func testCountdownBeginFiresOnceOnEveryDevice() {
+        let field = field(.duel, ids: ["bea", "ann"])
+        let tally = tally(field)
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + Double(START_COUNTDOWN_SECONDS) + 1)
+        XCTAssertEqual(tally.countdowns["ann"], 1)
+        XCTAssertEqual(tally.countdowns["bea"], 1)
+    }
+
+    func testAPartyHoldsTheDoorTwentySecondsAfterTheLastArrival() {
+        var field = field(.party, ids: ["cal", "ann", "bea"])
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+        XCTAssertEqual(field.hosts, ["ann"])
+        XCTAssertEqual(field["ann"].state?.players.count, 3)
+        XCTAssertNil(field["ann"].countdown, "the door is open")
+
+        // Someone else lands twelve seconds in: the clock restarts.
+        advance(field, by: 12)
+        arrive("dan", in: &field, rule: .party)
+        advance(field, by: 0.5)
+        XCTAssertEqual(field["dan"].hostID, "ann", "told who referees on arrival")
+        XCTAssertEqual(field["ann"].state?.players.count, 4)
+
+        advance(field, by: PARTY_IDLE_SECONDS - 1.5)
+        XCTAssertNil(field["ann"].countdown)
+        advance(field, by: 1.5)
+        XCTAssertEqual(field["ann"].countdown, START_COUNTDOWN_SECONDS)
+        XCTAssertEqual(field["dan"].countdown, START_COUNTDOWN_SECONDS)
+
+        advance(field, by: Double(START_COUNTDOWN_SECONDS))
+        XCTAssertEqual(field["ann"].state?.phase, .playing)
+        XCTAssertEqual(field["dan"].state?.phase, .playing)
+        XCTAssertEqual(field.models["dan"]?.rack, field.models["cal"]?.rack)
+    }
+
+    func testTheCountdownCancelsWhenAnOpponentLeavesAndTheHostIsThenAbandoned() {
+        let field = field(.duel, ids: ["bea", "ann"])
+        let tally = tally(field)
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+        XCTAssertNotNil(field["ann"].countdown)
+
+        field["bea"].leave()
+        advance(field, by: 0.5)
+        XCTAssertNil(field["ann"].countdown)
+        XCTAssertEqual(field["ann"].state?.phase, .lobby)
+        XCTAssertEqual(field["ann"].state?.players.map(\.id), ["ann"])
+
+        // Alone with the door shut: the app is told once to search again.
+        advance(field, by: BattleSession.aloneSeconds - 1)
+        XCTAssertEqual(tally.abandoned["ann"], nil)
+        advance(field, by: 2)
+        XCTAssertEqual(tally.abandoned["ann"], 1)
+        advance(field, by: 10)
+        XCTAssertEqual(tally.abandoned["ann"], 1, "told once")
+        XCTAssertEqual(tally.starts["ann"], nil, "never dealt a game against no one")
+    }
+
+    func testAHostLeavingTheLobbyIsReplaced() {
+        let field = field(.party, ids: ["ann", "bea", "cal"])
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+        XCTAssertEqual(field.hosts, ["ann"])
+
+        field["ann"].leave()
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+
+        // Ann's session is gone from the mesh; the app drops it. Of those
+        // still in the room, exactly one referees.
+        XCTAssertEqual(field.hosts.filter { $0 != "ann" }, ["bea"], "the lowest id left takes over")
+        XCTAssertEqual(field["cal"].hostID, "bea")
+        XCTAssertEqual(field["bea"].state?.players.map(\.id).sorted(), ["bea", "cal"])
+        XCTAssertFalse(field["cal"].isReconnecting, "a lobby loss is not a reconnection")
+    }
+
+    func testTwoHostsConvergeOnTheLowestID() {
+        // The race a party's backfill can lose: a newcomer with a lower id
+        // claims the chair before it hears the established host. Lowest id
+        // wins on every device, so the two lobbies fold into one.
+        let mesh = MemoryMesh()
+        let clock = TestClock()
+        let seed = "random-seed"
+        func session(_ id: PlayerID, role: BattleSession.Role) -> BattleSession {
+            BattleSession(
+                role: role, transport: mesh.add(id), model: GameModel(),
+                displayName: { $0 }, makeSeed: { seed }, clock: { clock.now },
+                autoStart: .party, announceTimeout: HOST_CLAIM_TIMEOUT_SECONDS)
+        }
+        let mmm = session("mmm", role: .host)
+        let zzz = session("zzz", role: .client)
+        mesh.connect("mmm")
+        mesh.connect("zzz")
+        XCTAssertEqual(zzz.hostID, "mmm")
+
+        // A newcomer that already believes it's hosting.
+        let aaa = session("aaa", role: .host)
+        mesh.connect("aaa")
+        for _ in 0..<6 {
+            clock.now = clock.now.addingTimeInterval(0.5)
+            for s in [aaa, mmm, zzz] { s.tick(at: clock.now) }
+        }
+
+        XCTAssertTrue(aaa.isHost)
+        XCTAssertFalse(mmm.isHost, "the higher id stood down")
+        XCTAssertEqual(mmm.hostID, "aaa")
+        XCTAssertEqual(zzz.hostID, "aaa", "the client followed the lower announcer")
+        XCTAssertEqual(aaa.state?.players.map(\.id).sorted(), ["aaa", "mmm", "zzz"])
+        XCTAssertEqual(zzz.state?.players.count, 3)
+    }
+
+    func testLeavingDisconnectsTheTransport() {
+        let field = field(.duel, ids: ["bea", "ann"])
+        advance(field, by: HOST_CLAIM_TIMEOUT_SECONDS + 0.5)
+
+        field["bea"].leave()
+        XCTAssertFalse(
+            field.mesh.transport(for: "ann")?.remotePlayerIDs.contains("bea") ?? true,
+            "everyone else sees the seat empty at once")
+        XCTAssertEqual(field["ann"].state?.players.map(\.id), ["ann"])
+    }
+
     // MARK: Helpers
 
     /// Play any real word of `length` from the model's rack as the opener.

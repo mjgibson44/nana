@@ -3,8 +3,9 @@ import WordBoard
 import WordCore
 
 /// The game screen, top to bottom: header and pile gauge, the board, the
-/// word being built, the pile, and the four actions — one column with the
-/// same margin all round and the same gap between every section.
+/// word being built, the pile with shuffle beside it, and the row of word
+/// actions — one column with the same margin all round and the same gap
+/// between every section.
 struct GameScreen: View {
     /// The shared coordinate space every pointer event and frame reads —
     /// the port's stand-in for the web's client coordinates.
@@ -30,8 +31,8 @@ struct GameScreen: View {
     @State private var clockNow = Date.now
     /// The tile-lettered menu, in place of the platform's.
     @State private var menuOpen = false
-    /// The column's inner width, which sizes the tiles: `Spacing.columns`
-    /// across, always.
+    /// The column's inner width, which sizes the tiles: eight of them and
+    /// the shuffle button across, always.
     @State private var columnWidth: CGFloat = 358
     @FocusState private var gameFocused: Bool
     @Environment(\.snapshotRendering) private var snapshotRendering
@@ -46,24 +47,28 @@ struct GameScreen: View {
             VStack(spacing: Spacing.gap) {
                 VStack(spacing: Spacing.gap / 2) {
                     header
-                    PileGaugeView(count: model.pileCount, tone: model.pileTone)
-                    if !rivals.isEmpty {
-                        RivalGaugesView(rivals: rivals)
+                    if model.isOccupy {
+                        // The pile can't bury anyone here; the bar says who
+                        // holds how much of the board instead.
+                        OccupyBarView(segments: occupySegments)
+                    } else {
+                        PileGaugeView(count: model.pileCount, tone: model.pileTone)
+                        if !rivals.isEmpty {
+                            RivalGaugesView(rivals: rivals)
+                        }
                     }
                 }
                 boardArea
-                WordRowView(picks: model.pickList, tileSize: tileSize) { position in
+                WordRowView(
+                    picks: model.pickList, verdict: model.wordVerdict, tileSize: tileSize,
+                    width: columnWidth
+                ) { position in
                     model.removePick(at: position)
                     focusGame()
                 }
                 .allowsHitTesting(model.canAcceptInput)
-                PileView(
-                    letters: model.rack, picked: Set(model.picks), tileSize: tileSize
-                ) { index in
-                    model.togglePick(index)
-                    focusGame()
-                }
-                .allowsHitTesting(model.canAcceptInput)
+                pile
+                    .allowsHitTesting(model.canAcceptInput)
                 actions
                     .allowsHitTesting(model.canAcceptInput)
             }
@@ -166,7 +171,9 @@ struct GameScreen: View {
             camera.autoFit(box: box)
         }
         .onChange(of: model.gameSerial, initial: true) {
-            camera.newGame(bounds: model.bounds, anchor: GameModel.startCell)
+            // A fixed board is shown whole; a growing one opens on its start
+            // square with room for a long opener.
+            camera.newGame(bounds: model.bounds, anchor: model.startCell, fitWhole: model.isOccupy)
         }
         #if os(iOS)
         .onChange(of: sizeClass, initial: true) { _, sizeClass in
@@ -184,8 +191,33 @@ struct GameScreen: View {
             headlineLabel: headlineLabel,
             secondsToTiles: model.secondsToNextTiles(at: clockNow),
             tilesComing: model.nextTileCount,
+            clock: headerClock,
             onPause: pause,
             onMenu: openMenu)
+    }
+
+    /// Occupy's clock: the match clock, or the stall countdown once it's close.
+    private var headerClock: HeaderClock? {
+        guard let left = model.occupySecondsLeft(at: clockNow) else { return nil }
+        return HeaderClock(secondsLeft: left, stallSeconds: model.occupyStallSecondsLeft(at: clockNow))
+    }
+
+    /// Everyone's share of the board, yours first, for the balanced bar.
+    private var occupySegments: [OccupyBarView.Segment] {
+        guard let battle, let occupy = battle.state?.occupy else { return [] }
+        let scores = model.occupyScores.isEmpty ? occupy.scores : model.occupyScores
+        let viewer = model.occupySeat
+        var segments = occupy.seats.enumerated().map { seat, id in
+            OccupyBarView.Segment(
+                id: seat,
+                name: battle.contestants.first { $0.id == id }?.name ?? "Player",
+                value: scores.indices.contains(seat) ? scores[seat] : 0,
+                colors: SeatColors.of(seat: seat, viewer: viewer))
+        }
+        if let viewer, let mine = segments.firstIndex(where: { $0.id == viewer }) {
+            segments.insert(segments.remove(at: mine), at: 0)
+        }
+        return segments
     }
 
     /// Everyone else in the battle, in roster order, for the row of small
@@ -201,7 +233,8 @@ struct GameScreen: View {
             }
     }
 
-    /// The score — or, in a battle, where this player stands.
+    /// The score — or, in a battle, where this player stands. Occupy shows
+    /// the value held: the bar under it already says who's ahead.
     private var headline: String {
         if model.isBattle {
             return battle?.position.map(ordinal) ?? "—"
@@ -212,6 +245,9 @@ struct GameScreen: View {
     private var headlineLabel: String {
         if model.isBattle, let position = battle?.position {
             return "Standing \(ordinal(position))"
+        }
+        if model.isOccupy {
+            return model.isComplete ? "Final value \(model.score)" : "Board value \(model.score)"
         }
         return model.isComplete ? "Final score \(model.score)" : "Score \(model.score)"
     }
@@ -225,7 +261,7 @@ struct GameScreen: View {
                     model.setSummaryPresented(true)
                 })
         }
-        if model.isBattle {
+        if model.isBattle || model.isOccupy {
             if let battle, battle.isHost {
                 if battle.canRestart {
                     items.append(
@@ -338,9 +374,12 @@ struct GameScreen: View {
             metrics: camera.metrics,
             tiles: model.board.entries.map { (key: $0.key, letter: $0.value) },
             preview: model.preview,
+            previewIsGood: model.wordVerdict != .bad,
             aim: model.aim?.cells,
             aimIsGood: model.aim?.isGood ?? true,
-            wordsAt: model.wordsByCell.mapValues { $0.map(\.word) })
+            wordsAt: model.wordsByCell.mapValues { $0.map(\.word) },
+            owners: model.owners,
+            viewerSeat: model.occupySeat)
     }
 
     /// Placed words are permanent in every mode, and nothing is ever picked
@@ -446,7 +485,30 @@ struct GameScreen: View {
         }
     }
 
-    // MARK: The actions
+    // MARK: The pile and the actions
+
+    /// The pile, with shuffle beside it: the one button that acts on the
+    /// tiles rather than on the word stands with the tiles.
+    private var pile: some View {
+        HStack(alignment: .top, spacing: Spacing.gap) {
+            PileView(
+                letters: model.rack, picked: Set(model.picks), tileSize: tileSize
+            ) { index in
+                model.togglePick(index)
+                focusGame()
+            }
+            .frame(width: Spacing.pileWidth(tileSize: tileSize))
+            PileShuffleButton(height: pileHeight, disabled: !model.canShuffle) {
+                model.shufflePile()
+                focusGame()
+            }
+        }
+    }
+
+    /// Three rows of tiles and the gaps between them.
+    private var pileHeight: CGFloat {
+        CGFloat(Spacing.pileRows) * tileSize + CGFloat(Spacing.pileRows - 1) * Spacing.tileGap
+    }
 
     private var actions: some View {
         HStack(spacing: Spacing.tileGap) {
@@ -455,13 +517,6 @@ struct GameScreen: View {
                 disabled: !model.canClearWord
             ) {
                 model.clearWord()
-                focusGame()
-            }
-            ActionButton(
-                systemImage: "repeat", label: "Shuffle the pile",
-                disabled: !model.canShuffle
-            ) {
-                model.shufflePile()
                 focusGame()
             }
             if model.isFirstWord {
@@ -496,13 +551,13 @@ struct GameScreen: View {
         GameEndView(
             score: model.score,
             words: model.finalWords,
-            placing: model.isBattle ? battle?.position.map(ordinal) : nil,
-            standings: battleStandings,
+            placing: model.isBattle || model.isOccupy ? battle?.position.map(ordinal) : nil,
+            standings: model.isOccupy ? occupyStandings : battleStandings,
             note: endNote,
             restart: endRestart,
             onSeeGame: { model.setSummaryPresented(false) },
             onLobby: battle?.isHost == true ? { battle?.toLobby() } : nil,
-            leaveLabel: model.isBattle ? "LEAVE" : "HOME",
+            leaveLabel: model.isBattle || model.isOccupy ? "LEAVE" : "HOME",
             onLeave: onLeave)
     }
 
@@ -516,7 +571,16 @@ struct GameScreen: View {
     private var endNote: String? {
         guard let battle else { return nil }
         if battle.isFinished {
-            return battle.isHost ? nil : "Waiting for the host to restart or reopen the lobby."
+            let how: String? = {
+                guard model.isOccupy, let end = battle.state?.occupy?.end else { return nil }
+                switch end {
+                case .clock: return "Time."
+                case .stall: return "The board was stuck."
+                case .field: return "Everyone else left."
+                }
+            }()
+            let wait = battle.isHost ? nil : "Waiting for the host to restart or reopen the lobby."
+            return [how, wait].compactMap { $0 }.joined(separator: " ").nilIfEmpty
         }
         let standing = battle.contestants.filter { $0.outOrder == nil && $0.id != battle.selfID }
         return "You’re out — \(standing.count) still standing."
@@ -540,6 +604,17 @@ struct GameScreen: View {
             return GameEndView.Standing(
                 id: player.id, rank: finished ? row.rank : nil, name: player.name,
                 isSelf: player.id == battle.selfID, note: note)
+        }
+    }
+
+    /// Occupy's field by value, each row worth what its seat holds.
+    private var occupyStandings: [GameEndView.Standing] {
+        guard let battle else { return [] }
+        return battle.occupyStandings.map { row in
+            GameEndView.Standing(
+                id: row.player.id, rank: row.rank, name: row.player.name,
+                isSelf: row.player.id == battle.selfID,
+                note: row.player.left ? "left" : "\(row.value)")
         }
     }
 
@@ -611,4 +686,8 @@ struct GameScreen: View {
         return model
     }())
     .preferredColorScheme(.dark)
+}
+
+extension String {
+    fileprivate var nilIfEmpty: String? { isEmpty ? nil : self }
 }

@@ -11,12 +11,15 @@
 ///    standing wins.
 ///  - Tutorial: a guided walk through placing words, at your own pace.
 
-public enum GameMode: String, Sendable {
+public enum GameMode: String, Sendable, Codable {
     case endless, battle, tutorial
     /// New on Apple platforms, with no counterpart in `modes.ts`: one fixed
     /// deal a day, identical for every player (plan §8.2, `DailyDeal.swift`).
     /// A deliberate product divergence, not a porting slip.
     case daily
+    /// Also new on Apple platforms: two to four players on one fixed, shared
+    /// board, fighting over the same squares (`Occupy.swift`).
+    case occupy
 }
 
 /// How hard Solo leans on the player. Both paces are the same game — same
@@ -45,11 +48,11 @@ public struct ModeInfo {
     }
 }
 
-/// The doors out of the home screen — the two buttons that lead to a game.
+/// The doors out of the home screen — the buttons that lead to a game.
 /// Not the same list as GameMode: Solo raises a setup sheet for its pace on
-/// the way in, while Battle leads to a lobby before any game starts.
+/// the way in, while Battle and Occupy lead to a lobby before any game starts.
 public enum GameDoor: String, CaseIterable {
-    case solo, battle
+    case solo, battle, occupy
 }
 
 public let SOLO_INFO = ModeInfo(
@@ -90,6 +93,17 @@ public let BATTLE_ROYALE_INFO = ModeInfo(
     ]
 )
 
+/// Occupy's card: one board, capture by crossing, and a clock.
+public let OCCUPY_INFO = ModeInfo(
+    name: "Occupy",
+    tagline: "One board. Hold the most of it when the clock runs out (2–4 players).",
+    details: [
+        "Everyone plays on the same board, from opposite corners",
+        "Borrow a rival’s letter and it’s yours — every tile is worth its longest word",
+        "Most value when the clock runs out wins; a stuck board ends early",
+    ]
+)
+
 /// The card that offers the tutorial, before it starts. It fronts a first
 /// player's very first game as well as the tutorial they pick deliberately, so
 /// it reads as an offer either way — and either way it can be skipped.
@@ -120,6 +134,7 @@ public let DAILY_DEAL_INFO = ModeInfo(
 public let DOOR_INFO: [GameDoor: ModeInfo] = [
     .solo: SOLO_INFO,
     .battle: BATTLE_ROYALE_INFO,
+    .occupy: OCCUPY_INFO,
 ]
 
 // MARK: - Endless

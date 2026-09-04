@@ -7,6 +7,13 @@ import WordCore
 /// build, a party formed without a lobby creator).
 public let HOST_ANNOUNCE_TIMEOUT_SECONDS: TimeInterval = 3
 
+/// The shorter wait for a match with no natural host at all — strangers
+/// paired by automatch, where nobody opened the room. Everyone starts as a
+/// client, and the lowest id claims the referee's chair once this passes with
+/// no announcement heard. Two repeats of the host's once-a-second re-announce,
+/// so an established host in a match being backfilled is heard first.
+public let HOST_CLAIM_TIMEOUT_SECONDS: TimeInterval = 2
+
 public struct ClientEvents {
     public var onState: ((BattleState) -> Void)?
     public var onStart: ((String) -> Void)?
@@ -16,6 +23,12 @@ public struct ClientEvents {
     public var onRejected: ((String) -> Void)?
     /// Which player is refereeing, once known.
     public var onHostElected: ((PlayerID) -> Void)?
+    /// Occupy: our word numbered `serial` is down, or isn't.
+    public var onPlaced: ((Int) -> Void)?
+    public var onRefused: ((Int, String) -> Void)?
+    /// Nobody announced and this player has the lowest id: it should be the
+    /// one refereeing. The app stands up a host session in this one's place.
+    public var onShouldHost: (() -> Void)?
 
     public init(
         onState: ((BattleState) -> Void)? = nil,
@@ -23,7 +36,10 @@ public struct ClientEvents {
         onStop: (() -> Void)? = nil,
         onAttack: ((Int) -> Void)? = nil,
         onRejected: ((String) -> Void)? = nil,
-        onHostElected: ((PlayerID) -> Void)? = nil
+        onHostElected: ((PlayerID) -> Void)? = nil,
+        onPlaced: ((Int) -> Void)? = nil,
+        onRefused: ((Int, String) -> Void)? = nil,
+        onShouldHost: (() -> Void)? = nil
     ) {
         self.onState = onState
         self.onStart = onStart
@@ -31,6 +47,9 @@ public struct ClientEvents {
         self.onAttack = onAttack
         self.onRejected = onRejected
         self.onHostElected = onHostElected
+        self.onPlaced = onPlaced
+        self.onRefused = onRefused
+        self.onShouldHost = onShouldHost
     }
 }
 
@@ -52,17 +71,26 @@ public final class ClientSession {
     /// Injected rather than read from the wall clock, so the election timeout
     /// is deterministic in tests.
     private let clock: () -> Date
+    /// How long to listen for an announcement before electing.
+    private let announceTimeout: TimeInterval
     /// When we started listening, for the election timeout.
     private var listeningSince: Date
     /// True once we've said hello to the current host.
     private var greeted = false
+    /// True once the app has been told to host, so it's told once per election.
+    private var askedToHost = false
     /// Dropped while re-entering, exactly like the web: a send that can't be
     /// delivered is silently skipped rather than queued (spec §6).
     public private(set) var isReconnecting = false
 
-    public init(transport: BattleTransport, clock: @escaping () -> Date = { .now }) {
+    public init(
+        transport: BattleTransport,
+        clock: @escaping () -> Date = { .now },
+        announceTimeout: TimeInterval = HOST_ANNOUNCE_TIMEOUT_SECONDS
+    ) {
         self.transport = transport
         self.clock = clock
+        self.announceTimeout = announceTimeout
         listeningSince = clock()
 
         transport.onReceive = { [weak self] data, sender in
@@ -93,12 +121,16 @@ public final class ClientSession {
     /// Deterministic and identical on every client, so nobody has to agree
     /// out loud.
     private func electIfNeeded(at now: Date) {
-        guard hostID == nil, !isRejected else { return }
-        guard now.timeIntervalSince(listeningSince) >= HOST_ANNOUNCE_TIMEOUT_SECONDS else { return }
+        // A mid-game loss holds the seat and waits; it never elects.
+        guard hostID == nil, !isRejected, !isReconnecting else { return }
+        guard now.timeIntervalSince(listeningSince) >= announceTimeout else { return }
         let candidates = ([selfID] + transport.remotePlayerIDs).sorted()
         guard let elected = candidates.first, elected != selfID else {
-            // We are the lowest id: this session should have been a host. The
-            // app layer decides what to do; a client with no host stays quiet.
+            // We are the lowest id: this session should be the host. The app
+            // layer stands one up in its place — told once per election.
+            guard !askedToHost else { return }
+            askedToHost = true
+            events.onShouldHost?()
             return
         }
         adopt(host: elected)
@@ -115,6 +147,13 @@ public final class ClientSession {
             // joiner gets its own copy.
             guard proto == PROTOCOL_VERSION else {
                 fail("This battle is running a different version of the game.")
+                return
+            }
+            // Two referees can only meet in a match nobody opened, and then
+            // the lowest id wins — the rule the timeout fallback already
+            // applies, so every device lands on the same answer. A live host
+            // is only ever traded for a lower one.
+            if let hostID, sender > hostID, transport.remotePlayerIDs.contains(hostID) {
                 return
             }
             adopt(host: sender)
@@ -148,20 +187,36 @@ public final class ClientSession {
         case let .reject(reason):
             guard sender == hostID else { return }
             fail(reason)
+
+        case let .placed(serial):
+            guard sender == hostID else { return }
+            events.onPlaced?(serial)
+
+        case let .refused(serial, reason):
+            guard sender == hostID else { return }
+            events.onRefused?(serial, reason)
         }
     }
 
     private func adopt(host: PlayerID) {
         guard hostID != host else {
-            // Re-announced (a reconnect, a late broadcast): greet again so the
-            // host re-attaches our seat.
-            if !greeted { greet() }
+            // Re-announced (a reconnect, a late broadcast, the host's repeat
+            // to whoever hasn't sat down): greet again unless the host's own
+            // snapshot already seats us. A hello that landed before the host
+            // session existed is retried this way rather than never.
+            if !greeted || !isSeated { greet() }
             return
         }
         hostID = host
         greeted = false
+        askedToHost = false
         events.onHostElected?(host)
         greet()
+    }
+
+    /// Whether the host's latest snapshot has a seat for us.
+    private var isSeated: Bool {
+        state?.players.contains { $0.id == selfID } == true
     }
 
     private func greet() {
@@ -170,15 +225,25 @@ public final class ClientSession {
         send(.hello(proto: PROTOCOL_VERSION))
     }
 
-    /// The host vanished. There is no host migration in this protocol — the
-    /// lobby dies with its referee — but GameKit tells us in seconds instead of
-    /// the web's 115-second redial budget (plan §7.4).
+    /// The host vanished. Mid-game there is no host migration in this
+    /// protocol — the lobby dies with its referee — but GameKit tells us in
+    /// seconds instead of the web's 115-second redial budget (plan §7.4). In
+    /// the lobby nothing is lost by choosing again, so the election simply
+    /// re-runs: whoever is lowest among those left takes the chair.
     private func hostDisappeared(_ player: PlayerID) {
         guard player == hostID else { return }
         hostID = nil
         greeted = false
-        isReconnecting = true
+        askedToHost = false
+        isReconnecting = state?.phase == .playing
         listeningSince = clock()
+    }
+
+    /// Take a known referee without waiting to be told: a host that has just
+    /// stood down in favour of a lower id already knows who that is.
+    public func follow(host: PlayerID) {
+        guard !isRejected else { return }
+        adopt(host: host)
     }
 
     /// A player id came back — the same-id re-entry that reclaims a graced
@@ -212,6 +277,12 @@ public final class ClientSession {
     public func sendAttack(_ count: Int) {
         guard count > 0 else { return }
         send(.attack(count: count))
+    }
+
+    /// Occupy: a word let go of. The host answers with `placed` or `refused`
+    /// by the same serial — after a snapshot, if it went down.
+    public func sendPlacement(serial: Int, placement: OccupyPlacement) {
+        send(.place(serial: serial, placement: placement))
     }
 
     public func leave() {

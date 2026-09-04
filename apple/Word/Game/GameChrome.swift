@@ -13,6 +13,9 @@ struct GameHeaderView: View {
     /// sentence — "5 tiles in 24s" — because they only mean anything together:
     /// twenty seconds is nothing to fear or everything, depending.
     var tilesComing: Int?
+    /// Occupy: the match clock, and the stall countdown when one is running,
+    /// in place of the deal. Nothing lands from a clock there.
+    var clock: HeaderClock?
     /// Nil hides the pause button — a battle can't be paused, and neither can
     /// a game that's already over.
     var onPause: (() -> Void)?
@@ -32,7 +35,15 @@ struct GameHeaderView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(headlineLabel)
 
-            if let secondsToTiles {
+            if let clock {
+                Text(clock.text)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(clock.stallSeconds == nil ? Palette.inkSoft : Palette.gaugeWarn)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel(clock.spoken)
+            } else if let secondsToTiles {
                 Text(Self.dealText(tiles: tilesComing, seconds: secondsToTiles))
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Palette.inkSoft)
@@ -87,6 +98,69 @@ struct GameHeaderView: View {
     /// Under a minute reads as "14s"; past it, "1:45".
     static func clockText(_ seconds: Int) -> String {
         seconds < 60 ? "\(seconds)s" : formatSeconds(Double(seconds))
+    }
+}
+
+/// Occupy's header clock: the match clock, or — once the board has been
+/// quiet long enough for the stall rule to be close — how long until that
+/// ends it, so the ending is never a surprise.
+struct HeaderClock: Equatable {
+    var secondsLeft: Int
+    var stallSeconds: Int?
+
+    var text: String {
+        if let stallSeconds { return "Stuck? Ends in \(stallSeconds)s" }
+        return formatSeconds(Double(secondsLeft))
+    }
+
+    var spoken: String {
+        if let stallSeconds { return "Nobody has placed a word; the game ends in \(stallSeconds) seconds" }
+        return "\(secondsLeft) seconds left"
+    }
+}
+
+/// Occupy's balanced bar, in place of the pile gauge: everyone's share of
+/// the value on the board, in one strip — yours first, in green, then each
+/// rival in their colour. The divider is the whole story: push it their way.
+struct OccupyBarView: View {
+    struct Segment: Identifiable, Equatable {
+        var id: Int
+        var name: String
+        var value: Int
+        var colors: SeatColors
+    }
+
+    var segments: [Segment]
+
+    var body: some View {
+        let total = max(1, segments.reduce(0) { $0 + $1.value })
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                ForEach(segments) { segment in
+                    Rectangle()
+                        .fill(segment.colors.ink)
+                        .frame(width: proxy.size.width * Double(segment.value) / Double(total))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.surface)
+            .overlay {
+                // The half-way mark, so a two-player game reads as ahead or
+                // behind at a glance.
+                if segments.count == 2 {
+                    Rectangle()
+                        .fill(Palette.bg)
+                        .frame(width: 2)
+                }
+            }
+        }
+        .frame(height: 10)
+        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+        .animation(.easeOut(duration: 0.25), value: segments)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Board held")
+        .accessibilityValue(
+            segments.map { "\($0.name) \($0.value)" }.joined(separator: ", "))
     }
 }
 
@@ -192,62 +266,81 @@ struct RivalGaugesView: View {
     }
 }
 
-/// The word being built, in amber tiles, `Spacing.columns` to a row. Tapping
-/// a tile takes that letter back out.
+/// The word being built, on one line, in a colour that answers the only
+/// question about it: is this a word?
+///
+/// It never wraps. Up to eight letters the tiles are the pile's own size;
+/// past that every tile narrows so the whole word stays on one line — a word
+/// broken across two rows stops looking like a word. The row keeps a tile's
+/// height whatever it holds, so the board above it doesn't resize as letters
+/// are picked.
+///
+/// Tapping a tile takes that letter back out.
 struct WordRowView: View {
     var picks: [Pick]
+    /// Green when it reads, red when it doesn't, and the plain word colour
+    /// while there is still too little of it to judge.
+    var verdict: WordVerdict
+    /// The tile size the row would like — the pile's, so a short word looks
+    /// like the tiles it was built from.
     var tileSize: CGFloat
+    /// The full width the row has to lay a word out across.
+    var width: CGFloat
     var onRemove: (Int) -> Void
 
     var body: some View {
-        let columns = Spacing.columns
-        let rows = max(1, (picks.count + columns - 1) / columns)
-        VStack(spacing: Spacing.tileGap) {
-            ForEach(0..<rows, id: \.self) { row in
-                HStack(spacing: Spacing.tileGap) {
-                    ForEach(0..<columns, id: \.self) { column in
-                        let position = row * columns + column
-                        if position < picks.count {
-                            let pick = picks[position]
-                            Button {
-                                onRemove(position)
-                            } label: {
-                                if let letter = pick.letter {
-                                    LetterTile(text: letter, style: .accent, size: tileSize)
-                                } else {
-                                    GapTile(size: tileSize)
-                                }
-                            }
-                            .buttonStyle(PressedTileStyle())
-                            .accessibilityLabel(
-                                pick.letter.map { "Remove \($0.uppercased())" } ?? "Remove gap")
-                        } else {
-                            Color.clear.frame(width: tileSize, height: tileSize)
-                        }
+        let layout = Spacing.wordRow(count: picks.count, fitting: width, cap: tileSize)
+        HStack(spacing: layout.gap) {
+            ForEach(Array(picks.enumerated()), id: \.offset) { position, pick in
+                Button {
+                    onRemove(position)
+                } label: {
+                    if let letter = pick.letter {
+                        LetterTile(text: letter, style: style, size: layout.size)
+                    } else {
+                        GapTile(size: layout.size, isBad: verdict == .bad)
                     }
                 }
+                .buttonStyle(PressedTileStyle())
+                .accessibilityLabel(
+                    pick.letter.map { "Remove \($0.uppercased())" } ?? "Remove gap")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: tileSize)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Your word")
-        .accessibilityValue(
-            picks.isEmpty
-                ? "Empty"
-                : picks.map { $0.letter?.uppercased() ?? "gap" }.joined(separator: " "))
+        .accessibilityValue(spoken)
+    }
+
+    private var style: TileStyle { verdict == .bad ? .bad : .accent }
+
+    private var spoken: String {
+        guard !picks.isEmpty else { return "Empty" }
+        let letters = picks.map { $0.letter?.uppercased() ?? "gap" }.joined(separator: " ")
+        switch verdict {
+        case .good: return "\(letters), a word"
+        case .bad: return "\(letters), not a word"
+        case .unjudged: return letters
+        }
     }
 }
 
 /// A gap in the word: the square that will sit on a board letter.
 struct GapTile: View {
     var size: CGFloat
+    /// Red with the rest of the word when no letter on the board would make
+    /// one of it.
+    var isBad = false
 
     var body: some View {
+        let style: TileStyle = isBad ? .bad : .accent
         RoundedRectangle(cornerRadius: Spacing.tileRadius, style: .continuous)
-            .fill(Palette.accentBg)
+            .fill(style.fill)
             .overlay(
                 Image(systemName: "square.dashed")
                     .font(.system(size: size * 0.5, weight: .bold))
-                    .foregroundStyle(Palette.accent))
+                    .foregroundStyle(style.ink))
             .frame(width: size, height: size)
     }
 }
@@ -298,7 +391,40 @@ struct PileView: View {
     }
 }
 
-/// One of the four actions under the pile: an icon on a wide, short tile.
+/// Shuffle, standing on its own to the right of the pile and as tall as it.
+///
+/// Every other button acts on the word being built; this one only rearranges
+/// the letters it is built from, so it sits with the pile rather than in the
+/// row of word actions — where it was one indistinguishable icon in four, and
+/// where a mis-tap cost a word instead of nothing.
+struct PileShuffleButton: View {
+    /// The pile's height, so the two read as one block.
+    var height: CGFloat
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "repeat")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(Palette.inkSoft)
+                .frame(maxWidth: .infinity)
+                .frame(height: height)
+                .background(
+                    RoundedRectangle(cornerRadius: Spacing.tileRadius, style: .continuous)
+                        .fill(Palette.surface))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressedTileStyle())
+        .disabled(disabled)
+        .opacity(disabled ? 0.35 : 1)
+        .accessibilityLabel("Shuffle the pile")
+    }
+}
+
+/// One of the actions under the pile: an icon on a wide, short tile. The
+/// accented one is solid green with a dark mark on it — the screen's one
+/// "go", and the only place the bright green is a fill.
 struct ActionButton: View {
     var systemImage: String
     var label: String
@@ -310,7 +436,7 @@ struct ActionButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(accent ? Palette.accent : Palette.inkSoft)
+                .foregroundStyle(accent ? Palette.accentButtonInk : Palette.inkSoft)
                 .frame(maxWidth: .infinity)
                 .frame(height: Spacing.buttonHeight)
                 .background(

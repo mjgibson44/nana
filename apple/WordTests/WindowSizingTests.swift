@@ -49,6 +49,21 @@ final class WindowSizingTests: XCTestCase {
         XCTAssertLessThanOrEqual(size.width, maxWidth)
     }
 
+    /// The word row is one line however long the word, and always one tile
+    /// tall — a row that grew a second line would push the board up as the
+    /// word was being typed.
+    func testTheWordRowIsOneTileTallAtAnyLength() {
+        func row(_ count: Int) -> CGSize {
+            minimumSize(
+                of: WordRowView(
+                    picks: (0..<count).map { Pick(letter: "a", rackIndex: $0) },
+                    verdict: .good, tileSize: 33, width: 358, onRemove: { _ in }))
+        }
+        XCTAssertEqual(row(1).height, 33, accuracy: 0.5)
+        XCTAssertEqual(row(8).height, 33, accuracy: 0.5)
+        XCTAssertEqual(row(PILE_LIMIT).height, 33, accuracy: 0.5)
+    }
+
     /// The pile is always three rows: full or empty, it asks for the same
     /// height, so the board above it never jumps as tiles come and go.
     func testThePileIsAlwaysThreeRowsTall() {

@@ -102,8 +102,8 @@ final class GameCenter {
         let player = GKLocalPlayer.local
         if player.isAuthenticated {
             // Note this stays `signedIn` even when multiplayer is restricted:
-            // leaderboards and achievements work fine, and it's only Battle
-            // that has to be turned away (`battleBlockedReason`).
+            // leaderboards work fine, and it's only Battle that has to be
+            // turned away (`battleBlockedReason`).
             state = .signedIn(playerID: player.gamePlayerID, name: player.displayName)
             if let progression {
                 Task { await progression.signedIn(as: GameKitSubmitter()) }
@@ -129,10 +129,9 @@ final class GameCenter {
 
 /// `ProgressionSubmitter` over the real Game Center.
 ///
-/// Both calls are idempotent by design — a leaderboard keeps the best score and
-/// an achievement ignores a report lower than what it holds — which is what
-/// lets `Progression` queue first and send afterwards without worrying about
-/// sending something twice.
+/// The call is idempotent by design — a leaderboard keeps the best score — which
+/// is what lets `Progression` queue first and send afterwards without worrying
+/// about sending something twice.
 struct GameKitSubmitter: ProgressionSubmitter {
     func submit(_ score: PendingScore) async -> Bool {
         guard GKLocalPlayer.local.isAuthenticated else { return false }
@@ -148,19 +147,6 @@ struct GameKitSubmitter: ProgressionSubmitter {
             return true
         } catch {
             // Left queued; the next flush tries again.
-            return false
-        }
-    }
-
-    func report(_ achievement: AchievementProgress) async -> Bool {
-        guard GKLocalPlayer.local.isAuthenticated else { return false }
-        let report = GKAchievement(identifier: achievement.id.rawValue)
-        report.percentComplete = achievement.percentComplete
-        report.showsCompletionBanner = true
-        do {
-            try await GKAchievement.report([report])
-            return true
-        } catch {
             return false
         }
     }

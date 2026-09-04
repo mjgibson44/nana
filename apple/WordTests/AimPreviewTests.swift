@@ -4,7 +4,7 @@ import XCTest
 @testable import Word
 
 /// Press-and-hold on a placed letter: the staged word appears where it would
-/// land, amber when it reads and red when it doesn't. Nothing about it is a
+/// land, green when it reads and red when it doesn't. Nothing about it is a
 /// commit until the fingers come up, and a word that doesn't read is held up
 /// long enough to be read before it's taken back.
 @MainActor
