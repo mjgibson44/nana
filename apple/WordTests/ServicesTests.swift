@@ -73,45 +73,30 @@ final class AppSettingsTests: XCTestCase {
     func testDefaultsMatchTheWebAndPersistUnderTheSameKeys() {
         let store = MemoryStore()
         let settings = AppSettings(store: store)
-        // Sound is on until turned off; the theme follows the device.
+        // Sound and haptics are on until turned off.
         XCTAssertTrue(settings.soundEnabled)
         XCTAssertTrue(settings.hapticsEnabled)
-        XCTAssertEqual(settings.theme, .system)
-        XCTAssertNil(settings.theme.colorScheme)
 
-        settings.theme = .dark
         settings.soundEnabled = false
-        XCTAssertEqual(store.get("nana.theme.v1"), "dark")
+        settings.hapticsEnabled = false
         XCTAssertEqual(store.get("nana.sound.v1"), "off")
+        XCTAssertEqual(store.get("nana.haptics.v1"), "off")
 
         // A fresh instance over the same store reads it all back.
         let reloaded = AppSettings(store: store)
-        XCTAssertEqual(reloaded.theme, .dark)
         XCTAssertFalse(reloaded.soundEnabled)
+        XCTAssertFalse(reloaded.hapticsEnabled)
     }
 
-    func testGarbageThemeFallsBackToSystem() {
-        let store = MemoryStore(["nana.theme.v1": "chartreuse"])
-        XCTAssertEqual(AppSettings(store: store).theme, .system)
-    }
-
-    func testPaceAndOnboardingRoundTrip() {
+    func testThePaceRoundTrips() {
         let store = MemoryStore()
         let settings = AppSettings(store: store)
         XCTAssertEqual(settings.pace, .regular)
-        XCTAssertFalse(settings.hasSeenTutorialOffer())
-        XCTAssertFalse(settings.hasSeen(door: .solo))
 
         settings.pace = .fast
-        settings.markTutorialOfferSeen()
-        settings.markSeen(door: .solo)
 
         let reloaded = AppSettings(store: store)
         XCTAssertEqual(reloaded.pace, .fast)
-        XCTAssertTrue(reloaded.hasSeenTutorialOffer())
-        XCTAssertTrue(reloaded.hasSeen(door: .solo))
-        // Doors are tracked one at a time.
-        XCTAssertFalse(reloaded.hasSeen(door: .battle))
     }
 
     func testFinishedGamesRecordToStats() {

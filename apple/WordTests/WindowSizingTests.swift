@@ -8,24 +8,21 @@ import XCTest
 /// The board draws the whole lattice — over 1,400pt square at default zoom —
 /// and it must never be the layout's *ideal* size. When it was, macOS took it
 /// as the window's minimum: the window opened 1,714pt tall on a 1,084pt
-/// screen, couldn't be resized down, and the word bar and pile fell off the
-/// bottom entirely. These tests measure the minimum size the screens actually
+/// screen, couldn't be resized down, and the pile fell off the bottom
+/// entirely. These tests measure the minimum size the screens actually
 /// demand, so that can't come back.
 @MainActor
 final class WindowSizingTests: XCTestCase {
     /// Comfortably smaller than any laptop screen. Height is the dimension the
-    /// bug lived in (a 1,714pt-tall window on a 1,084pt screen), so it is held
-    /// strictly; width is looser because the tutorial's instruction text
-    /// legitimately wants a readable line length.
+    /// bug lived in, so it is held strictly.
     private let maxHeight: CGFloat = 520
     private let maxWidth: CGFloat = 700
 
-    private func playedModel() -> GameModel {
+    private func playedModel() async throws -> GameModel {
         let model = GameModel()
         model.newGame(seed: "sizing", pace: .regular, now: .now)
-        model.cellClick(keyOf(16, 16))
-        model.togglePick(0)
-        if let target = model.target { model.commit(target.key, target.dir) }
+        await model.loadDictionary()
+        try TestPlays.placeOpener(on: model)
         return model
     }
 
@@ -36,8 +33,8 @@ final class WindowSizingTests: XCTestCase {
         NSHostingView(rootView: view).fittingSize
     }
 
-    func testTheGameScreenFitsInASmallWindow() {
-        let size = minimumSize(of: GameScreen(model: playedModel()))
+    func testTheGameScreenFitsInASmallWindow() async throws {
+        let size = try await minimumSize(of: GameScreen(model: playedModel()))
         XCTAssertLessThanOrEqual(
             size.height, maxHeight,
             "the game screen demands \(size.height)pt of height — something inside it "
@@ -45,41 +42,24 @@ final class WindowSizingTests: XCTestCase {
         XCTAssertLessThanOrEqual(size.width, maxWidth, "the game screen demands \(size.width)pt of width")
     }
 
-    func testTheTutorialScreenFitsToo() {
-        let model = GameModel()
-        model.newTutorial()
-        let size = minimumSize(of: GameScreen(model: model))
-        XCTAssertLessThanOrEqual(size.height, maxHeight)
-        XCTAssertLessThanOrEqual(size.width, maxWidth)
-    }
-
     func testTheHomeScreenFitsInASmallWindow() {
         let size = minimumSize(
-            of: HomeScreen(
-                hasSavedGame: true,
-                daily: DailyStatus(
-                    deal: dailyDeal(at: .now), result: nil, streak: 12),
-                onResume: {}, onDaily: {}, onChoose: { _ in }, onTutorial: {},
-                onStats: {}, onSettings: {}))
+            of: HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {}))
         XCTAssertLessThanOrEqual(size.height, maxHeight)
         XCTAssertLessThanOrEqual(size.width, maxWidth)
     }
-    #endif
 
-    #if os(macOS)
-    /// The pile is the other view that can run away: a bare `LazyVGrid` asked
-    /// for its ideal size stacks every tile into a single column.
-    func testThePileStaysABoundedHeight() {
-        let model = playedModel()
-        let size = minimumSize(
-            of: RackView(
-                letters: model.rack, hiddenIndex: nil, picks: [], pointerEvent: { _ in },
-                downTarget: { index, letter in .rackTile(index: index, letter: letter) },
-                onShuffle: {}))
-        XCTAssertLessThanOrEqual(
-            size.height, 220,
-            "the pile demands \(size.height)pt — it should scroll past a few rows, not grow")
-        XCTAssertGreaterThan(size.height, 40, "but it must still show a row of tiles")
+    /// The pile is always three rows: full or empty, it asks for the same
+    /// height, so the board above it never jumps as tiles come and go.
+    func testThePileIsAlwaysThreeRowsTall() {
+        let empty = minimumSize(
+            of: PileView(letters: [], picked: [], tileSize: 32, onTap: { _ in }))
+        let full = minimumSize(
+            of: PileView(
+                letters: Array(repeating: "r", count: PILE_LIMIT), picked: [],
+                tileSize: 32, onTap: { _ in }))
+        XCTAssertEqual(empty.height, full.height)
+        XCTAssertEqual(empty.height, 32 * 3 + Spacing.tileGap * 2, accuracy: 0.5)
     }
     #endif
 
@@ -93,13 +73,13 @@ final class WindowSizingTests: XCTestCase {
         XCTAssertGreaterThan(metrics.contentSize.width, 1_400)
     }
 
-    /// A render at a real window size, for eyeballing that the header, word bar
-    /// and pile are all on screen together.
-    func testGameScreenRendersAtWindowSize() throws {
+    /// A render at the Mac window's opening size, for eyeballing that the
+    /// header, board, word row, pile and buttons are all on screen together.
+    func testGameScreenRendersAtWindowSize() async throws {
         let renderer = ImageRenderer(
-            content: GameScreen(model: playedModel())
-                .frame(width: 980, height: 760)
-                .environment(\.colorScheme, .light))
+            content: try await GameScreen(model: playedModel())
+                .frame(width: 440, height: 900)
+                .environment(\.colorScheme, .dark))
         renderer.scale = 2
         let image = try XCTUnwrap(renderer.cgImage)
         let url = URL(fileURLWithPath: "/tmp/word-game-at-window-size.png")

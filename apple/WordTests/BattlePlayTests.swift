@@ -11,7 +11,6 @@ import XCTest
 @MainActor
 final class BattlePlayTests: XCTestCase {
 
-    /// A host and a client wired to one mesh, each with its own board.
     /// A clock the test moves by hand, shared by both sessions and both
     /// boards — the same instant everywhere, which is what lets a whole
     /// battle play out in milliseconds.
@@ -19,6 +18,7 @@ final class BattlePlayTests: XCTestCase {
         var now = Date(timeIntervalSinceReferenceDate: 0)
     }
 
+    /// A host and a client wired to one mesh, each with its own board.
     private struct Table {
         var mesh: MemoryMesh
         var clock: TestClock
@@ -103,7 +103,8 @@ final class BattlePlayTests: XCTestCase {
             table.hostModel.rack, table.clientModel.rack,
             "one seed, one shared stream — the whole point")
         XCTAssertEqual(table.hostModel.mode, .battle)
-        XCTAssertTrue(table.hostModel.boardLocked, "words are permanent in a battle")
+        XCTAssertEqual(table.host.position, 1, "everyone starts level")
+        XCTAssertEqual(table.client.position, 1)
     }
 
     func testTheDripLandsTheSameBatchOnBothBoards() {
@@ -133,17 +134,18 @@ final class BattlePlayTests: XCTestCase {
 
     // MARK: Attacks
 
-    func testAWordSendsTilesToTheRivalWithoutPuttingLettersOnTheWire() throws {
+    func testAWordSendsTilesToTheRivalWithoutPuttingLettersOnTheWire() async throws {
         let table = table()
         table.host.start()
         let before = table.clientModel.rack.count
 
         // The host plays a word worth an attack.
-        try playWord(on: table.hostModel, length: 5)
+        try await playWord(on: table.hostModel, length: 5)
         advance(table, by: 1)
 
         XCTAssertGreaterThan(
             table.clientModel.rack.count, before, "the rival's pile grew")
+        XCTAssertGreaterThan(table.hostModel.attackTilesSent, 0)
         // The letters were drawn locally from a private stream, so they are
         // *not* the host's letters.
         let hostAttackStream = TileStream(seed: "battle-seed-1/attacks/client")
@@ -166,7 +168,7 @@ final class BattlePlayTests: XCTestCase {
         table.host.start()
 
         // Bury the client under a heavy attack.
-        table.clientModel.receiveAttack(BATTLE_PILE_LIMIT)
+        table.clientModel.receiveAttack(PILE_LIMIT)
 
         XCTAssertTrue(table.clientModel.isComplete)
         XCTAssertEqual(table.clientModel.endReason, .buried)
@@ -176,7 +178,7 @@ final class BattlePlayTests: XCTestCase {
     func testABuriedPlayerBecomesASpectatorAndTakesNoMoreTiles() {
         let table = table()
         table.host.start()
-        table.clientModel.receiveAttack(BATTLE_PILE_LIMIT)
+        table.clientModel.receiveAttack(PILE_LIMIT)
         XCTAssertTrue(table.client.isSpectating)
 
         let buriedPile = table.clientModel.rack.count
@@ -188,13 +190,53 @@ final class BattlePlayTests: XCTestCase {
         let table = table()
         table.host.start()
 
-        table.clientModel.receiveAttack(BATTLE_PILE_LIMIT)
+        table.clientModel.receiveAttack(PILE_LIMIT)
         advance(table, by: 1)
 
         let seat = table.host.state?.players.first { $0.id == "client" }
         XCTAssertEqual(seat?.buried, true)
         XCTAssertEqual(table.host.state?.phase, .finished)
         XCTAssertEqual(table.host.state?.winnerId, "host")
+    }
+
+    func testADecidedBattleFinishesTheWinnersBoardToo() {
+        let table = table()
+        table.host.start()
+
+        table.clientModel.receiveAttack(PILE_LIMIT)
+        advance(table, by: 1)
+
+        // The winner's board is frozen and reported as a win; the loser's
+        // stays the burial it already was.
+        XCTAssertTrue(table.hostModel.isComplete)
+        XCTAssertEqual(table.hostModel.endReason, .battleOver)
+        XCTAssertTrue(table.hostModel.battleWon)
+        XCTAssertTrue(table.hostModel.outcome.report.battleWon)
+        XCTAssertEqual(table.hostModel.outcome.report.battlePlayers, 2)
+        XCTAssertEqual(table.clientModel.endReason, .buried)
+        XCTAssertFalse(table.clientModel.battleWon)
+
+        // The placings the results show.
+        XCTAssertEqual(table.host.position, 1)
+        XCTAssertEqual(table.client.position, 2)
+        XCTAssertTrue(table.host.selfWon)
+        XCTAssertTrue(table.host.canRestart, "two seats are still filled")
+        XCTAssertFalse(table.client.canRestart, "only the host deals again")
+    }
+
+    func testTheHostCanDealAnotherGameFromTheResults() {
+        let table = table()
+        table.host.start()
+        table.clientModel.receiveAttack(PILE_LIMIT)
+        advance(table, by: 1)
+        XCTAssertEqual(table.host.state?.phase, .finished)
+
+        table.host.restart()
+
+        XCTAssertEqual(table.host.state?.phase, .playing)
+        XCTAssertFalse(table.hostModel.isComplete)
+        XCTAssertFalse(table.clientModel.isComplete)
+        XCTAssertEqual(table.hostModel.rack, table.clientModel.rack)
     }
 
     // MARK: Spectating
@@ -227,45 +269,20 @@ final class BattlePlayTests: XCTestCase {
 
         table.hostModel.newGame(pace: .regular)
         XCTAssertFalse(table.hostModel.isBattle)
-        XCTAssertFalse(table.hostModel.boardLocked, "solo boards are editable again")
         XCTAssertNil(table.hostModel.battle)
     }
 
     // MARK: Helpers
 
-    /// Play any real word of `length` from the model's rack. Battle boards are
-    /// locked, so only real words land — which makes this the honest way to
-    /// exercise the attack path.
-    private func playWord(on model: GameModel, length: Int) throws {
-        // The dictionary has to be in before a locked board will accept
-        // anything.
-        let expectation = expectation(description: "dictionary")
-        Task { await model.loadDictionary(); expectation.fulfill() }
-        wait(for: [expectation], timeout: 10)
-        let dictionary = try XCTUnwrap(model.dictionary)
-
-        let rack = model.rack
-        for combo in orderedPicks(from: Array(rack.indices), choose: length) {
-            let word = combo.map { rack[$0] }.joined()
-            guard dictionary.contains(word) else { continue }
-            for index in combo { model.togglePick(index) }
-            if model.handle(.confirm), model.board.count >= length { return }
-            model.handle(.escape)
+    /// Play any real word of `length` from the model's rack as the opener.
+    private func playWord(on model: GameModel, length: Int) async throws {
+        // The dictionary has to be in before anything is allowed down.
+        await model.loadDictionary()
+        guard let (_, indices) = TestPlays.spellableWord(in: model, lengths: [length]) else {
+            throw XCTSkip("this rack can't spell a \(length)-letter word")
         }
-        throw XCTSkip("this rack can't spell a \(length)-letter word")
-    }
-
-    private func orderedPicks(from items: [Int], choose k: Int) -> [[Int]] {
-        guard k > 0 else { return [[]] }
-        var result: [[Int]] = []
-        for (offset, item) in items.enumerated() {
-            var rest = items
-            rest.remove(at: offset)
-            for tail in orderedPicks(from: rest, choose: k - 1) {
-                result.append([item] + tail)
-                if result.count > 3_000 { return result }
-            }
-        }
-        return result
+        for index in indices { model.togglePick(index) }
+        XCTAssertTrue(model.handle(.confirm))
+        XCTAssertEqual(model.board.count, length)
     }
 }

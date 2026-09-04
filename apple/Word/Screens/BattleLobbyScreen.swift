@@ -6,15 +6,12 @@ import WordNet
 /// button that starts it.
 ///
 /// The roster is the host's snapshot, so it is the same list on every screen —
-/// including the seats being *held* for someone whose connection dropped. That
-/// distinction is the lobby's real job: a battle plays on without a
-/// disconnected player rather than pausing for them (plan §7.4), so their seat
-/// has to read as held rather than gone, or the field looks like it lost
-/// someone it hasn't.
+/// including the seats being *held* for someone whose connection dropped. A
+/// battle plays on without a disconnected player rather than pausing for
+/// them (plan §7.4), so their seat has to read as held rather than gone.
 struct BattleLobbyScreen: View {
     var state: BattleState?
     var selfID: String
-    var hostID: String?
     var isHost: Bool
     var canStart: Bool
     var isReconnecting: Bool
@@ -22,120 +19,103 @@ struct BattleLobbyScreen: View {
     var rejection: String?
     var onStart: () -> Void
     var onLeave: () -> Void
-    var scrollable = true
 
     private var players: [BattlePlayer] {
         (state?.players ?? []).filter { !$0.left }
     }
 
     var body: some View {
-        PageScaffold(
-            eyebrow: BATTLE_ROYALE_INFO.name.uppercased(),
-            title: "Lobby",
-            onClose: onLeave,
-            scrollable: scrollable
-        ) {
-            if let rejection {
-                noticeCard(
-                    icon: "exclamationmark.triangle.fill",
-                    text: rejection,
-                    tone: Ink.badInk)
-            } else if isReconnecting {
-                noticeCard(
-                    icon: "antenna.radiowaves.left.and.right",
-                    text: "Reconnecting — your seat is held for "
-                        + "\(Int(RECONNECT_GRACE_SECONDS)) seconds.",
-                    tone: Ink.warnInk)
-            }
+        ScreenColumn {
+            Spacer()
+            VStack(spacing: Spacing.tileGap) {
+                TileWord(text: "LOBBY", style: .accent)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.bottom, Spacing.tileGap)
 
-            HStack(spacing: 12) {
-                PageStat(
-                    value: "\(players.count)",
-                    label: players.count == 1 ? "Player" : "Players")
-                PageStat(value: "\(BATTLE_MAX_PLAYERS)", label: "Seats")
-            }
-
-            PageSection("Who's here") {
-                if players.isEmpty {
-                    Text("Waiting for the roster…")
-                        .font(.callout)
-                        .foregroundStyle(Ink.ink.opacity(0.7))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    VStack(spacing: 5) {
-                        ForEach(players) { player in
-                            seatRow(player)
-                        }
-                    }
+                if let rejection {
+                    note(rejection, tone: Palette.gaugeBad)
+                } else if isReconnecting {
+                    note(
+                        "Reconnecting — your seat is held for "
+                            + "\(Int(RECONNECT_GRACE_SECONDS)) seconds.",
+                        tone: Palette.gaugeWarn)
                 }
-            }
 
-            if isHost {
-                VStack(spacing: 8) {
-                    Button("Start the battle", action: onStart)
-                        .buttonStyle(InkActionButtonStyle(primary: true))
-                        .disabled(!canStart)
+                roster
+                    .padding(.vertical, Spacing.tileGap)
+
+                if isHost {
+                    TileWordButton(
+                        text: "START", style: canStart ? .accentButton : .plain,
+                        disabled: !canStart, action: onStart)
                     if !canStart {
-                        Text(
-                            "A battle needs at least \(BATTLE_MIN_PLAYERS) players."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(Ink.ink.opacity(0.7))
+                        note("A battle needs at least \(BATTLE_MIN_PLAYERS) players.")
                     }
+                } else {
+                    note("Waiting for the host to start.")
                 }
-            } else {
-                Text("Waiting for the host to start.")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Ink.ink.opacity(0.7))
-            }
 
-            Button("Leave", action: onLeave)
-                .buttonStyle(InkActionButtonStyle())
+                TileWordButton(text: "LEAVE", action: onLeave)
+                    .padding(.top, Spacing.tileGap)
+            }
+            Spacer()
         }
     }
 
     @ViewBuilder
-    private func seatRow(_ player: BattlePlayer) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: player.host ? "crown.fill" : "person.fill")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(Ink.ink.opacity(player.connected ? 0.85 : 0.35))
-                .frame(width: 20)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(player.id == selfID ? "\(player.name) (you)" : player.name)
-                    .font(.callout.bold())
-                    .foregroundStyle(Ink.ink.opacity(player.connected ? 1 : 0.55))
-                if let note = note(for: player) {
-                    Text(note)
-                        .font(.caption2)
-                        .foregroundStyle(Ink.ink.opacity(0.65))
+    private var roster: some View {
+        VStack(spacing: Spacing.tileGap) {
+            if players.isEmpty {
+                note("Waiting for the roster…")
+            } else {
+                ForEach(players) { player in
+                    seatRow(player)
                 }
             }
+        }
+        .frame(width: Spacing.tile * 8 + Spacing.tileGap * 7)
+    }
 
-            Spacer(minLength: 4)
-
-            if !player.connected {
-                // Held, not lost — the battle plays on around them.
-                Text("Holding")
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Ink.warnBg))
-                    .foregroundStyle(Ink.warnInk)
+    private func seatRow(_ player: BattlePlayer) -> some View {
+        HStack(spacing: 8) {
+            Text(player.name.uppercased())
+                .font(.system(size: 15, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(Palette.ink.opacity(player.connected ? 1 : 0.5))
+                .lineLimit(1)
+            if player.id == selfID {
+                chip("YOU")
+            }
+            if player.host {
+                chip("HOST")
+            }
+            Spacer(minLength: 6)
+            if let status = status(for: player) {
+                Text(status)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(player.connected ? Palette.inkSoft : Palette.gaugeWarn)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Ink.surface))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Ink.lineSoft, lineWidth: 2))
+        .frame(height: Spacing.tile)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.tileRadius, style: .continuous)
+                .fill(Palette.surface))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(for: player))
     }
 
-    private func note(for player: BattlePlayer) -> String? {
-        if player.host { return "Refereeing" }
-        if player.waiting { return "Joined mid-game — in from the next one" }
+    private func chip(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .tracking(1)
+            .foregroundStyle(Palette.accent)
+    }
+
+    private func status(for player: BattlePlayer) -> String? {
+        // Held, not lost — the battle plays on around them.
+        if !player.connected { return "holding" }
+        if player.waiting { return "next game" }
         return nil
     }
 
@@ -147,20 +127,12 @@ struct BattleLobbyScreen: View {
         return parts.joined(separator: ", ")
     }
 
-    @ViewBuilder
-    private func noticeCard(icon: String, text: String, tone: Color) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .bold))
-            Text(text)
-                .font(.caption.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .foregroundStyle(tone)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Ink.surfaceAlt))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tone.opacity(0.5), lineWidth: 2))
-        .accessibilityElement(children: .combine)
+    private func note(_ text: String, tone: Color = Palette.inkSoft) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(tone)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 300)
+            .padding(.vertical, Spacing.tileGap)
     }
 }

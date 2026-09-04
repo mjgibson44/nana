@@ -12,15 +12,49 @@ names, exactly as plan §13 anticipated. The web app carries the same name.
 **Phases 0–2 are complete; phase 3 is code-complete and signing against a real team;
 phase 4 needs matchmaking and its spike.** What's left in both is behavior that can only
 be exercised on hardware with a real Apple ID — there has been no Game Center sandbox
-since 2016 (TN2417). What runs today: Solo (both paces), the **Daily Deal**, and the guided
-tutorial, playable on iPhone, iPad and Mac.
+since 2016 (TN2417). What runs today: Solo (both paces) and Battle's lobby and board,
+built phone-first. The Mac target still compiles and runs the test suite, but the layout
+is the phone's and the Mac is not a release target for now.
+
+### The redesign (September 2026)
+
+The iPhone app was reworked around a much smaller rule set and a minimalist, tile-lettered
+dark UI. The rules, in one breath:
+
+- **Build a word from the pile** by tapping letters (or typing, on a hardware keyboard).
+  They line up in the word row, ten to a line.
+- **The first word** lands from the start square heading across, with the ✓ button that
+  takes the gap button's place until it's down. It is the only word placed by fiat, and
+  the only one that previews on the board as it's typed.
+- **Every later word borrows a letter** already on the board: put a gap tile where the
+  borrowed letter goes and tap that letter. The word arranges itself around it, across
+  or down, whichever spells real words. There is no tapping the board to choose a
+  square, no typing onto the board, and no direction to pick.
+- **Words are permanent.** Nothing on the board moves, turns, comes back off, or undoes —
+  so only real words are allowed down, in Solo as much as in Battle.
+- **The pile is the only pressure.** Reach `PILE_LIMIT` (30) tiles in hand and the game
+  ends on the spot, in either mode. The gauge under the header fills toward it and turns
+  amber at 21 and red at 25; the pile is drawn as three rows of ten whatever it holds, so
+  a full pile looks like the end.
+
+Retired with it: undo/redo, dragging tiles, the selected-word controls, the loose-tile
+deadline, the Daily Deal, the tutorial, and the stats and settings pages. Sound and
+haptics stay on unless a stored preference says otherwise. Battle keeps its lobby,
+codes and invites; its header shows the player's placing ("1st") instead of a score, and
+the results screen carries the standings and the player's words.
+
+Every screen is built from the same pieces (`Screens/TileText.swift`): words spelled in
+tiles, one margin round the outside, one gap between sections, one gap between tiles.
+The palette and spacing live in `Theme.swift`. Screens render offscreen in
+`ScreenSnapshotTests` (PNGs in `/tmp/word-*.png`), and `WORD_AUTOSTART=solo` in the
+launch environment opens straight onto a game so a simulator can be screenshotted.
 
 | Package / target | What it is |
 |---|---|
 | `Packages/WordCore` | The game core in pure Swift — **bit-exact with the web game** via golden fixtures generated from the TypeScript core (`npm run gen:fixtures`), so the same seed deals the same letters on both platforms. |
 | `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold-to-drag, locked-board semantics, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
 | `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
-| `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for occupied cells, one gesture pipeline feeding board and rack, the editing loop with undo/redo, the paced Solo session, the tutorial, home/stats/settings screens, synthesized audio + haptics, and save/restore across process death. `Board/BoardInputBridge.swift` is the one place that reaches past SwiftUI into UIKit/AppKit, for the three things SwiftUI won't report: the live pinch midpoint, the pointer's actual device kind, and Mac scroll wheels. |
+| `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for placed cells, one gesture pipeline for board taps and pans, the word-building loop, the paced Solo session, the battle session and its results, the tile-lettered home and battle screens, synthesized audio + haptics, and save/restore across process death. `Board/BoardInputBridge.swift` is the one place that reaches past SwiftUI into UIKit/AppKit, for the three things SwiftUI won't report: the live pinch midpoint, the pointer's actual device kind, and Mac scroll wheels. |
 
 ```bash
 cd apple/Packages/WordCore  && swift test   # core + golden parity fixtures
@@ -42,28 +76,14 @@ its file order is determinism-critical).
 
 Conventions and the porting API contract live in [`PORTING.md`](PORTING.md).
 
-### The Daily Deal
+### The Daily Deal (retired from the app)
 
-One fixed deal a day, the same letters for everyone, no clock — `DailyDeal.swift` in
-`WordCore` plus a row on the home screen. It works because `TileStream` grows its deal off
-a *hidden* board rather than the player's, so one seed yields the same letters however
-differently two people play them; Solo's own deal path grows tiles off the live board and
-would diverge on the first move.
-
-The knobs the plan leaves open (§16.3) sit together in `DailyRules` rather than scattered
-through the code, because each is a product decision that wants playtesting:
-
-| Knob | Default | Why |
-|---|---|---|
-| `resetHourUTC` | 8 | Midnight US Pacific / 9am Central European. UTC midnight — the obvious pick — flips the puzzle mid-afternoon in the US. **Must agree with the recurring leaderboard's occurrence boundary** when phase 3 lands. |
-| `tileCount` | 30 | A fixed deal, not a timed run: the score should say how well you used the letters, not how fast you type. |
-| `attemptsPerDay` | 1 | The daily-puzzle ritual. Interrupted games still resume — this stops restarting, not resuming. |
-
-The seed is salted so the day's letters aren't derivable from the date alone (§8.4) — a
-speed bump, not a lock, which is the posture the plan already accepts for v1. Results are
-recorded against the day a game was *started* on and flagged `withinDay: false` if the
-puzzle rolled over mid-game, so phase 3 knows not to submit them. Streaks are computed from
-the *set* of days played, which is the shape §9.1's iCloud merge needs.
+The mode is gone from the app, but `DailyDeal.swift` and `DailyRules` stay in `WordCore`
+with their tests: the recurring leaderboard is already configured against them in App
+Store Connect, and `Progression` still knows how to file a daily result should the mode
+come back. The seed is salted so the day's letters aren't derivable from the date alone
+(§8.4), and `TileStream` grows its deal off a *hidden* board so one seed yields the same
+letters however differently two people play them.
 
 ### Progression, leaderboards and achievements
 
@@ -332,12 +352,13 @@ apple/
   Word/                         # the app target (SwiftUI)
     Board/                      #   camera, board rendering, pointer surface,
                                 #   the UIKit/AppKit input bridge
-    Game/                       #   model, Solo + Battle clocks, screen + chrome, tutorial
-    Screens/                    #   router, home, doors/cards, stats, settings,
-                                #   battle entry + lobby
+    Game/                       #   model, Solo + Battle clocks, the game screen, its
+                                #   chrome (header, gauge, word row, pile, actions),
+                                #   overlays and the results screen
+    Screens/                    #   router, home, battle entry + lobby, and the tile
+                                #   lettering every screen is built from
     Services/                   #   audio synthesis, storage, settings, saved games,
-                                #   Daily Deal results, progression, battle session,
-                                #   Game Center auth, matchmaking, the GKMatch
-                                #   transport
+                                #   progression, battle session, Game Center auth,
+                                #   matchmaking, the GKMatch transport
   WordTests/                    # app-layer rendering, editing + lifecycle tests
 ```

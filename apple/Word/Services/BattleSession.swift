@@ -35,6 +35,9 @@ final class BattleSession {
     private let client: ClientSession?
     private weak var model: GameModel?
     private var ticker: Task<Void, Never>?
+    /// The phase the last snapshot was in, so the finish is handled once, on
+    /// the way in, rather than on every broadcast after it.
+    private var lastPhase: BattlePhase?
 
     /// Told when a game starts, so the router can show the board.
     var onGameStart: (() -> Void)?
@@ -101,15 +104,56 @@ final class BattleSession {
         return state.players.filter { !$0.left }.count >= BATTLE_MIN_PLAYERS
     }
 
+    // MARK: Standings
+
+    /// Everyone dealt into this game, standing or fallen.
+    var contestants: [BattlePlayer] {
+        (state?.players ?? []).filter { !$0.waiting }
+    }
+
+    var isFinished: Bool { state?.phase == .finished }
+
+    var selfWon: Bool {
+        guard let winner = state?.winnerId else { return false }
+        return winner == selfID
+    }
+
+    /// The field ranked: the last one standing first, then everyone else in
+    /// reverse order of falling — the results table.
+    var standings: [RankedPlayer<BattlePlayer>] {
+        rankByElimination(contestants)
+    }
+
+    /// Where this player stands right now, 1-based. While the battle runs it
+    /// is the live order of everyone still standing, by score; once this
+    /// player has fallen — or the battle is decided — it is their final
+    /// placing, which the fall order fixes the moment they go out.
+    var position: Int? {
+        let field = contestants
+        guard let me = field.first(where: { $0.id == selfID }) else { return nil }
+        if isFinished || me.outOrder != nil {
+            return standings.first { $0.player.id == selfID }?.rank
+        }
+        let ahead = field.filter { $0.outOrder == nil && $0.score > me.score }.count
+        return ahead + 1
+    }
+
+    /// A battle can only go again with enough seats still filled.
+    var canRestart: Bool {
+        guard isHost, isFinished, let state else { return false }
+        return state.players.filter { $0.connected && !$0.left }.count >= BATTLE_MIN_PLAYERS
+    }
+
     // MARK: Driving it
 
     /// Start the heartbeat.
     ///
     /// Cancelled by `leave()` rather than a `deinit` — a nonisolated `deinit`
     /// can't touch main-actor state under strict concurrency, and the router
-    /// owns the session's lifetime anyway. Both sessions need a regular `tick` — the host to
-    /// expire seat graces and ping, the client to notice a stale link and to
-    /// fall back on host election when no announcement arrives.
+    /// owns the session's lifetime anyway. Both sessions need a regular
+    /// `tick` — the host to expire seat graces and ping, the client to notice
+    /// a stale link and to fall back on host election when no announcement
+    /// arrives.
     func run() {
         ticker?.cancel()
         ticker = Task { [weak self] in
@@ -133,7 +177,15 @@ final class BattleSession {
         host?.start()
     }
 
-    func stop() {
+    /// The host deals everyone into another game straight from the results.
+    func restart() {
+        guard canRestart else { return }
+        host?.start()
+    }
+
+    /// The host gathers everyone back in the lobby.
+    func toLobby() {
+        guard isHost else { return }
         host?.stop()
     }
 
@@ -148,18 +200,28 @@ final class BattleSession {
 
     private func bind() {
         host?.events = HostEvents(
-            onState: { [weak self] state in self?.state = state },
+            onState: { [weak self] state in self?.adopt(state) },
             onStart: { [weak self] seed in self?.beginGame(seed: seed) },
             onStop: { [weak self] in self?.endGame() },
             onAttack: { [weak self] count in self?.model?.receiveAttack(count) })
 
         client?.events = ClientEvents(
-            onState: { [weak self] state in self?.state = state },
+            onState: { [weak self] state in self?.adopt(state) },
             onStart: { [weak self] seed in self?.beginGame(seed: seed) },
             onStop: { [weak self] in self?.endGame() },
             onAttack: { [weak self] count in self?.model?.receiveAttack(count) },
             onRejected: { [weak self] reason in self?.rejection = reason },
             onHostElected: { [weak self] id in self?.hostID = id })
+    }
+
+    /// The host's latest snapshot. The one transition that reaches the board
+    /// is into `finished`: whoever is still standing is finished there too.
+    private func adopt(_ state: BattleState) {
+        let previous = lastPhase
+        self.state = state
+        lastPhase = state.phase
+        guard state.phase == .finished, previous != .finished else { return }
+        model?.finishBattle(won: state.winnerId == selfID, players: contestants.count)
     }
 
     private func beginGame(seed: String) {

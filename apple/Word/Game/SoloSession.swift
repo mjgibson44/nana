@@ -33,9 +33,11 @@ enum SoloPhase: Equatable {
 }
 
 enum SoloEndReason: Equatable {
+    /// The pile filled up. The one way to lose, in every mode.
     case buried
-    /// The Daily Deal handed in. Not a loss — there is nothing to survive.
-    case dailyDone
+    /// The battle was decided while this board was still standing — as the
+    /// winner, or as half of a draw.
+    case battleOver
 }
 
 /// Cards that briefly cover the board and freeze a Solo countdown.
@@ -48,15 +50,9 @@ enum SoloSplash: Equatable {
     case resumed
 }
 
-enum SoloClockEffect: Equatable {
-    case none
-    case deal(tiles: Int)
-    case buried
-}
-
-/// The pressure-clock state machine. It owns no board or random generator;
-/// an expiry emits an effect and `GameModel` applies the corresponding deal
-/// or freezes the final score.
+/// The tile clock. It owns no board or random generator; an expiry says how
+/// many tiles to deal and `GameModel` deals them. It has no opinion about
+/// losing — the pile is the model's business.
 struct SoloSession: Equatable {
     private(set) var pace: SoloPace
     private(set) var phase: SoloPhase = .initial
@@ -72,24 +68,6 @@ struct SoloSession: Equatable {
         // The opening card is readable content, so the initial clock starts
         // frozen and is released when the card is dismissed.
         countdown = .paused(remaining: Double(endlessInitialSeconds(pace)))
-    }
-
-    /// The tutorial: a lesson has nothing to run out of, so there is no
-    /// countdown and no opening card holding one (App.tsx:379–380, 584–590).
-    init(tutorialAt _: Date) {
-        pace = .regular
-        countdown = nil
-        splash = nil
-    }
-
-    /// The Daily Deal: one fixed deal, no clock. The opening card exists to
-    /// hold a frozen countdown behind something readable, so with no clock
-    /// there's nothing for it to do — today's puzzle is introduced on the home
-    /// screen and by its explainer, not by a card in front of the board.
-    init(dailyAt _: Date) {
-        pace = .regular
-        countdown = nil
-        splash = nil
     }
 
     /// A battle: no countdown of its own. The pressure is the drip and the
@@ -142,19 +120,13 @@ struct SoloSession: Equatable {
         normalizeCountdown(at: now)
     }
 
-    /// Handle at most one expiry. Like the web app, returning from a long
-    /// background interval deals one batch and starts a fresh round rather
-    /// than replaying every interval that elapsed while suspended.
-    mutating func advance(at now: Date, looseTiles: Int) -> SoloClockEffect {
+    /// Handle at most one expiry, returning how many tiles it deals. Like the
+    /// web app, returning from a long background interval deals one batch and
+    /// starts a fresh round rather than replaying every interval that elapsed
+    /// while suspended.
+    mutating func advance(at now: Date) -> Int? {
         guard !complete, case let .running(endsAt) = countdown, now >= endsAt else {
-            return .none
-        }
-
-        // The limit is a deadline, not an instant loss: the player gets the
-        // remainder of this drip round to work back down to twenty.
-        if phase == .drip, looseTiles > ENDLESS_LOOSE_LIMIT {
-            finish(reason: .buried)
-            return .buried
+            return nil
         }
 
         let elapsed = phase == .drip ? dripsElapsed + 1 : 0
@@ -170,7 +142,7 @@ struct SoloSession: Equatable {
         countdown = clockHeld
             ? .paused(remaining: Double(seconds))
             : .running(endsAt: now.addingTimeInterval(Double(seconds)))
-        return .deal(tiles: tiles)
+        return tiles
     }
 
     mutating func finish(reason: SoloEndReason) {

@@ -12,8 +12,7 @@ final class SoloSessionTests: XCTestCase {
 
         XCTAssertEqual(session.splash, .start)
         XCTAssertEqual(session.remaining(at: start.addingTimeInterval(500)), 120)
-        XCTAssertEqual(
-            session.advance(at: start.addingTimeInterval(500), looseTiles: 99), .none)
+        XCTAssertNil(session.advance(at: start.addingTimeInterval(500)))
 
         session.dismissSplash(at: start)
         XCTAssertEqual(session.remaining(at: start.addingTimeInterval(30)), 90)
@@ -21,50 +20,39 @@ final class SoloSessionTests: XCTestCase {
         session.pause(at: start.addingTimeInterval(30))
         XCTAssertTrue(session.paused)
         XCTAssertEqual(session.remaining(at: start.addingTimeInterval(500)), 90)
-        XCTAssertEqual(
-            session.advance(at: start.addingTimeInterval(500), looseTiles: 99), .none)
+        XCTAssertNil(session.advance(at: start.addingTimeInterval(500)))
 
         session.resume(at: start.addingTimeInterval(500))
         XCTAssertFalse(session.paused)
         XCTAssertEqual(session.remaining(at: start.addingTimeInterval(589)), 1)
-        XCTAssertEqual(
-            session.advance(at: start.addingTimeInterval(590), looseTiles: 99),
-            .deal(tiles: 5))
+        XCTAssertEqual(session.advance(at: start.addingTimeInterval(590)), 5)
         XCTAssertEqual(session.phase, .drip)
         XCTAssertEqual(session.remaining(at: start.addingTimeInterval(590)), 45)
-        XCTAssertEqual(
-            session.advance(at: start.addingTimeInterval(590), looseTiles: 99), .none,
+        XCTAssertNil(
+            session.advance(at: start.addingTimeInterval(590)),
             "one wall-clock expiry must never deal twice")
     }
 
-    func testGoingOverLimitOnlyEndsAtADripDeadline() {
+    func testTheClockOnlyDealsAndNeverEndsTheGame() {
+        // The pile is the model's business: the clock has no opinion about
+        // losing, however many tiles are out.
         var session = SoloSession(pace: .fast, now: start)
         session.dismissSplash(at: start)
-
-        // The opening expiry starts the drip phase even if the opening pile
-        // itself is over the eventual loose-tile limit.
-        XCTAssertEqual(
-            session.advance(at: start.addingTimeInterval(60), looseTiles: 99),
-            .deal(tiles: 3))
+        XCTAssertEqual(session.advance(at: start.addingTimeInterval(60)), 3)
+        XCTAssertEqual(session.advance(at: start.addingTimeInterval(75)), 3)
         XCTAssertFalse(session.complete)
-
-        XCTAssertEqual(
-            session.advance(at: start.addingTimeInterval(75), looseTiles: 21), .buried)
-        XCTAssertTrue(session.complete)
-        XCTAssertEqual(session.endReason, .buried)
-        XCTAssertNil(session.countdown)
+        XCTAssertNil(session.endReason)
     }
 
     func testFastBatchGrowthRaisesASplashAndHoldsTheNewRound() {
         var session = SoloSession(pace: .fast, now: start)
         session.dismissSplash(at: start)
         var expiry = start.addingTimeInterval(60)
-        XCTAssertEqual(session.advance(at: expiry, looseTiles: 0), .deal(tiles: 3))
+        XCTAssertEqual(session.advance(at: expiry), 3)
 
         for elapsed in 1...8 {
             expiry = expiry.addingTimeInterval(15)
-            let effect = session.advance(at: expiry, looseTiles: 0)
-            XCTAssertEqual(effect, .deal(tiles: elapsed == 8 ? 4 : 3))
+            XCTAssertEqual(session.advance(at: expiry), elapsed == 8 ? 4 : 3)
         }
 
         XCTAssertEqual(session.dripsElapsed, 8)
@@ -77,27 +65,24 @@ final class SoloSessionTests: XCTestCase {
 final class SoloGameModelTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 2_000)
 
-    func testClockDealSurvivesUndoAndNextDeadlineCanBuryThePile() {
+    func testTheClockDealsAndAFullPileEndsTheGame() {
         let model = GameModel()
         model.newGame(seed: "phase-2b-clock", pace: .fast, now: start)
         model.dismissSplash(at: start)
+        let opening = model.rack.count
 
-        let originalCount = model.rack.count
-        model.togglePick(0)
-        XCTAssertTrue(model.handle(.confirm))
-        XCTAssertEqual(model.rack.count, originalCount - 1)
-
-        model.advanceClock(at: start.addingTimeInterval(60))
+        var now = start.addingTimeInterval(60)
+        model.advanceClock(at: now)
         XCTAssertEqual(model.phase, .drip)
-        XCTAssertEqual(model.rack.count, originalCount + 2)
+        XCTAssertEqual(model.rack.count, opening + 3)
+        XCTAssertFalse(model.isComplete)
 
-        model.undo()
-        XCTAssertTrue(model.board.isEmpty)
-        XCTAssertEqual(
-            model.rack.count, originalCount + 3,
-            "undo restores the move but keeps every clock-dealt tile")
-
-        model.advanceClock(at: start.addingTimeInterval(75))
+        // Three tiles a round: the pile reaches the limit on the fourth.
+        for _ in 0..<3 {
+            now = now.addingTimeInterval(15)
+            model.advanceClock(at: now)
+        }
+        XCTAssertGreaterThanOrEqual(model.rack.count, PILE_LIMIT)
         XCTAssertTrue(model.isComplete)
         XCTAssertTrue(model.showSummary)
         XCTAssertEqual(model.endReason, .buried)
@@ -125,34 +110,23 @@ final class SoloGameModelTests: XCTestCase {
         XCTAssertEqual(model.remainingSeconds(at: start.addingTimeInterval(604)), 1)
     }
 
-    func testBoardClearBanksBonusAndRefillsWithoutChangingScore() async throws {
+    func testABattleCannotBePaused() {
         let model = GameModel()
-        model.newGame(seed: "hello", pace: .regular, now: start)
-        await model.loadDictionary()
-        let puzzle = try generatePuzzle(
-            wordPool: commonWords, tileCount: ENDLESS_START_TILES, rng: seededRng("hello"))
-        let solution = try XCTUnwrap(puzzle.solution)
+        model.newBattle(seed: "battle", selfID: "me", now: start)
+        XCTAssertFalse(model.canPause)
+        model.pause(at: start)
+        XCTAssertFalse(model.isPaused)
+    }
 
-        for (key, letter) in solution.entries {
-            let index = findAvailable(rack: model.rack, letter: letter, taken: [])
-            XCTAssertNotEqual(index, -1)
-            model.cellClick(key)
-            model.togglePick(index)
-            if let target = model.target { model.commit(target.key, target.dir) }
-        }
+    func testTheHeaderClockCountsToTheNextBatch() {
+        let model = GameModel()
+        model.newGame(seed: "clock", pace: .regular, now: start)
+        model.dismissSplash(at: start)
+        XCTAssertEqual(model.secondsToNextTiles(at: start.addingTimeInterval(10)), 110)
 
-        XCTAssertTrue(model.rack.isEmpty)
-        XCTAssertTrue(model.boardClearReady)
-        let scoreWithLiveBonus = model.score
-
-        model.claimBoardClear()
-        XCTAssertEqual(model.bankedBonus, ENDLESS_CONNECT_BONUS)
-        XCTAssertEqual(model.rack.count, ENDLESS_CLEAR_TILES)
-        XCTAssertEqual(model.score, scoreWithLiveBonus)
-
-        model.finishGame(reason: .buried)
-        XCTAssertEqual(model.finalScore, scoreWithLiveBonus)
-        XCTAssertFalse(model.finalWords.isEmpty)
-        XCTAssertTrue(model.showSummary)
+        let battle = GameModel()
+        battle.newBattle(seed: "battle", selfID: "me", now: start)
+        XCTAssertEqual(
+            battle.secondsToNextTiles(at: start.addingTimeInterval(5)), BATTLE_DRIP_SECONDS - 5)
     }
 }

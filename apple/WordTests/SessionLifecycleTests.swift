@@ -12,7 +12,7 @@ final class RecordingCues: GameCueSink {
     func reset() { played = [] }
 }
 
-/// The seven cues fire off game events exactly where the web plays them.
+/// The cues fire off game events exactly where the web plays them.
 @MainActor
 final class GameCueTests: XCTestCase {
     private func playableModel(seed: String = "cues") -> (GameModel, RecordingCues) {
@@ -23,12 +23,10 @@ final class GameCueTests: XCTestCase {
         return (model, cues)
     }
 
-    func testLandingAWordSoundsTheCommitCue() {
+    func testLandingAWordSoundsTheCommitCue() async throws {
         let (model, cues) = playableModel()
-        model.cellClick(keyOf(16, 16))
-        model.togglePick(0)
-        guard let target = model.target else { return XCTFail("no anchored target") }
-        model.commit(target.key, target.dir)
+        await model.loadDictionary()
+        try TestPlays.placeOpener(on: model)
         XCTAssertEqual(cues.played, [.commit])
     }
 
@@ -56,25 +54,21 @@ final class GameCueTests: XCTestCase {
         XCTAssertEqual(cues.played.filter { $0 == .tick }.count, 3)
     }
 
-    func testCrossingTheLooseLimitAlarmsAndReArms() {
+    func testEnteringTheRedSoundsTheAlarmOnce() {
         let (model, cues) = playableModel()
         model.dismissSplash(at: .now)
-        // Reach the drip phase, where the loose gauge is live.
         var now = Date.now.addingTimeInterval(Double(endlessInitialSeconds(.regular)) + 1)
-        model.advanceClock(at: now)
-        XCTAssertEqual(model.phase, .drip)
 
-        // Deal until the pile crosses the limit; each expiry adds a batch.
-        var alarms = 0
+        // Deal until the pile is in the red — but not full.
         var guard_ = 0
-        while model.looseTiles <= ENDLESS_LOOSE_LIMIT, guard_ < 20 {
-            now = now.addingTimeInterval(Double(endlessDripSeconds(model.dripsElapsed, .regular)) + 1)
+        while model.pileTone != .urgent, !model.isComplete, guard_ < 20 {
             model.advanceClock(at: now)
+            now = now.addingTimeInterval(Double(endlessDripSeconds(model.dripsElapsed, .regular)) + 1)
             guard_ += 1
         }
-        alarms = cues.played.filter { $0 == .overflow }.count
-        XCTAssertGreaterThan(model.looseTiles, ENDLESS_LOOSE_LIMIT)
-        XCTAssertEqual(alarms, 1, "one alarm per crossing, not one per deal")
+        XCTAssertEqual(model.pileTone, .urgent)
+        XCTAssertFalse(model.isComplete)
+        XCTAssertEqual(cues.played.filter { $0 == .overflow }.count, 1, "one alarm per crossing")
     }
 
     func testTheEndOfTheGameSoundsTheLoseCue() {
@@ -97,14 +91,12 @@ final class SavedGameTests: XCTestCase {
         XCTAssertNil(model.savedGame(), "nothing has happened yet")
     }
 
-    func testAPlayedGameRoundTripsThroughStorage() {
+    func testAPlayedGameRoundTripsThroughStorage() async throws {
         let store = MemoryStore()
         let model = GameModel()
         model.newGame(seed: "save", pace: .fast, now: .now)
-        model.cellClick(keyOf(16, 16))
-        model.togglePick(0)
-        guard let target = model.target else { return XCTFail("no anchored target") }
-        model.commit(target.key, target.dir)
+        await model.loadDictionary()
+        try TestPlays.placeOpener(on: model)
 
         guard let snapshot = model.savedGame() else { return XCTFail("expected a save") }
         snapshot.save(to: store)
@@ -120,17 +112,17 @@ final class SavedGameTests: XCTestCase {
         XCTAssertEqual(restored.rack, model.rack)
         XCTAssertEqual(restored.pace, .fast)
         XCTAssertEqual(restored.seed, "save")
+        XCTAssertFalse(restored.isFirstWord, "the opener is down, so the next word borrows")
     }
 
-    func testARestoredClockComesBackHeldAtItsRemainingTime() {
+    func testARestoredClockComesBackHeldAtItsRemainingTime() async throws {
         let store = MemoryStore()
         let model = GameModel()
         let start = Date(timeIntervalSince1970: 1_000)
         model.newGame(seed: "save", pace: .regular, now: start)
         model.dismissSplash(at: start)
-        model.cellClick(keyOf(16, 16))
-        model.togglePick(0)
-        if let target = model.target { model.commit(target.key, target.dir) }
+        await model.loadDictionary()
+        try TestPlays.placeOpener(on: model)
 
         // Put it away 30 seconds in.
         let away = start.addingTimeInterval(30)
@@ -170,99 +162,19 @@ final class SavedGameTests: XCTestCase {
         XCTAssertNil(SavedSoloGame.load(from: store))
     }
 
-    func testAFinishedGameIsNotAGameToComeBackTo() {
+    func testAFinishedGameIsNotAGameToComeBackTo() async throws {
         let model = GameModel()
         model.newGame(seed: "save", pace: .regular, now: .now)
-        model.cellClick(keyOf(16, 16))
-        model.togglePick(0)
-        if let target = model.target { model.commit(target.key, target.dir) }
+        await model.loadDictionary()
+        try TestPlays.placeOpener(on: model)
         XCTAssertNotNil(model.savedGame())
         model.finishGame(reason: .buried)
         XCTAssertNil(model.savedGame())
     }
-}
 
-/// The guided lesson walks its script, enforces the gap step, and can be
-/// skipped from any point.
-@MainActor
-final class TutorialTests: XCTestCase {
-    func testTheLessonOpensOnStepOneWithItsWordSpelledOut() {
+    func testABattleIsNeverSaved() {
         let model = GameModel()
-        model.newTutorial()
-        XCTAssertTrue(model.isTutorial)
-        XCTAssertEqual(model.tutorialProgress?.step, 1)
-        XCTAssertEqual(model.tutorialProgress?.of, TUTORIAL_STEPS)
-        // Step one's tiles are dealt in order, not shuffled: the lesson is
-        // about getting a word down at all.
-        XCTAssertEqual(model.rack, tutorialScript[0].tiles)
-        // A lesson has no clock to run out.
-        XCTAssertFalse(model.showsClock)
-        XCTAssertNil(model.countdown)
-        XCTAssertFalse(model.showsLooseGauge)
-    }
-
-    func testSkippingEveryStepPlaysTheScriptAndWalksThePlayerOut() {
-        let model = GameModel()
-        var walkedOut = false
-        model.onTutorialWalkedOut = { walkedOut = true }
-        model.newTutorial()
-
-        for _ in 0..<TUTORIAL_STEPS {
-            model.skipTutorialStep()
-        }
-        XCTAssertTrue(model.tutorialFinished)
-        // Every scripted word made it onto the board.
-        let words = Set(extractRuns(model.board).map(\.word))
-        for step in tutorialScript {
-            XCTAssertTrue(words.contains(step.word), "\(step.word) should be on the board")
-        }
-        XCTAssertTrue(walkedOut, "a player who skipped the lot is handed on")
-    }
-
-    func testPlayingStepOneDealsStepTwosTiles() {
-        let model = GameModel()
-        model.newTutorial()
-        let step = tutorialScript[0]
-
-        // Type the step's word from the pile and land it on the pre-anchored
-        // middle square.
-        for letter in step.word.map(String.init) { model.typeLetter(letter) }
-        guard let target = model.target else { return XCTFail("no anchored target") }
-        model.commit(target.key, target.dir)
-
-        XCTAssertEqual(model.tutorialProgress?.step, 2)
-        // The next step's tiles arrived.
-        XCTAssertEqual(model.rack, tutorialScript[1].tiles)
-    }
-
-    func testTheGapStepRefusesTheSameWordTypedOverTheBoardLetter() {
-        // The final step insists the word be played *through* a gap tile.
-        guard let gapIndex = tutorialScript.firstIndex(where: \.needsGap) else {
-            return XCTFail("the script should have a gap step")
-        }
-        let model = GameModel()
-        model.newTutorial()
-        // Skip up to the gap step, which plays each earlier word for us.
-        for _ in 0..<gapIndex { model.skipTutorialStep() }
-        XCTAssertEqual(model.tutorialProgress?.step, gapIndex + 1)
-        XCTAssertEqual(model.rack, tutorialScript[gapIndex].tiles)
-
-        // The scripted placement uses a gap and is accepted.
-        let step = tutorialScript[gapIndex]
-        guard
-            let played = scriptedPlacement(
-                board: model.board, bounds: model.bounds, step: step, rack: model.rack)
-        else { return XCTFail("the script should be playable") }
-        XCTAssertTrue(played.picks.contains { $0.letter == nil }, "the step plays through a gap")
-        model.commit(
-            keyOf(played.anchor.row, played.anchor.col), played.dir, picksToPlace: played.picks)
-        XCTAssertTrue(model.tutorialFinished)
-    }
-
-    func testTheTutorialNeverOffersAGameToResume() {
-        let model = GameModel()
-        model.newTutorial()
-        model.skipTutorialStep()
-        XCTAssertNil(model.savedGame(), "a lesson is not a run to lose")
+        model.newBattle(seed: "battle", selfID: "me")
+        XCTAssertNil(model.savedGame(), "a battle is host-driven; there is nothing to come back to")
     }
 }
