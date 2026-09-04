@@ -4,29 +4,22 @@ import WordCore
 /// An in-progress solo game, serialized so it survives process death.
 ///
 /// New on Apple platforms and deliberately so (plan §6.1): the OS routinely
-/// kills backgrounded apps, and losing a 30-minute endless run to a phone call
-/// is a regression web players never hit. The board is plain serializable data,
-/// so the whole game is a small JSON blob.
+/// kills backgrounded apps, and losing a 30-minute run to a phone call is a
+/// regression web players never hit. The board is plain serializable data, so
+/// the whole game is a small JSON blob.
 ///
 /// The clock is stored as **remaining seconds**, not a deadline: a game resumed
-/// tomorrow must not find its round already expired. That matches how the web
+/// tomorrow must not find its round already expired. That matches how the game
 /// freezes a countdown behind a readable overlay — a resumed game comes back
 /// held, and starts ticking when the player dismisses the card.
 struct SavedSoloGame: Codable, Equatable {
     /// Bumped if the shape changes; a stale blob is dropped, never migrated.
-    /// v2 added `mode`, so a Daily Deal interrupted by the OS comes back as a
-    /// Daily Deal rather than an Endless run.
-    static let version = 2
+    /// v3 dropped the Daily Deal's fields along with the mode.
+    static let version = 3
     static let key = "nana.solo.save.v1"
 
     var version: Int = Self.version
     var seed: String
-    /// `GameMode.rawValue`. Only `endless` and `daily` are ever saved — the
-    /// tutorial has nothing worth restoring and battle is host-driven.
-    var mode: String = GameMode.endless.rawValue
-    /// The Daily Deal's day number, so a resumed daily is still *that* day's
-    /// puzzle even if the player comes back after the flip.
-    var dailyDay: Int?
     var pace: String
     var board: TileMap
     var rack: [String]
@@ -38,13 +31,11 @@ struct SavedSoloGame: Codable, Equatable {
     /// How many clock deals have happened — the deal stream's position, so a
     /// resumed game keeps dealing the same letters it would have.
     var dealSerial: Int
-    /// When it was put away, for the "resume?" prompt's wording.
+    /// When it was put away.
     var savedAt: Double
 
     var soloPace: SoloPace { SoloPace(rawValue: pace) ?? .regular }
     var soloPhase: SoloPhase { phase == "drip" ? .drip : .initial }
-    var gameMode: GameMode { GameMode(rawValue: mode) ?? .endless }
-    var deal: DailyDeal? { dailyDay.map { dailyDeal(day: $0) } }
 
     var savedDate: Date { Date(timeIntervalSince1970: savedAt) }
 

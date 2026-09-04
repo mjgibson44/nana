@@ -45,15 +45,6 @@ jobs:
       - name: Install XcodeGen
         run: brew install --quiet xcodegen
 
-      # The app tests don't run in the Linux CI job — this is the only place
-      # they gate anything, and a broken build is worse on a tester's phone
-      # than in a log.
-      - name: Test
-        run: |
-          (cd apple && xcodegen generate)
-          xcodebuild test -quiet -project apple/Word.xcodeproj -scheme Word \
-            -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
-
       - name: Import the distribution certificate
         env:
           CERT_P12: ${{ secrets.APPLE_DIST_CERT_P12 }}
@@ -90,6 +81,17 @@ jobs:
           echo "$ASC_KEY_P8" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_"$ASC_KEY_ID".p8
           chmod 600 ~/.appstoreconnect/private_keys/AuthKey_"$ASC_KEY_ID".p8
+
+      # The app tests don't run in the Linux CI job — this is the only place
+      # they gate anything, and a broken build is worse on a tester's phone
+      # than in a log. Runs after the configuration is written: the project
+      # references Local.xcconfig, and XcodeGen refuses to generate a project
+      # whose config file is missing (which is how the first run died).
+      - name: Test
+        run: |
+          (cd apple && xcodegen generate)
+          xcodebuild test -quiet -project apple/Word.xcodeproj -scheme Word \
+            -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
 
       - name: Archive, export and upload
         env:

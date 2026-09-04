@@ -5,18 +5,19 @@ import XCTest
 
 @testable import Word
 
-/// The camera's pinch and pan behavior. `PinchAnchor` itself is covered in
-/// `WordBoard`; what's tested here is the wiring the app owns — that the live
-/// midpoint from `BoardInputBridge` actually reaches the alignment, and that
-/// the board still behaves when it doesn't.
+/// The camera's opening view, pinch and pan behavior. `PinchAnchor` itself is
+/// covered in `WordBoard`; what's tested here is the wiring the app owns —
+/// that the live midpoint from `BoardInputBridge` actually reaches the
+/// alignment, that the board still behaves when it doesn't, and that a new
+/// game opens where the design says.
 @MainActor
 final class BoardCameraTests: XCTestCase {
 
-    /// A camera on a full 33×33 board with a phone-sized viewport, scrolled to
-    /// the middle so there is room to move in every direction.
-    private func camera() -> BoardCamera {
+    /// A camera on a full 33×33 board with a phone-sized viewport.
+    private func camera(width: CGFloat = 390, height: CGFloat = 600) -> BoardCamera {
         let camera = BoardCamera()
-        camera.viewportChanged(to: CGSize(width: 390, height: 600), tileBox: nil)
+        camera.cellBase = CELL_BASE_COMPACT
+        camera.viewportChanged(to: CGSize(width: width, height: height), tileBox: nil)
         camera.newGame(bounds: Bounds(minRow: 0, minCol: 0, maxRow: 32, maxCol: 32))
         return camera
     }
@@ -31,19 +32,78 @@ final class BoardCameraTests: XCTestCase {
         return CGPoint(x: content.x / size.width, y: content.y / size.height)
     }
 
-    // MARK: The fix
+    // MARK: The opening view
+
+    func testANewGameOpensWideEnoughForALongOpener() {
+        let camera = camera()
+        let visibleColumns = camera.viewport.width / camera.metrics.step
+        XCTAssertGreaterThanOrEqual(visibleColumns, 14, "a twelve-letter opener needs room")
+        XCTAssertGreaterThanOrEqual(camera.zoom, MIN_ZOOM)
+        XCTAssertLessThanOrEqual(camera.zoom, AUTO_ZOOM_MAX)
+    }
+
+    func testANewGameParksTheStartSquareTwoCellsInAndCentred() {
+        let camera = camera()
+        camera.frame = CGRect(origin: .zero, size: camera.viewport)
+        let start = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2)
+        let rect = camera.gameRect(ofContent: camera.metrics.rect(of: start))
+
+        XCTAssertEqual(
+            rect.minX, Double(BoardCamera.openingInset) * camera.metrics.step, accuracy: 1e-6)
+        XCTAssertEqual(rect.midY, camera.viewport.height / 2, accuracy: 1e-6)
+    }
+
+    func testTheOpeningViewWaitsForTheViewport() {
+        // The router deals before the screen is laid out; the camera has to
+        // go home once it knows how big home is.
+        let camera = BoardCamera()
+        camera.cellBase = CELL_BASE_COMPACT
+        camera.newGame(bounds: Bounds(minRow: 0, minCol: 0, maxRow: 32, maxCol: 32))
+        camera.viewportChanged(to: CGSize(width: 390, height: 600), tileBox: nil)
+        camera.frame = CGRect(origin: .zero, size: camera.viewport)
+
+        let start = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2)
+        let rect = camera.gameRect(ofContent: camera.metrics.rect(of: start))
+        XCTAssertEqual(
+            rect.minX, Double(BoardCamera.openingInset) * camera.metrics.step, accuracy: 1e-6)
+    }
+
+    func testAWideScreenNeverOpensPastFullSize() {
+        let camera = camera(width: 1_200, height: 900)
+        XCTAssertEqual(camera.zoom, AUTO_ZOOM_MAX, accuracy: 1e-9)
+    }
+
+    // MARK: Auto-fit
+
+    func testAutoFitOnlyEverZoomsOut() {
+        let camera = camera()
+        let opening = camera.zoom
+        // A tiny crossword would "fit" at a much bigger zoom. It must not be
+        // pulled in: the wide opening view is the point.
+        camera.autoFit(box: Bounds(minRow: 16, minCol: 16, maxRow: 16, maxCol: 20))
+        XCTAssertEqual(camera.zoom, opening, accuracy: 1e-9)
+
+        // A crossword wider than the viewport does get zoomed out for.
+        camera.zoom = AUTO_ZOOM_MAX
+        camera.autoFit(box: Bounds(minRow: 10, minCol: 4, maxRow: 20, maxCol: 28))
+        XCTAssertLessThan(camera.zoom, AUTO_ZOOM_MAX)
+    }
+
+    // MARK: The pinch
 
     func testFingersThatTravelWhilePinchingPanTheBoard() {
         let camera = camera()
+        let startZoom = camera.zoom
         let start = CGPoint(x: 195, y: 300)
         let grabbed = anchored(camera, under: start)
 
         camera.beginPinch(startAnchor: .center, midpoint: start)
-        // Same spread, fingers slid 80pt left and 40pt up.
-        let moved = CGPoint(x: 115, y: 260)
+        // Same spread, fingers slid 80pt right and 40pt down — the way the
+        // opening view has room to go; leftward runs into the board's edge.
+        let moved = CGPoint(x: 275, y: 340)
         camera.updatePinch(scale: 1, midpoint: moved)
 
-        XCTAssertEqual(camera.zoom, 1, accuracy: 1e-9, "an unchanged spread must not zoom")
+        XCTAssertEqual(camera.zoom, startZoom, accuracy: 1e-9, "an unchanged spread must not zoom")
         let nowUnderFingers = anchored(camera, under: moved)
         XCTAssertEqual(nowUnderFingers.x, grabbed.x, accuracy: 1e-9)
         XCTAssertEqual(nowUnderFingers.y, grabbed.y, accuracy: 1e-9)
@@ -51,6 +111,7 @@ final class BoardCameraTests: XCTestCase {
 
     func testTheGrabbedPointStaysUnderTheFingersWhileTheyBothZoomAndTravel() {
         let camera = camera()
+        let startZoom = camera.zoom
         let start = CGPoint(x: 250, y: 400)
         let grabbed = anchored(camera, under: start)
 
@@ -65,20 +126,21 @@ final class BoardCameraTests: XCTestCase {
             XCTAssertEqual(under.x, grabbed.x, accuracy: 1e-9)
             XCTAssertEqual(under.y, grabbed.y, accuracy: 1e-9)
         }
-        XCTAssertEqual(camera.zoom, 1.4, accuracy: 1e-9)
+        XCTAssertEqual(camera.zoom, clampZoom(startZoom * 1.4), accuracy: 1e-9)
     }
 
     // MARK: The fallback
 
     func testWithoutABridgeMidpointThePinchAnchorsOnTheGestureStartAnchor() {
         let camera = camera()
+        let startZoom = camera.zoom
         camera.beginPinch(startAnchor: UnitPoint(x: 0.25, y: 0.75), midpoint: nil)
         let expected = CGPoint(x: 0.25 * 390, y: 0.75 * 600)
         let grabbed = anchored(camera, under: expected)
 
         camera.updatePinch(scale: 1.3, midpoint: nil)
 
-        XCTAssertEqual(camera.zoom, 1.3, accuracy: 1e-9)
+        XCTAssertEqual(camera.zoom, clampZoom(startZoom * 1.3), accuracy: 1e-9)
         let under = anchored(camera, under: expected)
         XCTAssertEqual(under.x, grabbed.x, accuracy: 1e-9)
         XCTAssertEqual(under.y, grabbed.y, accuracy: 1e-9)
@@ -103,9 +165,10 @@ final class BoardCameraTests: XCTestCase {
 
     func testUpdatesBeforeAPinchBeginsDoNothing() {
         let camera = camera()
+        let zoom = camera.zoom
         let offset = camera.offset
         camera.updatePinch(scale: 2, midpoint: CGPoint(x: 10, y: 10))
-        XCTAssertEqual(camera.zoom, 1)
+        XCTAssertEqual(camera.zoom, zoom)
         XCTAssertEqual(camera.offset, offset)
     }
 

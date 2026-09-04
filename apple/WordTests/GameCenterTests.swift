@@ -49,16 +49,10 @@ final class GameCenterTests: XCTestCase {
         let center = GameCenter()
         XCTAssertFalse(center.isSignedIn)
 
-        // Solo, the Daily Deal and the tutorial ask GameCenter nothing at all.
+        // Solo asks GameCenter nothing at all.
         let model = GameModel()
         model.newGame(pace: .regular)
         XCTAssertEqual(model.rack.count, ENDLESS_START_TILES)
-
-        model.newDaily(deal: dailyDeal(at: .now))
-        XCTAssertEqual(model.rack.count, DailyRules.tileCount)
-
-        model.newTutorial()
-        XCTAssertFalse(model.rack.isEmpty)
     }
 
     func testScoresEarnedSignedOutAreHeldAndFlushOnSignIn() async {

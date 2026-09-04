@@ -11,6 +11,13 @@ import WordCore
 /// stable board and one that tears and snaps (ui.md §8.5–8.7).
 @Observable @MainActor
 final class BoardCamera {
+    /// How many columns the opening view fits across the viewport: enough
+    /// for a twelve-letter opener with room either side, on a phone.
+    static let openingColumns = 16
+    /// Where the start square sits in the opening view: this many cells in
+    /// from the left edge, so the opener reads left to right from there.
+    static let openingInset = 2
+
     var zoom: Double = 1
     var offset: CGPoint = .zero
     private(set) var viewport: CGSize = .zero
@@ -19,6 +26,11 @@ final class BoardCamera {
     var frame: CGRect = .zero
     var cellBase: Double = CELL_BASE_REGULAR
     private(set) var bounds = boardBounds(TileMap())
+
+    /// The start square, for the opening view.
+    private var anchor = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2)
+    /// A new game asked for the opening view before the viewport had a size.
+    private var homePending = true
 
     private var pinch: PinchAnchor?
     private var pinchMidpoint: CGPoint = .zero
@@ -41,8 +53,7 @@ final class BoardCamera {
         return metrics.cell(at: content)
     }
 
-    /// A content-space rect translated into "game" space (for hit-testing
-    /// chrome like the rotate control).
+    /// A content-space rect translated into "game" space.
     func gameRect(ofContent rect: CGRect) -> CGRect {
         let origin = viewportPoint(
             fromContent: rect.origin, offset: offset, contentSize: metrics.contentSize,
@@ -55,10 +66,9 @@ final class BoardCamera {
     // MARK: Sizing
 
     func viewportChanged(to size: CGSize, tileBox box: Bounds?) {
-        let first = viewport == .zero
         viewport = size
-        if first {
-            center()
+        if homePending {
+            goHome()
         } else {
             // The web refits on viewport resizes too (fitTick, App.tsx:1071).
             autoFit(box: box)
@@ -66,15 +76,32 @@ final class BoardCamera {
         }
     }
 
-    /// Center the board — the web's new-game scroll (App.tsx:1015–1021).
-    func center() {
-        offset = centeredOffset(contentSize: metrics.contentSize, viewport: viewport)
+    /// A fresh board: zoomed out far enough for a long opener, with the start
+    /// square parked near the left edge and centred vertically.
+    func newGame(bounds: Bounds, anchor: Cell = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2)) {
+        self.bounds = bounds
+        self.anchor = anchor
+        homePending = true
+        goHome()
     }
 
-    func newGame(bounds: Bounds) {
-        self.bounds = bounds
-        zoom = 1
-        center()
+    /// The zoom that fits `openingColumns` across the viewport — never past
+    /// 1.0 on a wide screen, never below the pinch floor on a narrow one.
+    var openingZoom: Double {
+        guard viewport.width > 0 else { return 1 }
+        let fit = (viewport.width / Double(Self.openingColumns) - CELL_HAIRLINE) / cellBase
+        return min(AUTO_ZOOM_MAX, max(MIN_ZOOM, fit))
+    }
+
+    private func goHome() {
+        guard viewport != .zero else { return }
+        homePending = false
+        zoom = openingZoom
+        let rect = metrics.rect(of: anchor)
+        offset = clamped(
+            CGPoint(
+                x: rect.minX - Double(Self.openingInset) * metrics.step,
+                y: rect.midY - viewport.height / 2))
     }
 
     /// The board grew. Prepended rows/cols get the same-update scroll nudge
@@ -137,14 +164,17 @@ final class BoardCamera {
 
     // MARK: Auto-fit (App.tsx:1089–1133)
 
-    /// Whenever the tiles change, re-pick the zoom that shows all of them —
-    /// shrink-only — and put the point the player was looking at straight
-    /// back. Never scrolls toward the tiles.
+    /// Whenever the tiles change, make sure all of them still fit on screen —
+    /// by zooming *out*, never in. The opening view is deliberately wide, and
+    /// a pinch the player chose is theirs to keep; the only thing this
+    /// corrects is a crossword that has outgrown the viewport. The point the
+    /// player was looking at goes straight back.
     func autoFit(box: Bounds?) {
         guard let box, viewport != .zero else { return }
         guard
             let target = autoFitZoom(
-                tileBox: box, viewport: viewport, cellBase: cellBase, currentZoom: zoom)
+                tileBox: box, viewport: viewport, cellBase: cellBase, currentZoom: zoom),
+            target < zoom
         else { return }
         let focus = captureFocus(offset: offset, metrics: metrics, tileBox: box, viewport: viewport)
         zoom = target

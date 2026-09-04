@@ -17,16 +17,13 @@ final class BoardRenderTests: XCTestCase {
         let bounds = Bounds(minRow: 0, minCol: 0, maxRow: 32, maxCol: 32)
         let metrics = BoardMetrics(bounds: bounds, cellBase: 44, zoom: MIN_ZOOM)
         var tiles: [(key: CellKey, letter: String)] = []
-        var feedback: [CellKey: CellFeedback] = [:]
         let letters = "abcdefghijklmnopqrstuvwxyz".map(String.init)
         for row in stride(from: 1, through: 31, by: 2) {
             for col in stride(from: 1, through: 31, by: 2) {
-                let key = keyOf(row, col)
-                tiles.append((key: key, letter: letters[(row + col) % 26]))
-                feedback[key] = [.valid, .invalid, .isolated, .disconnected][(row * col) % 4]
+                tiles.append((key: keyOf(row, col), letter: letters[(row + col) % 26]))
             }
         }
-        return BoardScene(metrics: metrics, tiles: tiles, feedback: feedback)
+        return BoardScene(metrics: metrics, tiles: tiles)
     }
 
     func testFullBoardAtMaxZoomOutRenders() throws {

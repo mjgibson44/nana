@@ -2,23 +2,24 @@ import SwiftUI
 import WordBoard
 import WordCore
 
-/// The solo game screen: phase 2a's pan/zoom board and unified pointer layer,
-/// plus phase 2b's editing, scoring and session lifecycle.
+/// The game screen, top to bottom: header and pile gauge, the board, the
+/// word being built, the pile, and the four actions — one column with the
+/// same margin all round and the same gap between every section.
 struct GameScreen: View {
     /// The shared coordinate space every pointer event and frame reads —
     /// the port's stand-in for the web's client coordinates.
     nonisolated static let space = "game"
 
     /// Owned by the router, which decides what was dealt (a solo run, a
-    /// restored save, the tutorial) before this screen appears.
+    /// restored save, a battle) before this screen appears.
     var model: GameModel
-    /// Back out to the home screen — also where a finished tutorial leads.
+    /// The battle this board is in, if any: the placing, the standings, and
+    /// the host's controls come from here.
+    var battle: BattleSession?
+    /// Out: home from a solo game, out of the battle from a battle.
     var onLeave: () -> Void = {}
-    /// Raise the settings page over the game (the router owns it, so one page
-    /// serves both home and game).
-    var onShowSettings: () -> Void = {}
-    /// The streak this game landed on, read back after it was recorded.
-    var dailyStreak = 0
+    /// Deal a fresh solo game. The router owns it so the pace gets remembered.
+    var onNewGame: ((SoloPace) -> Void)?
 
     @State private var camera = BoardCamera()
     @State private var machine = GestureMachine()
@@ -26,94 +27,72 @@ struct GameScreen: View {
     /// The fingers' current midpoint, sensed outside SwiftUI's gesture
     /// vocabulary (`BoardInputBridge`); nil when nothing is pinching.
     @State private var pinchMidpoint: CGPoint?
-    @State private var rackFrame: CGRect = .zero
     @State private var clockNow = Date.now
+    /// The column's inner width, which sizes the tiles: ten across, always.
+    @State private var columnWidth: CGFloat = 358
     @FocusState private var gameFocused: Bool
+    @Environment(\.snapshotRendering) private var snapshotRendering
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
-    /// A lifted tile keeps the size it had in the pile, which a phone shrinks.
-    private var ghostTileSize: Double {
-        #if os(iOS)
-        RackView.tileSize(for: sizeClass)
-        #else
-        RackView.tileSize(for: .regular)
-        #endif
-    }
+    private var tileSize: CGFloat { Spacing.tileSize(fitting: columnWidth) }
 
     var body: some View {
         ZStack {
-            VStack(spacing: 0) {
-                header
-                if let progress = model.tutorialProgress, !model.tutorialFinished {
-                    TutorialBanner(step: progress.step)
+            VStack(spacing: Spacing.gap) {
+                VStack(spacing: Spacing.gap / 2) {
+                    header
+                    PileGaugeView(count: model.pileCount, tone: model.pileTone)
                 }
                 boardArea
-                // A finished lesson hands its whole working area to the way
-                // out: there is nothing left to type or place.
-                if model.tutorialFinished {
-                    TutorialFinishBand(onFinish: onLeave)
-                } else {
-                    wordBar
-                    RackView(
-                        letters: model.rack,
-                        hiddenIndex: model.hiddenRackIndex,
-                        picks: model.picks,
-                        pointerEvent: dispatch,
-                        downTarget: { index, letter in .rackTile(index: index, letter: letter) },
-                        onShuffle: {
-                            model.shufflePile()
-                            focusGame()
-                        }
-                    )
-                    .onGeometryChange(for: CGRect.self) { proxy in
-                        proxy.frame(in: .named(Self.space))
-                    } action: { frame in
-                        rackFrame = frame
-                    }
-                    .allowsHitTesting(model.canAcceptInput)
+                WordRowView(picks: model.pickList, tileSize: tileSize) { position in
+                    model.removePick(at: position)
+                    focusGame()
                 }
+                .allowsHitTesting(model.canAcceptInput)
+                PileView(
+                    letters: model.rack, picked: Set(model.picks), tileSize: tileSize
+                ) { index in
+                    model.togglePick(index)
+                    focusGame()
+                }
+                .allowsHitTesting(model.canAcceptInput)
+                actions
+                    .allowsHitTesting(model.canAcceptInput)
             }
-
-            // The drag ghost rides above everything (web z=1000).
-            if let drag = model.drag {
-                GhostTileView(letter: drag.letter, size: ghostTileSize)
-                    .position(drag.location)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                columnWidth = width
             }
-            if let wordDrag = model.wordDrag {
-                WordGhostView(drag: wordDrag, cellSize: camera.metrics.cellSize)
-            }
+            .frame(maxWidth: Spacing.maxWidth)
+            .padding(Spacing.margin)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if let splash = model.splash {
-                SoloSplashView(splash: splash, pace: model.pace) {
+                SplashView(splash: splash, pace: model.pace) {
                     model.dismissSplash(at: .now)
                     focusGame()
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .transition(.opacity)
             }
 
             if model.showSummary {
-                SoloSummaryView(
-                    words: model.finalWords,
-                    score: model.score,
-                    onPlayAgain: startNewGame,
-                    onSeeBoard: { model.setSummaryPresented(false) },
-                    onReturnHome: onLeave,
-                    daily: dailySummary)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                endScreen
+                    .transition(.opacity)
             }
 
             if model.isPaused {
-                SoloPauseView(pace: model.pace) {
+                PauseView {
                     model.resume(at: .now)
                     focusGame()
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .transition(.opacity)
             }
         }
         .coordinateSpace(name: Self.space)
-        .background(Ink.bg)
+        .background(Palette.bg.ignoresSafeArea())
         .focusable()
         .focused($gameFocused)
         .onKeyPress(phases: [.down, .repeat], action: handleKeyPress)
@@ -163,8 +142,8 @@ struct GameScreen: View {
         .onChange(of: model.tileBounds) { _, box in
             camera.autoFit(box: box)
         }
-        .onChange(of: model.gameSerial) {
-            camera.newGame(bounds: model.bounds)
+        .onChange(of: model.gameSerial, initial: true) {
+            camera.newGame(bounds: model.bounds, anchor: GameModel.startCell)
         }
         #if os(iOS)
         .onChange(of: sizeClass, initial: true) { _, sizeClass in
@@ -173,57 +152,87 @@ struct GameScreen: View {
         #endif
     }
 
-    // MARK: Solo scoreboard
+    // MARK: Header
 
-    @ViewBuilder
     private var header: some View {
-        if let progress = model.tutorialProgress {
-            TutorialHeaderView(
-                step: progress.step,
-                of: progress.of,
-                showsSkip: !model.tutorialFinished,
-                onSkip: {
-                    model.skipTutorialStep()
-                    focusGame()
-                },
-                onLeave: onLeave)
-        } else {
-            soloHeader
+        GameHeaderView(
+            headline: headline,
+            headlineLabel: headlineLabel,
+            secondsToTiles: model.secondsToNextTiles(at: clockNow)
+        ) {
+            if model.isBattle {
+                battleMenu
+            } else {
+                soloMenu
+            }
         }
     }
 
-    private var soloHeader: some View {
-        SoloHeaderView(
-            score: model.score,
-            complete: model.isComplete,
-            seconds: model.remainingSeconds(at: clockNow),
-            timerLabel: model.phase == .drip ? "Next tiles" : "Time",
-            looseTiles: model.showsLooseGauge ? model.looseTiles : nil,
-            tilesLeft: model.showsTilesLeft ? model.rack.count : nil,
-            gaugeTone: model.gaugeTone,
-            bonusEarned: model.boardScore.bonusEarned,
-            canPause: model.canPause,
-            onPause: pauseGame,
-            onNewDeal: startNewGame,
-            onShowSummary: { model.setSummaryPresented(true) },
-            pace: model.pace,
-            onChoosePace: startNewGame(pace:),
-            onShowSettings: onShowSettings,
-            onReturnHome: onLeave,
-            onFinish: model.canFinishDaily ? { model.finishDaily() } : nil,
-            allowsReplay: !model.isDaily)
+    /// The score — or, in a battle, where this player stands.
+    private var headline: String {
+        if model.isBattle {
+            return battle?.position.map(ordinal) ?? "—"
+        }
+        return "\(model.score)"
+    }
+
+    private var headlineLabel: String {
+        if model.isBattle, let position = battle?.position {
+            return "Standing \(ordinal(position))"
+        }
+        return model.isComplete ? "Final score \(model.score)" : "Score \(model.score)"
+    }
+
+    @ViewBuilder
+    private var soloMenu: some View {
+        if model.canPause {
+            Button("Pause", action: pauseGame)
+        }
+        if model.isComplete {
+            Button("Results") { model.setSummaryPresented(true) }
+        }
+        Button("New game") { startNewGame(pace: model.pace) }
+        Section("Speed") {
+            ForEach(PACE_OPTIONS, id: \.pace) { option in
+                Button {
+                    startNewGame(pace: option.pace)
+                } label: {
+                    if model.pace == option.pace {
+                        Label(option.name, systemImage: "checkmark")
+                    } else {
+                        Text(option.name)
+                    }
+                }
+            }
+        }
+        Divider()
+        Button("Home", action: onLeave)
+    }
+
+    @ViewBuilder
+    private var battleMenu: some View {
+        if model.isComplete {
+            Button("Results") { model.setSummaryPresented(true) }
+        }
+        if let battle, battle.isHost {
+            if battle.canRestart {
+                Button("Restart", action: battle.restart)
+            }
+            Button("Everyone to the lobby", action: battle.toLobby)
+        }
+        Divider()
+        Button("Leave battle", action: onLeave)
     }
 
     // MARK: The board viewport
 
     private var boardArea: some View {
         // The board's rendered content is the size of the whole lattice —
-        // 1,400pt-plus square at default zoom — so it must never be a direct
-        // child of the layout: SwiftUI would take that as the area's ideal
-        // size, push it up as the window's minimum, and shove the pile off the
-        // bottom of the screen. An overlay is laid out *inside* the size its
-        // parent already chose, so a flexible transparent base decides how big
-        // the viewport is and the board is drawn into it (and clipped).
+        // far bigger than the screen — so it must never be a direct child of
+        // the layout: SwiftUI would take that as the area's ideal size. An
+        // overlay is laid out *inside* the size its parent already chose, so
+        // a flexible transparent base decides how big the viewport is and
+        // the board is drawn into it (and clipped).
         Color.clear
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .topLeading) {
@@ -234,9 +243,7 @@ struct GameScreen: View {
                     .allowsHitTesting(false)
                     .offset(x: origin.x - camera.offset.x, y: origin.y - camera.offset.y)
             }
-            // One transparent input plane sits above every board cell and
-            // below popovers. Keeping the word controls outside this plane is
-            // what lets their external drag own its pointer from press time.
+            // One transparent input plane sits above every board cell.
             .overlay {
                 Rectangle()
                     .fill(.clear)
@@ -244,51 +251,31 @@ struct GameScreen: View {
                     .pointerSurface(
                         target: boardTarget(at:), context: { machineContext }, dispatch: dispatch)
                     .simultaneousGesture(pinchGesture)
-                    .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
-                        // Mouse/trackpad aims the preview by hovering (ui.md §8.10);
-                        // the model gates it to letters-staged-and-nothing-dragged.
-                        switch phase {
-                        case let .active(point):
-                            model.setHover(
-                                camera.cell(atGame: point).map { keyOf($0.row, $0.col) })
-                        case .ended:
-                            model.setHover(nil)
-                        }
-                    }
                     .allowsHitTesting(model.canAcceptInput)
             }
             // Laid out over the same rectangle as the input plane, so the
             // points it reports are already viewport coordinates.
             .overlay {
-                BoardInputBridge(
-                    onMidpoint: { pinchMidpoint = $0 },
-                    onScroll: { camera.pan(by: $0) },
-                    isEnabled: model.canAcceptInput)
+                if !snapshotRendering {
+                    BoardInputBridge(
+                        onMidpoint: { pinchMidpoint = $0 },
+                        onScroll: { camera.pan(by: $0) },
+                        isEnabled: model.canAcceptInput)
+                }
             }
-            .overlay(alignment: .topLeading) { wordControls }
-            .background(Ink.boardBg)
+            .background(Palette.bg)
             .clipped()
-        .onGeometryChange(for: BoardGeometryValues.self) { proxy in
-            BoardGeometryValues(frame: proxy.frame(in: .named(Self.space)), size: proxy.size)
-        } action: { values in
-            camera.frame = values.frame
-            camera.viewportChanged(to: values.size, tileBox: model.tileBounds)
-        }
-        .overlay(alignment: .top) { toastView }
-        .overlay { boardAlarm }
-    }
-
-    @ViewBuilder
-    private var boardAlarm: some View {
-        if model.showsLooseGauge, model.gaugeTone != .ok {
-            let urgent = model.gaugeTone == .over
-            RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(urgent ? Ink.badInk : Ink.warnInk, lineWidth: 4)
-                .padding(2)
-                .alarmPulse(active: true, urgent: urgent)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
+            .onGeometryChange(for: BoardGeometryValues.self) { proxy in
+                BoardGeometryValues(frame: proxy.frame(in: .named(Self.space)), size: proxy.size)
+            } action: { values in
+                camera.frame = values.frame
+                camera.viewportChanged(to: values.size, tileBox: model.tileBounds)
+            }
+            .overlay(alignment: .top) {
+                if let toast = model.toast {
+                    ToastView(toast: toast) { serial in model.clearToast(serial: serial) }
+                }
+            }
     }
 
     private struct BoardGeometryValues: Equatable {
@@ -300,55 +287,18 @@ struct GameScreen: View {
         BoardScene(
             metrics: camera.metrics,
             tiles: model.board.entries.map { (key: $0.key, letter: $0.value) },
-            feedback: model.cellFeedback,
-            hiddenKey: model.hiddenBoardKey,
             preview: model.preview,
-            previewGaps: model.previewGaps,
-            cursorKey: model.cursorKey,
-            selectedKey: model.selectedKey,
-            highlightedKeys: model.highlightedKeys,
-            wordsAt: model.wordsByCell.mapValues { $0.map(\.word) },
-            rotate: rotateControl,
-            locked: model.boardLocked)
+            wordsAt: model.wordsByCell.mapValues { $0.map(\.word) })
     }
 
-    private var rotateControl: (key: CellKey, dir: Direction)? {
-        guard model.showRotate, case let .place(anchor, dir, _) = model.interaction else {
-            return nil
-        }
-        return (anchor, dir)
-    }
-
-    /// The daily's extra summary lines, or nil for any other mode.
-    private var dailySummary: SoloSummaryView.DailySummary? {
-        guard let daily = model.daily else { return nil }
-        return SoloSummaryView.DailySummary(
-            date: daily.shortLabel,
-            tilesLeft: model.finalTilesLeft,
-            bonusEarned: model.finalBonusEarned,
-            streak: dailyStreak)
-    }
-
+    /// Placed words are permanent in every mode, and nothing is ever picked
+    /// up off the board: the machine only needs taps and pans.
     private var machineContext: GestureMachine.Context {
-        GestureMachine.Context(
-            boardLocked: model.boardLocked,
-            hasStagedPicks: !model.picks.isEmpty,
-            externalDragActive: model.wordDrag != nil)
+        GestureMachine.Context(boardLocked: true, hasStagedPicks: false, externalDragActive: false)
     }
 
-    /// The press-time hit-test — the port of `elementFromPoint` against
-    /// `[data-cell]`, as coordinate math.
+    /// The press-time hit-test, as coordinate math.
     private func boardTarget(at point: CGPoint) -> GestureMachine.DownTarget? {
-        // The rotate control claims its press before the machine sees it
-        // (the web's stopPropagation, Grid.tsx:149–153).
-        if let rotate = rotateControl {
-            let rect = camera.gameRect(
-                ofContent: BoardContentView.rotateRect(for: rotate.key, metrics: camera.metrics))
-            if rect.contains(point) {
-                model.rotateDirection()
-                return nil
-            }
-        }
         guard let cell = camera.cell(atGame: point) else { return .boardEmpty(cell: nil) }
         if let letter = model.board[keyOf(cell.row, cell.col)] {
             return .boardTile(cell: cell, letter: letter)
@@ -382,24 +332,15 @@ struct GameScreen: View {
     private func apply(_ effects: [GestureMachine.Effect]) {
         for effect in effects {
             switch effect {
-            case let .beginDrag(source, at):
-                model.beginDrag(source, at: at)
-            case let .dragMoved(point):
-                model.dragMoved(to: point)
-            case let .endDrag(drop):
-                if let drop {
-                    model.applyDrop(dropRegion(at: drop))
-                } else {
-                    model.endDrag()
-                }
-            case let .tapRackTile(index):
-                model.togglePick(index)
             case let .tapBoardTile(cell):
                 model.selectTile(keyOf(cell.row, cell.col))
-            case let .doubleTapBoardTile(cell):
-                model.doubleTapBoardTile(keyOf(cell.row, cell.col))
-            case let .tapBoardCell(cell):
-                model.cellClick(keyOf(cell.row, cell.col))
+                focusGame()
+            case .beginPan:
+                break
+            case let .panBy(delta):
+                camera.pan(by: delta)
+            case let .endPan(velocity):
+                camera.endPan(velocity: velocity)
             case let .scheduleHold(id):
                 holdTask?.cancel()
                 holdTask = Task {
@@ -410,271 +351,115 @@ struct GameScreen: View {
             case .cancelHold:
                 holdTask?.cancel()
                 holdTask = nil
-            case .beginPan:
-                break
-            case let .panBy(delta):
-                camera.pan(by: delta)
-            case let .endPan(velocity):
-                camera.endPan(velocity: velocity)
-            case let .beginPreviewDrag(at):
-                model.beginPreviewDrag()
-                hover(at: at)
-            case let .previewDragMoved(point):
-                hover(at: point)
-            case let .endPreviewDrag(point):
-                // Anchor the word under the lifted finger — ready to
-                // confirm, not committed (ui.md §3.9).
-                if let cell = camera.cell(atGame: point) {
-                    model.cellClick(keyOf(cell.row, cell.col))
-                }
-            case .cancelPreviewDrag:
+            case .tapBoardCell, .doubleTapBoardTile, .tapRackTile,
+                .beginDrag, .dragMoved, .endDrag,
+                .beginPreviewDrag, .previewDragMoved, .endPreviewDrag, .cancelPreviewDrag:
+                // Nothing lands by tapping empty board, nothing is dragged,
+                // and the pile has no pointer surface: none of these can
+                // happen with the context above, and none mean anything now.
                 break
             }
         }
     }
 
-    /// Where a ghost landed — the web's `elementFromPoint` + `[data-rack]`
-    /// contract: anywhere on the pile (shuffle button included) returns the
-    /// tile (Rack.tsx:29).
-    private func dropRegion(at point: CGPoint) -> GameModel.DropRegion {
-        if rackFrame.contains(point) { return .rack }
-        if let cell = camera.cell(atGame: point) { return .cell(cell) }
-        return .none
-    }
+    // MARK: The actions
 
-    /// The preview-drag hover: only a real cell updates it, so the ghost
-    /// letters hold their last spot at the board's edge (App.tsx:2621–2627).
-    private func hover(at point: CGPoint) {
-        if let cell = camera.cell(atGame: point) {
-            model.setHover(keyOf(cell.row, cell.col))
-        }
-    }
-
-    // MARK: Selected-word controls
-
-    @ViewBuilder
-    private var wordControls: some View {
-        if model.canAcceptInput,
-            let selectedKey = model.selectedKey, !model.selectedWords.isEmpty
-        {
-            let words = model.selectedWords
-            let cellRect = camera.gameRect(
-                ofContent: camera.metrics.rect(of: parseKey(selectedKey)))
-            let height = Double(words.count * 37 + 10)
-            let localX = min(
-                max(cellRect.midX - camera.frame.minX, 168),
-                max(168, camera.viewport.width - 168))
-            let localY = max(
-                height / 2,
-                cellRect.minY - camera.frame.minY - height / 2 + 6)
-
-            WordControlsView(
-                words: words,
-                canRotate: model.canRotate,
-                onGrabBegan: { word, point in model.beginWordDrag(word, at: point) },
-                onGrabMoved: model.wordDragMoved,
-                onGrabEnded: { point in
-                    model.endWordDrag(at: camera.cell(atGame: point))
-                    focusGame()
-                },
-                onGrabCancelled: model.cancelWordDrag,
-                onRotate: { word in
-                    model.rotateWord(word)
-                    focusGame()
-                },
-                onRemove: { word in
-                    model.removeWord(word)
-                    focusGame()
-                },
-                onHighlight: model.setHighlightedWord)
-                // Keep the gesture's source mounted until the external drag
-                // ends; hiding it must not cancel its pointer stream.
-                .opacity(model.wordDrag == nil ? 1 : 0)
-                .allowsHitTesting(model.wordDrag == nil)
-                .position(x: localX, y: localY)
-        }
-    }
-
-    // MARK: Word bar (WordBar.tsx + PileTools.tsx)
-
-    private var wordBar: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                stagedLetters
-                Spacer(minLength: 8)
-                wordActions
+    private var actions: some View {
+        HStack(spacing: Spacing.tileGap) {
+            ActionButton(
+                systemImage: "trash", label: "Clear the word",
+                disabled: !model.canClearWord
+            ) {
+                model.clearWord()
+                focusGame()
             }
-
-            // Phone: the word gets the first row and every action stays in a
-            // single thumb row below it, with confirm/cancel at the far edge.
-            VStack(spacing: 4) {
-                ScrollView(.horizontal) {
-                    stagedLetters
-                }
-                .scrollIndicators(.hidden)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                wordActions
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+            ActionButton(
+                systemImage: "repeat", label: "Shuffle the pile",
+                disabled: !model.canShuffle
+            ) {
+                model.shufflePile()
+                focusGame()
             }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(Ink.surface)
-        .overlay(alignment: .top) {
-            if let tone = wordBarTone {
-                Rectangle().fill(tone).frame(height: 3)
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Word builder")
-        .accessibilityValue(wordBarAccessibilityValue)
-        .allowsHitTesting(model.canAcceptInput)
-    }
-
-    private var stagedLetters: some View {
-        HStack(spacing: 4) {
-            if model.pickList.isEmpty {
-                Text(model.interaction == .idle ? "No letters selected" : "Type your word…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(Array(model.pickList.enumerated()), id: \.offset) { position, pick in
-                Button {
-                    model.removePick(at: position)
-                    focusGame()
-                } label: {
-                    Text(pick.letter?.uppercased() ?? "␣")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(verdictInk)
-                        .frame(width: 26, height: 26)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Ink.surface))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 5)
-                                .strokeBorder(verdictInk, lineWidth: 1.5))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    pick.letter.map { "Remove \($0.uppercased())" } ?? "Remove gap")
-            }
-        }
-        .frame(minHeight: 34)
-    }
-
-    private var wordActions: some View {
-        HStack(spacing: 6) {
-            if model.canRedo {
-                barButton("↷", label: "Redo the move") {
-                    model.redo()
-                }
-            }
-            barButton("↶", label: "Undo the last move", disabled: !model.canUndo) {
-                model.undo()
-            }
-
-            barButton("□", label: "Add a gap tile") {
-                model.addGap()
-            }
-
-            barButton("⌫", label: "Remove the last letter", disabled: !model.canBackspace) {
-                _ = model.handle(.backspace)
-            }
-
-            if model.canRotateAnchor {
-                barButton(
-                    model.interactionDir == .across ? "⬇" : "➜",
-                    label: "Change direction"
+            if model.isFirstWord {
+                // The opener is the one word placed by fiat: confirm takes the
+                // gap button's place until it's down.
+                ActionButton(
+                    systemImage: "checkmark", label: "Place your first word",
+                    accent: true, disabled: !model.canConfirm
                 ) {
-                    model.rotateDirection()
+                    model.confirmFirstWord()
+                    focusGame()
+                }
+            } else {
+                ActionButton(systemImage: "square.dashed", label: "Add a gap") {
+                    model.addGap()
+                    focusGame()
                 }
             }
-
-            // Cancel then confirm, so confirm keeps the far-right corner where
-            // a thumb expects it (styles.css:1786, WordBar.tsx).
-            barButton("✗", label: "Clear word", tone: .cancel, disabled: !model.canCancel) {
-                model.clearFocus()
-            }
-            barButton("✓", label: "Confirm word", tone: .confirm, disabled: !model.canConfirm) {
-                if let target = model.target {
-                    model.commit(target.key, target.dir)
-                }
+            ActionButton(
+                systemImage: "delete.left", label: "Remove the last letter",
+                disabled: !model.canBackspace
+            ) {
+                _ = model.handle(.backspace)
+                focusGame()
             }
         }
     }
 
-    /// The bar's live verdict tint; VoiceOver receives the same state as text.
-    private var verdictInk: Color {
-        if model.plan != nil, model.plan?.complete == false { return Ink.badInk }
-        switch model.verdictOK {
-        case true: return Ink.okInk
-        case false: return Ink.badInk
-        default: return Ink.ink
-        }
+    // MARK: The end
+
+    private var endScreen: some View {
+        GameEndView(
+            score: model.score,
+            words: model.finalWords,
+            placing: model.isBattle ? battle?.position.map(ordinal) : nil,
+            standings: battleStandings,
+            note: endNote,
+            restart: endRestart,
+            onSeeGame: { model.setSummaryPresented(false) },
+            onLobby: battle?.isHost == true ? { battle?.toLobby() } : nil,
+            leaveLabel: model.isBattle ? "LEAVE" : "HOME",
+            onLeave: onLeave)
     }
 
-    private var wordBarTone: Color? {
-        if model.plan != nil, model.plan?.complete == false { return Ink.badInk }
-        return switch model.verdictOK {
-        case true: Ink.okInk
-        case false: Ink.badInk
-        default: nil
+    private var endRestart: (() -> Void)? {
+        if let battle {
+            return battle.canRestart ? { battle.restart() } : nil
         }
+        return { startNewGame(pace: model.pace) }
     }
 
-    private var wordBarAccessibilityValue: String {
-        if model.plan != nil, model.plan?.complete == false { return "Word does not fit" }
-        return switch model.verdictOK {
-        case true: "Valid word"
-        case false: "Not a valid word"
-        default: model.pickList.isEmpty ? "Empty" : "Not yet judged"
+    private var endNote: String? {
+        guard let battle else { return nil }
+        if battle.isFinished {
+            return battle.isHost ? nil : "Waiting for the host to restart or reopen the lobby."
         }
+        let standing = battle.contestants.filter { $0.outOrder == nil && $0.id != battle.selfID }
+        return "You’re out — \(standing.count) still standing."
     }
 
-    /// The word bar's yes/no pair wears colour; every other tool is ink on
-    /// white. "Cancel wears red the way confirm wears green: the pair reads as
-    /// no / yes" (styles.css:926–937).
-    enum BarTone {
-        case plain, confirm, cancel
-
-        var fill: Color {
-            switch self {
-            case .plain: Ink.surface
-            case .confirm: Ink.okBg
-            case .cancel: Ink.badBg
+    /// The field, in the order the results read: whoever is still standing
+    /// first, then everyone else in reverse order of falling.
+    private var battleStandings: [GameEndView.Standing] {
+        guard let battle, let state = battle.state else { return [] }
+        let finished = state.phase == .finished
+        return battle.standings.map { row in
+            let player = row.player
+            let note: String
+            if finished {
+                note = player.id == state.winnerId ? "won" : (player.left ? "left" : "buried")
+            } else if player.buried || player.left {
+                note = player.left ? "left" : "out"
+            } else {
+                note = "\(player.tiles) tiles"
             }
-        }
-
-        var edge: Color {
-            switch self {
-            case .plain: Ink.ink
-            case .confirm: Ink.okEdge
-            case .cancel: Ink.badEdge
-            }
+            return GameEndView.Standing(
+                id: player.id, rank: finished ? row.rank : nil, name: player.name,
+                isSelf: player.id == battle.selfID, note: note)
         }
     }
 
-    private func barButton(
-        _ glyph: String, label: String, tone: BarTone = .plain, disabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            action()
-            focusGame()
-        } label: {
-            Text(glyph)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(Ink.ink)
-                .frame(width: 40, height: 34)
-                .background(RoundedRectangle(cornerRadius: 8).fill(tone.fill))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tone.edge, lineWidth: 2))
-                .opacity(disabled ? 0.35 : 1)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityLabel(label)
-    }
-
-    // MARK: Hardware keyboard (Mac + iPad)
+    // MARK: Hardware keyboard (iPad)
 
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
         if model.isPaused, press.key == .escape {
@@ -691,11 +476,8 @@ struct GameScreen: View {
         switch press.key {
         case .space: command = .gap
         case .delete: command = .backspace
-        case .deleteForward: command = .deleteForward
         case .escape: command = .escape
         case .return: command = .confirm
-        case .rightArrow: command = .direction(.across)
-        case .downArrow: command = .direction(.down)
         default:
             command = press.characters.count == 1 ? .letter(press.characters) : nil
         }
@@ -706,10 +488,6 @@ struct GameScreen: View {
 
     private func focusGame() {
         gameFocused = true
-    }
-
-    private func startNewGame() {
-        startNewGame(pace: model.pace)
     }
 
     private func pauseGame() {
@@ -725,33 +503,10 @@ struct GameScreen: View {
         holdTask?.cancel()
         holdTask = nil
         machine = GestureMachine()
-        model.newGame(pace: pace, now: now)
-    }
-
-    // MARK: Toast (single slot, keyed by serial — App.tsx:415, 1746–1750)
-
-    @ViewBuilder
-    private var toastView: some View {
-        if let toast = model.toast {
-            Text(toast.text)
-                .font(.callout.bold())
-                .foregroundStyle(Ink.ink)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Capsule().fill(Ink.surface))
-                .overlay(Capsule().strokeBorder(Ink.ink, lineWidth: 2))
-                .padding(.top, 10)
-                .transition(.opacity)
-                .task(id: toast.serial) {
-                    // Tiles landing, a refusal, a step completed: things the
-                    // board can't show. The web's toast is an aria-live region;
-                    // this is its announcement (plan §6.6).
-                    AccessibilityNotification.Announcement(toast.text).post()
-                    try? await Task.sleep(for: .seconds(2.5))
-                    model.clearToast(serial: toast.serial)
-                }
-                .accessibilityHidden(true)
-                .allowsHitTesting(false)
+        if let onNewGame {
+            onNewGame(pace)
+        } else {
+            model.newGame(pace: pace, now: now)
         }
     }
 }
@@ -762,4 +517,5 @@ struct GameScreen: View {
         model.newGame(seed: "preview")
         return model
     }())
+    .preferredColorScheme(.dark)
 }
