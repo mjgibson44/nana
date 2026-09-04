@@ -114,10 +114,17 @@ struct GameOutcome: Equatable {
 /// let go of — and is taken back, tiles and all, if the host says someone got
 /// there first. The rules that lay it over are the host's own (`occupyApply`),
 /// so the two can only disagree about a square someone else reached first.
+///
+/// `host`, `view` and `pending` are all in the host's frame. The board that is
+/// drawn and typed on is that view *turned* by `rotation`, so this seat's
+/// start square sits top-left and its words run left to right; a word is
+/// turned back before it's judged, kept or sent.
 struct OccupyRun: Equatable {
     var seed: String
     var selfID: String
     var seat: Int?
+    /// How the host's board is turned for this seat (`occupyRotation`).
+    var rotation: OccupyRotation = .upright
     /// The host's latest word on the board.
     var host: OccupyState?
     /// What's drawn: `host` with `pending` laid over it.
@@ -277,23 +284,21 @@ final class GameModel {
     static var startKey: CellKey { keyOf(startCell.row, startCell.col) }
 
     /// This game's start square: the middle of a growing board, or this
-    /// seat's corner of an Occupy board.
+    /// seat's corner of an Occupy board — which, with the board turned for
+    /// this seat, is always the top-left one.
     var startCell: Cell {
         if let occupy, let seat = occupy.seat, let view = occupy.view {
-            return view.startCell(seat: seat)
+            return rotateCell(view.startCell(seat: seat), size: view.size, by: occupy.rotation)
         }
         return Self.startCell
     }
 
-    /// Where the opener would start from, heading across. Occupy's right-hand
-    /// seats head left toward the middle, so their anchor is worked back from
-    /// the start square; nil when the word wouldn't fit.
+    /// Where the opener would start from, heading across: the start square.
+    /// In Occupy that's nil until the deal has named this player's seat.
     var openerAnchor: Cell? {
         guard mode == .occupy else { return Self.startCell }
-        guard let seat = occupy?.seat else { return nil }
-        return occupyOpenerAnchor(
-            board: board, bounds: bounds, start: startCell,
-            headsRight: occupyOpenerHeadsRight(seat: seat), picks: pickList)
+        guard occupy?.seat != nil, occupy?.view != nil else { return nil }
+        return startCell
     }
 
     // MARK: Derived word-building state
@@ -341,7 +346,7 @@ final class GameModel {
         for step in plan.steps { next[step.key] = step.letter }
         let runs = runsTouching(plan.steps.map(\.key), in: next)
         if runs.isEmpty { return nil }
-        return runs.allSatisfy { $0.word.count >= MIN_WORD_LENGTH && dictionary.contains($0.word) }
+        return runs.allSatisfy { $0.word.count >= MIN_WORD_LENGTH && reads($0.word, in: dictionary) }
     }
 
     /// The confirm button only exists for the opener, and only lights up for
@@ -544,6 +549,8 @@ final class GameModel {
         if changed { run.lastChangeAt = now }
         if run.seat == nil, let seat = state.seat(of: run.selfID) {
             run.seat = seat
+            // Turned so this seat's corner is top-left, from here on.
+            run.rotation = occupyRotation(seat: seat)
             spectating = false
             fixedBounds = state.bounds
             // The board just took its real shape: the camera has to look again.
@@ -632,9 +639,10 @@ final class GameModel {
     }
 
     /// Redraw the board as this player sees it: the host's latest snapshot
-    /// with every unanswered word laid over it by the host's own rules. A
-    /// word the host has since put down lays over as nothing; one the host
-    /// will refuse shows until the refusal lands.
+    /// with every unanswered word laid over it by the host's own rules, then
+    /// turned so this seat's corner is top-left. A word the host has since
+    /// put down lays over as nothing; one the host will refuse shows until
+    /// the refusal lands.
     private func refreshOccupyView() {
         guard var run = occupy, let host = run.host else { return }
         var view = host
@@ -649,8 +657,8 @@ final class GameModel {
         }
         run.view = view
         occupy = run
-        owners = view.owners
-        setBoard(view.board)
+        owners = rotateOwners(view.owners, size: view.size, by: run.rotation)
+        setBoard(view.board.rotated(size: view.size, by: run.rotation))
     }
 
     /// Deal an Occupy hand back up to `OCCUPY_HAND`: letters grown off the
@@ -1080,7 +1088,7 @@ final class GameModel {
         var placed = plan.steps.map(\.key)
         if let key { placed.append(key) }
         return runsTouching(placed, in: next)
-            .filter { $0.word.count < MIN_WORD_LENGTH || !dictionary.contains($0.word) }
+            .filter { $0.word.count < MIN_WORD_LENGTH || !reads($0.word, in: dictionary) }
             .map(\.word)
     }
 
@@ -1106,6 +1114,16 @@ final class GameModel {
         wordVerdict = judgedWord()
     }
 
+    /// Whether a run reads as a word here. Occupy turns each seat's board so
+    /// everyone writes left to right in their own frame, which leaves a
+    /// rival's words backwards on this screen — so there a run counts if it
+    /// reads either way (`occupyIsWord`), the same test the referee applies.
+    private func reads(_ word: String, in dictionary: Set<String>) -> Bool {
+        mode == .occupy
+            ? occupyIsWord(word, isWord: { dictionary.contains($0) })
+            : dictionary.contains(word)
+    }
+
     private func judgedWord() -> WordVerdict {
         guard let dictionary else { return .unjudged }
         let staged = pickList
@@ -1128,7 +1146,7 @@ final class GameModel {
         // No gap: there is nowhere for it to go yet, so all that can be
         // judged is whether the letters picked spell a word.
         let typed = staged.compactMap(\.letter).joined()
-        return dictionary.contains(typed) ? .good : .bad
+        return reads(typed, in: dictionary) ? .good : .bad
     }
 
     // MARK: Aiming — press and hold to see where the word goes
@@ -1236,7 +1254,7 @@ final class GameModel {
             return false
         }
         let bad = newRuns.filter {
-            $0.word.count < MIN_WORD_LENGTH || !dictionary.contains($0.word)
+            $0.word.count < MIN_WORD_LENGTH || !reads($0.word, in: dictionary)
         }
         if !bad.isEmpty {
             let words = bad.map { $0.word.uppercased() }
@@ -1312,7 +1330,9 @@ final class GameModel {
         }
         let tiles = Dictionary(uniqueKeysWithValues: plan.steps.map { ($0.key, $0.letter) })
         let borrowed = gapCells(board: board, bounds: bounds, anchor: anchor, dir: dir, picks: picks)
+        // Laid in this seat's frame; judged, kept and sent in the host's.
         let placement = OccupyPlacement(tiles: tiles, borrowed: borrowed)
+            .rotated(size: view.size, by: run.rotation.inverse)
 
         // Judged by the host's own rules before it's shown — the one thing
         // this can't know is whether someone else got there first.
@@ -1332,7 +1352,7 @@ final class GameModel {
         let typed: [String?] = picks.map(\.letter)
         let spentIndices = Set(plan.steps.map(\.rackIndex))
         let spent = plan.steps.map(\.letter)
-        let captured = borrowed.filter { view.owners[$0] != seat }.count
+        let captured = placement.borrowed.filter { view.owners[$0] != seat }.count
 
         run.serial += 1
         let serial = run.serial

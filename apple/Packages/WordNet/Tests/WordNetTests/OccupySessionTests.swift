@@ -331,6 +331,18 @@ struct OccupyEndTests {
         #expect(lobby.host.state.winnerId == "host")
     }
 
+    @Test func aClientsOpenerArrivesInTheHostsFrame() {
+        // Ann sees the board turned so her corner is top-left and types CAT
+        // rightward; what reaches the host is T-A-C ending on her start
+        // square, and the referee reads a run either way.
+        let lobby = OccupyLobby.opened()
+        lobby.clients["ann"]?.sendPlacement(
+            serial: 5, placement: across("tac", from: Cell(row: 11, col: 9)))
+        #expect(lobby.occupy?.owners[keyOf(11, 11)] == 1)
+        #expect(lobby.occupy?.scores == [9, 9])
+        #expect(lobby.heard["ann"]?.last == "placed:5")
+    }
+
     @Test func aFinishedBoardTakesNoMoreWords() {
         let lobby = OccupyLobby.opened()
         lobby.advance(Double(occupySeconds(players: 2)))

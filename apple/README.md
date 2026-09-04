@@ -180,9 +180,15 @@ instant they let go and what the host decides can only differ about a square som
 else reached first.
 
 - **The board** is fifteen square for two players (Scrabble's, and it fits a phone's
-  width whole) and nineteen for three or four (Go's). It never grows. Openers head
-  *toward the middle*, so a right-hand seat's first word ends on its start square rather
-  than running off the edge (`occupyOpenerAnchor`).
+  width whole) and nineteen for three or four (Go's). It never grows. **Every seat sees
+  it turned so its own start square is top-left** (`occupyRotation`, quarter turns of the
+  host's board), so everyone opens from their top-left and writes left to right, toward
+  the middle. The host, the wire and the client's own copy stay in the host's frame; only
+  what is drawn and typed on is turned (`GameModel.refreshOccupyView`), and a word is
+  turned back before it's judged, kept or sent (`commitOccupy`). Letters are always drawn
+  upright, so a rival's words read backwards on your screen — like a Scrabble board seen
+  from across the table — and a run counts as a word if it reads as one in **either
+  direction** along its line (`occupyIsWord`), on the client and the referee alike.
 - **Capture by crossing.** Every later word borrows a letter through a gap tile, exactly
   as everywhere else — and the borrowed letter flips to the borrower's colour. A letter
   already in both an across and a down word has no free direction, so crossing your own
@@ -197,7 +203,7 @@ else reached first.
   the shared board as it stands, so every letter has a known way on — and never buries
   anyone.
 - **The end.** Three minutes head-to-head, four on the big board; or early, once nobody
-  has placed a word for thirty seconds — with a thirty-second opening grace during which
+  has placed a word for a full minute — with a thirty-second opening grace during which
   the stall clock doesn't run. The header turns the last twenty seconds of a stall into a
   visible countdown. Most value wins; ties go to quadrants held (whoever owns more tiles
   in a quadrant), then to whoever reached their score first. A player who leaves ranks

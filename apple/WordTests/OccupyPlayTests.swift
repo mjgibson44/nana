@@ -106,7 +106,11 @@ final class OccupyPlayTests: XCTestCase {
         XCTAssertEqual(table.hostModel.bounds, Bounds(size: OCCUPY_SMALL_BOARD))
         XCTAssertEqual(table.clientModel.bounds, Bounds(size: OCCUPY_SMALL_BOARD))
         XCTAssertEqual(table.hostModel.startCell, Cell(row: 3, col: 3))
-        XCTAssertEqual(table.clientModel.startCell, Cell(row: 11, col: 11))
+        XCTAssertEqual(
+            table.clientModel.startCell, Cell(row: 3, col: 3),
+            "the board is turned so every seat opens from its own top-left")
+        XCTAssertEqual(table.hostModel.occupy?.rotation, .upright)
+        XCTAssertEqual(table.clientModel.occupy?.rotation, .half)
         XCTAssertEqual(table.hostModel.rack.count, OCCUPY_HAND)
         XCTAssertEqual(table.clientModel.rack.count, OCCUPY_HAND)
         XCTAssertNotEqual(table.hostModel.rack, table.clientModel.rack, "private deals")
@@ -123,10 +127,15 @@ final class OccupyPlayTests: XCTestCase {
         let word = try open(on: table.hostModel)
 
         XCTAssertEqual(table.hostModel.board.count, word.count)
-        XCTAssertEqual(table.clientModel.board, table.hostModel.board, "one board")
+        XCTAssertEqual(
+            table.clientModel.occupy?.view?.board, table.hostModel.occupy?.view?.board, "one board")
+        XCTAssertEqual(
+            table.clientModel.board, table.hostModel.board.rotated(size: OCCUPY_SMALL_BOARD, by: .half),
+            "turned for the other seat")
         XCTAssertNotNil(table.hostModel.board[keyOf(3, 3)], "from the start square")
+        XCTAssertNotNil(table.clientModel.board[keyOf(11, 11)], "bottom-right on the other screen")
         XCTAssertEqual(Set(table.clientModel.owners.values), [0], "the host's, on both screens")
-        XCTAssertEqual(table.hostModel.owners, table.clientModel.owners)
+        XCTAssertEqual(table.hostModel.occupy?.view?.owners, table.clientModel.occupy?.view?.owners)
         XCTAssertEqual(table.hostModel.rack.count, OCCUPY_HAND, "refilled on the spot")
         XCTAssertEqual(table.hostModel.occupy?.pending.count, 0, "answered")
         XCTAssertEqual(table.hostModel.score, word.count * word.count, "each tile worth its word")
@@ -137,18 +146,27 @@ final class OccupyPlayTests: XCTestCase {
         XCTAssertEqual(table.client.position, 2)
     }
 
-    func testTheRightHandSeatsOpenerEndsOnItsStartSquare() async throws {
+    func testTheOtherSeatsOpenerReadsForwardAtHomeAndBackwardOnTheHost() async throws {
         let table = await dealt()
         let word = try open(on: table.clientModel)
 
-        let start = table.clientModel.startCell
-        for (offset, letter) in word.reversed().enumerated() {
+        // On the client's own screen: from its top-left start, heading right.
+        for (offset, letter) in word.enumerated() {
             XCTAssertEqual(
-                table.clientModel.board[keyOf(start.row, start.col - offset)], String(letter),
-                "letter \(word.count - 1 - offset) of \(word), heading left")
+                table.clientModel.board[keyOf(3, 3 + offset)], String(letter),
+                "letter \(offset) of \(word), heading right at home")
         }
-        XCTAssertEqual(table.hostModel.board, table.clientModel.board)
+        // On the host's: from the bottom-right start, heading toward the
+        // middle — which reads backwards there.
+        for (offset, letter) in word.enumerated() {
+            XCTAssertEqual(
+                table.hostModel.board[keyOf(11, 11 - offset)], String(letter),
+                "letter \(offset) of \(word), heading left on the host's board")
+        }
+        XCTAssertEqual(
+            table.hostModel.occupy?.view?.board, table.clientModel.occupy?.view?.board, "one board")
         XCTAssertEqual(Set(table.hostModel.owners.values), [1])
+        XCTAssertEqual(table.client.position, 1, "and it counts")
     }
 
     func testBorrowingARivalsLetterCapturesIt() async throws {
@@ -159,8 +177,10 @@ final class OccupyPlayTests: XCTestCase {
         let (word, through) = try TestPlays.attachWord(on: table.clientModel)
 
         XCTAssertEqual(table.clientModel.owners[through], 1, "captured")
-        XCTAssertEqual(table.hostModel.owners[through], 1, "and the host agrees")
-        XCTAssertEqual(table.hostModel.board, table.clientModel.board)
+        XCTAssertEqual(
+            table.hostModel.owners[rotateKey(through, size: OCCUPY_SMALL_BOARD, by: .half)], 1,
+            "and the host agrees, on its own frame of the board")
+        XCTAssertEqual(table.hostModel.occupy?.view?.board, table.clientModel.occupy?.view?.board)
         XCTAssertLessThan(table.hostModel.score, before, "the host lost the tile's value")
         XCTAssertGreaterThan(table.clientModel.score, 0)
         XCTAssertEqual(table.clientModel.rack.count, OCCUPY_HAND)
@@ -184,6 +204,8 @@ final class OccupyPlayTests: XCTestCase {
         advance(table, by: 30)
         XCTAssertNil(table.hostModel.occupyStallSecondsLeft(at: table.clock.now), "the grace just ended")
         advance(table, by: 15)
+        XCTAssertNil(table.hostModel.occupyStallSecondsLeft(at: table.clock.now), "45 left: not shown yet")
+        advance(table, by: 30)
         XCTAssertEqual(table.hostModel.occupyStallSecondsLeft(at: table.clock.now), 15)
         XCTAssertEqual(table.clientModel.occupyStallSecondsLeft(at: table.clock.now), 15)
     }
@@ -329,6 +351,46 @@ final class OccupyModelTests: XCTestCase {
         XCTAssertEqual(model.owners[keyOf(3, 3)], 0)
         XCTAssertEqual(model.occupyScores, [word.count * word.count, 16])
         XCTAssertFalse(model.isFirstWord, "our opener is still counted, pending or not")
+    }
+
+    func testASeatSeesTheBoardTurnedSoItsCornerIsTopLeft() async throws {
+        // Seat 1: bottom-right on the host's board, top-left on this screen.
+        let model = GameModel()
+        model.newOccupy(
+            seed: "occupy-turned", selfID: "me",
+            state: OccupyState(size: OCCUPY_SMALL_BOARD, seats: ["them", "me"]))
+        await model.loadDictionary()
+        var sent: [(Int, OccupyPlacement)] = []
+        model.onOccupyPlace = { sent.append(($0, $1)) }
+        XCTAssertEqual(model.occupySeat, 1)
+        XCTAssertEqual(model.occupy?.rotation, .half)
+        XCTAssertEqual(model.startCell, Cell(row: 3, col: 3), "everyone opens from their own top-left")
+
+        let word = try TestPlays.placeOpener(on: model)
+        for (offset, letter) in word.enumerated() {
+            XCTAssertEqual(model.board[keyOf(3, 3 + offset)], String(letter), "rightward at home")
+        }
+        let placement = try XCTUnwrap(sent.first?.1)
+        XCTAssertEqual(
+            placement.tiles[keyOf(11, 11)], String(word.first!),
+            "sent in the host's frame: on the start square, heading toward the middle")
+        XCTAssertEqual(placement.tiles[keyOf(11, 11 - (word.count - 1))], String(word.last!))
+
+        // Their STAR at the host's (3,3…6) shows bottom-right here, backwards.
+        var theirs = OccupyState(size: OCCUPY_SMALL_BOARD, seats: ["them", "me"])
+        for (offset, letter) in "star".enumerated() {
+            theirs.board[keyOf(3, 3 + offset)] = String(letter)
+            theirs.owners[keyOf(3, 3 + offset)] = 0
+        }
+        theirs.opened = [true, false]
+        theirs.scores = [16, 0]
+        model.adoptOccupy(theirs)
+
+        XCTAssertEqual(model.board[keyOf(11, 11)], "s")
+        XCTAssertEqual(model.board[keyOf(11, 8)], "r")
+        XCTAssertEqual(model.owners[keyOf(11, 11)], 0)
+        XCTAssertEqual(model.owners[keyOf(3, 3)], 1, "ours, still pending, top-left")
+        XCTAssertEqual(model.board.count, word.count + 4)
     }
 
     func testASeatNotDealtInWatches() {
