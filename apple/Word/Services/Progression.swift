@@ -64,7 +64,7 @@ final class Progression {
             if !device.dailyDays.contains(daily.day) { device.dailyDays.append(daily.day) }
             device.bestDailyScore = max(device.bestDailyScore, outcome.score)
         }
-        if outcome.report.battleWon { device.battleWins += 1 }
+        if outcome.mode == .battle, outcome.report.battleWon { device.battleWins += 1 }
         if outcome.mode != .tutorial {
             device.recent = Array(
                 ([GameRecord(score: outcome.score, words: outcome.words, at: stamp)]

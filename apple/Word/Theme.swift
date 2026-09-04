@@ -48,6 +48,40 @@ enum Palette {
     static let gaugeWarnTrack = Color(hex: 0x4D3711)
     static let gaugeBad = Color(hex: 0xB73131)
     static let gaugeBadTrack = badBg
+
+    /// Occupy's rivals. Your own tiles are always the word green, because
+    /// green means "yours" everywhere else on the screen; each rival gets one
+    /// of these, in seat order, so the same player is the same colour on
+    /// the board, the bar and the standings. Three, for a room of four.
+    static let rivalInks: [Color] = [
+        Color(hex: 0x8EC5FF), Color(hex: 0xFFB86B), Color(hex: 0xE0A6FF),
+    ]
+    static let rivalBgs: [Color] = [
+        Color(hex: 0x1B3550), Color(hex: 0x4A2E0F), Color(hex: 0x3D1F55),
+    ]
+}
+
+/// The colours a seat's tiles wear, as seen from another seat.
+struct SeatColors: Equatable {
+    var ink: Color
+    var fill: Color
+
+    /// You are green; your rivals take the rival colours in seat order,
+    /// skipping your own seat so a room of four uses exactly three.
+    static func of(seat: Int, viewer: Int?) -> SeatColors {
+        guard let viewer, seat != viewer else {
+            return seat == viewer || viewer == nil
+                ? SeatColors(ink: Palette.accent, fill: Palette.accentBg)
+                : rival(seat)
+        }
+        let rank = seat < viewer ? seat : seat - 1
+        return rival(rank)
+    }
+
+    private static func rival(_ rank: Int) -> SeatColors {
+        let index = max(0, rank) % Palette.rivalInks.count
+        return SeatColors(ink: Palette.rivalInks[index], fill: Palette.rivalBgs[index])
+    }
 }
 
 /// The one spacing system every screen uses: the same margin around the

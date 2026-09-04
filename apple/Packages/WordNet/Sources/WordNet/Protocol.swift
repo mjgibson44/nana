@@ -4,17 +4,21 @@ import WordCore
 /// The wire protocol, ported from `src/net/battleSession.ts` (spec:
 /// `docs/apple-port-notes/protocol.md` §1).
 ///
-/// **Version 6**, up from the web's 5, for exactly one addition: `host`.
+/// **Version 6**, up from the web's 5, added exactly one thing: `host`.
 /// On the web the join code *is* the host's address, so a client always knows
 /// whom to `hello`. A GKMatch formed from a party code is a mesh with no marked
 /// owner, so the lobby's creator announces itself and late joiners are told
 /// again; clients that hear nothing fall back to the lowest player id
 /// (plan §7.2).
 ///
+/// **Version 7** adds Occupy: a `place` from a client, the host's `placed` or
+/// `refused` answer, and the shared board riding in every `state` snapshot
+/// (`BattleState.occupy`), plus the lobby's `mode`.
+///
 /// The version gate is load-bearing rather than ceremonial: there has been no
 /// Game Center sandbox since 2016 (TN2417), so a prerelease build can and will
 /// meet a released one.
-public let PROTOCOL_VERSION = 6
+public let PROTOCOL_VERSION = 7
 
 /// Who a message is from or to. Maps to `GKPlayer.gamePlayerID` — the stable
 /// per-game identity that replaces the web's sessionStorage `playerKey`.
@@ -29,6 +33,9 @@ public enum ClientMessage: Equatable {
     case hello(proto: Int)
     case progress(score: Int, buried: Bool, tiles: Int)
     case attack(count: Int)
+    /// Occupy: a word let go of. `serial` is the client's own count, so the
+    /// host's answer can be matched to the word it was about.
+    case place(serial: Int, placement: OccupyPlacement)
     case pong
     case leave
 }
@@ -45,6 +52,11 @@ public enum HostMessage: Equatable {
     /// New in v6: "I am the referee." Broadcast on match formation and
     /// re-sent to every later-connecting player.
     case host(proto: Int)
+    /// Occupy: the word numbered `serial` is down. Sent to its sender only,
+    /// *after* the snapshot that carries it.
+    case placed(serial: Int)
+    /// Occupy: the word numbered `serial` isn't going down, and why.
+    case refused(serial: Int, reason: String)
 }
 
 // MARK: - Coding
@@ -54,11 +66,11 @@ public enum HostMessage: Equatable {
 /// without a translation layer.
 extension ClientMessage: Codable {
     private enum Tag: String, Codable {
-        case hello, progress, attack, pong, leave
+        case hello, progress, attack, place, pong, leave
     }
 
     private enum Key: String, CodingKey {
-        case t, score, buried, tiles, count, proto
+        case t, score, buried, tiles, count, proto, serial, placement
     }
 
     public init(from decoder: Decoder) throws {
@@ -73,6 +85,10 @@ extension ClientMessage: Codable {
                 tiles: try container.decode(Int.self, forKey: .tiles))
         case .attack:
             self = .attack(count: try container.decode(Int.self, forKey: .count))
+        case .place:
+            self = .place(
+                serial: try container.decode(Int.self, forKey: .serial),
+                placement: try container.decode(OccupyPlacement.self, forKey: .placement))
         case .pong:
             self = .pong
         case .leave:
@@ -94,6 +110,10 @@ extension ClientMessage: Codable {
         case let .attack(count):
             try container.encode(Tag.attack, forKey: .t)
             try container.encode(count, forKey: .count)
+        case let .place(serial, placement):
+            try container.encode(Tag.place, forKey: .t)
+            try container.encode(serial, forKey: .serial)
+            try container.encode(placement, forKey: .placement)
         case .pong:
             try container.encode(Tag.pong, forKey: .t)
         case .leave:
@@ -104,11 +124,11 @@ extension ClientMessage: Codable {
 
 extension HostMessage: Codable {
     private enum Tag: String, Codable {
-        case state, start, stop, reject, attack, ping, host
+        case state, start, stop, reject, attack, ping, host, placed, refused
     }
 
     private enum Key: String, CodingKey {
-        case t, state, seed, reason, count, proto
+        case t, state, seed, reason, count, proto, serial
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,6 +148,12 @@ extension HostMessage: Codable {
             self = .ping
         case .host:
             self = .host(proto: try container.decode(Int.self, forKey: .proto))
+        case .placed:
+            self = .placed(serial: try container.decode(Int.self, forKey: .serial))
+        case .refused:
+            self = .refused(
+                serial: try container.decode(Int.self, forKey: .serial),
+                reason: try container.decode(String.self, forKey: .reason))
         }
     }
 
@@ -153,6 +179,13 @@ extension HostMessage: Codable {
         case let .host(proto):
             try container.encode(Tag.host, forKey: .t)
             try container.encode(proto, forKey: .proto)
+        case let .placed(serial):
+            try container.encode(Tag.placed, forKey: .t)
+            try container.encode(serial, forKey: .serial)
+        case let .refused(serial, reason):
+            try container.encode(Tag.refused, forKey: .t)
+            try container.encode(serial, forKey: .serial)
+            try container.encode(reason, forKey: .reason)
         }
     }
 }

@@ -84,7 +84,7 @@ launch environment opens straight onto a game so a simulator can be screenshotte
 |---|---|
 | `Packages/WordCore` | The game core in pure Swift — **bit-exact with the web game** via golden fixtures generated from the TypeScript core (`npm run gen:fixtures`), so the same seed deals the same letters on both platforms. |
 | `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold — to drag, or to aim a gapped word through a placed letter — locked-board semantics, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
-| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
+| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, the v7 Occupy board and its placement round trip, and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
 | `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for placed cells, one gesture pipeline for board taps and pans, the word-building loop, the paced Solo session, the battle session and its results, the tile-lettered home and battle screens, synthesized audio + haptics, and save/restore across process death. `Board/BoardInputBridge.swift` is the one place that reaches past SwiftUI into UIKit/AppKit, for the three things SwiftUI won't report: the live pinch midpoint, the pointer's actual device kind, and Mac scroll wheels. |
 
 ```bash
@@ -168,6 +168,51 @@ actually play:
 - **`BattleLobbyScreen`**: the roster from the host's snapshot, including seats being
   *held* for a dropped player. A battle plays on around a disconnect rather than pausing,
   so a held seat has to read as held, not gone.
+
+### Occupy
+
+The third door: two to four players on **one fixed, shared board**, each opening from
+the centre of their own quadrant (two players sit diagonal), fighting over the same
+squares until the clock runs out. The rules are pure Swift in `WordCore/Occupy.swift`,
+and the whole thing is designed around one function, `occupyApply`, which the host runs
+as the referee and every client runs on its own words — so what a player sees the
+instant they let go and what the host decides can only differ about a square someone
+else reached first.
+
+- **The board** is fifteen square for two players (Scrabble's, and it fits a phone's
+  width whole) and nineteen for three or four (Go's). It never grows. Openers head
+  *toward the middle*, so a right-hand seat's first word ends on its start square rather
+  than running off the edge (`occupyOpenerAnchor`).
+- **Capture by crossing.** Every later word borrows a letter through a gap tile, exactly
+  as everywhere else — and the borrowed letter flips to the borrower's colour. A letter
+  already in both an across and a down word has no free direction, so crossing your own
+  long word's letters is how you defend it.
+- **Value.** Every tile is worth the length of the longest word it sits in, and you score
+  the tiles you own. Two 3-letter words are worth 12; one 5-letter word is worth 20; so
+  spamming short words loses to building long ones, and a capture carries the tile's
+  value with it. The header shows your value; under it, the pile gauge is replaced by a
+  **balanced bar** of everyone's share (`OccupyBarView`), you first in green, each rival
+  in their own colour (`SeatColors`), the same colour their tiles wear on the board.
+- **The pile** is dealt to `OCCUPY_HAND` (24) and refilled after every word — grown off
+  the shared board as it stands, so every letter has a known way on — and never buries
+  anyone.
+- **The end.** Three minutes head-to-head, four on the big board; or early, once nobody
+  has placed a word for thirty seconds — with a thirty-second opening grace during which
+  the stall clock doesn't run. The header turns the last twenty seconds of a stall into a
+  visible countdown. Most value wins; ties go to quadrants held (whoever owns more tiles
+  in a quadrant), then to whoever reached their score first. A player who leaves ranks
+  last whatever they own.
+
+Over the wire it's protocol **v7**: a client sends `place` (the new tiles and the
+borrowed squares — the outcome, not the picks), the host judges it against its board and
+dictionary, broadcasts the whole board in the next `state`, and only *then* answers the
+sender with `placed` — so a word a player has already been shown is never taken back for
+the instant between the answer and the board that agrees with it. A `refused` takes the
+word back off the sender's board, puts the letters dealt for it back, returns the ones it
+spent, and puts the word back in the row to try again. Scores are the board's, so no
+`progress` reports travel in this mode; the two clocks are the host's alone, and each
+screen shows its own reading of them. `WORD_AUTOSTART=occupy` opens straight onto a board
+against a stand-in rival on an in-memory mesh, for screenshots.
 
 `GameKitTransport` implements `BattleTransport` over a real `GKMatch`, and
 `Matchmaking` forms one. Two roads in, ranked by what the OS can do (§7.3):

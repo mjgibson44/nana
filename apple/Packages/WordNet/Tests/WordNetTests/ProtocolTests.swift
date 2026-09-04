@@ -11,6 +11,9 @@ struct WireProtocolTests {
             .hello(proto: PROTOCOL_VERSION),
             .progress(score: 42, buried: true, tiles: 7),
             .attack(count: 5),
+            .place(
+                serial: 3,
+                placement: OccupyPlacement(tiles: ["3,3": "c", "3,4": "a"], borrowed: ["3,5"])),
             .pong,
             .leave,
         ]
@@ -34,6 +37,15 @@ struct WireProtocolTests {
             .attack(count: 3),
             .ping,
             .host(proto: PROTOCOL_VERSION),
+            .placed(serial: 3),
+            .refused(serial: 4, reason: "Someone got there first."),
+            .state(
+                BattleState(
+                    phase: .playing, players: [], game: 1, winnerId: nil, mode: .occupy,
+                    occupy: OccupyState(
+                        size: 15, seats: ["a", "b"], board: TileMap([("3,3", "c")]),
+                        owners: ["3,3": 0], opened: [true, false], scores: [1, 0],
+                        settledAt: [5, 0], end: .stall))),
         ]
         for message in messages {
             let data = try #require(Wire.encode(message))
@@ -60,8 +72,8 @@ struct WireProtocolTests {
         #expect(Wire.decode(ClientMessage.self, from: Data(#"{"t":"hello"}"#.utf8)) == nil)
     }
 
-    @Test func versionIsSixForTheHostAnnouncement() {
+    @Test func versionIsSevenForOccupy() {
         // v5 was the web's; the announcement is the one addition (plan §7.2).
-        #expect(PROTOCOL_VERSION == 6)
+        #expect(PROTOCOL_VERSION == 7)
     }
 }

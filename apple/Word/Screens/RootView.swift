@@ -1,13 +1,14 @@
 import GameKit
 import SwiftUI
 import WordCore
+import WordNet
 
 /// The app's one router state, plus the overlays each screen raises.
 enum Route: Equatable {
     case home
     /// Picking a Solo game's speed, on the way in.
     case soloSetup
-    /// Getting into a battle: opening a room or joining one.
+    /// Getting into a battle (or an Occupy game): opening a room or joining one.
     case battleEntry
     /// In a battle's lobby, waiting for the host to start.
     case battleLobby
@@ -27,11 +28,15 @@ struct RootView: View {
     @State private var gameCenter = GameCenter()
     @State private var matchmaking = Matchmaking()
     @State private var battle: BattleSession?
+    /// Which game the room being opened or joined plays.
+    @State private var battleMode: GameMode = .battle
     @State private var battleBusy = false
     @State private var battleError: String?
     @State private var partyCode: String?
     @State private var battleDoorNotice = false
     @State private var savedGame: SavedSoloGame?
+    /// The stand-in rival of a `WORD_AUTOSTART=occupy` game.
+    @State private var localRival: BattleSession?
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -43,7 +48,8 @@ struct RootView: View {
                     hasSavedGame: savedGame != nil,
                     onResume: resumeSavedGame,
                     onSolo: { route = .soloSetup },
-                    onBattle: chooseBattle)
+                    onBattle: { chooseBattle(mode: .battle) },
+                    onOccupy: { chooseBattle(mode: .occupy) })
 
             case .soloSetup:
                 SoloSetupScreen(
@@ -53,6 +59,7 @@ struct RootView: View {
 
             case .battleEntry:
                 BattleEntryScreen(
+                    mode: battleMode,
                     supportsPartyCodes: Matchmaking.supportsPartyCodes,
                     partyCode: partyCode,
                     isBusy: battleBusy,
@@ -64,6 +71,7 @@ struct RootView: View {
 
             case .battleLobby:
                 BattleLobbyScreen(
+                    mode: battleMode,
                     state: battle?.state,
                     selfID: battle?.selfID ?? "",
                     isHost: battle?.isHost ?? false,
@@ -104,8 +112,10 @@ struct RootView: View {
             // A development hook: `WORD_AUTOSTART=solo` in the launch
             // environment opens straight onto a game, so a simulator can be
             // screenshotted without a finger on it. Ignored otherwise.
-            if ProcessInfo.processInfo.environment["WORD_AUTOSTART"] == "solo" {
-                startSolo(pace: settings.pace)
+            switch ProcessInfo.processInfo.environment["WORD_AUTOSTART"] {
+            case "solo": startSolo(pace: settings.pace)
+            case "occupy": startLocalOccupy()
+            default: break
             }
         }
         // The OS can kill a backgrounded app at any moment, so the in-progress
@@ -140,15 +150,48 @@ struct RootView: View {
         settings.save(nil)
     }
 
-    // MARK: Battle (plan §7.3)
+    // MARK: Battle and Occupy (plan §7.3)
 
-    private func chooseBattle() {
+    private func chooseBattle(mode: GameMode) {
         if gameCenter.battleBlockedReason != nil {
             battleDoorNotice = true
         } else {
+            battleMode = mode
             battleError = nil
             partyCode = nil
             route = .battleEntry
+            // Occupy's host judges everyone's words, so its dictionary has to
+            // be in before the first one arrives — not when the board appears.
+            if mode == .occupy {
+                Task { await model.loadDictionary() }
+            }
+        }
+    }
+
+    /// A development hook: `WORD_AUTOSTART=occupy` opens straight onto an
+    /// Occupy board against a rival who never plays — two sessions on an
+    /// in-memory mesh — so a simulator can be screenshotted.
+    private func startLocalOccupy() {
+        let mesh = MemoryMesh()
+        let hostTransport = mesh.add("me")
+        let rivalTransport = mesh.add("rival")
+        let rivalModel = GameModel()
+        let host = BattleSession(
+            role: .host, mode: .occupy, transport: hostTransport, model: model,
+            displayName: { $0 == "me" ? "You" : "Rival" })
+        let rival = BattleSession(role: .client, mode: .occupy, transport: rivalTransport, model: rivalModel)
+        mesh.connect("me")
+        mesh.connect("rival")
+        host.onGameStart = { route = .game }
+        host.onReturnToLobby = { route = .battleLobby }
+        host.run()
+        battle = host
+        battleMode = .occupy
+        // Held for the app's lifetime: a dropped session takes its seat with it.
+        localRival = rival
+        Task {
+            await model.loadDictionary()
+            host.start()
         }
     }
 
@@ -176,8 +219,9 @@ struct RootView: View {
     /// Game Center's own invite sheet — the road that works on every OS the
     /// app supports. Whoever sends the invite referees.
     private func inviteToBattle() {
+        let mode = battleMode
         runBattleSetup {
-            let match = try await matchmaking.findMatchByInvite()
+            let match = try await matchmaking.findMatchByInvite(mode: mode)
             return (match, .host)
         }
     }
@@ -215,6 +259,7 @@ struct RootView: View {
         let transport = GameKitTransport(match: match)
         let session = BattleSession(
             role: role,
+            mode: battleMode,
             transport: transport,
             model: model,
             displayName: { transport.displayName(for: $0) })

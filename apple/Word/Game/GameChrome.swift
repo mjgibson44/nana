@@ -13,6 +13,9 @@ struct GameHeaderView: View {
     /// sentence — "5 tiles in 24s" — because they only mean anything together:
     /// twenty seconds is nothing to fear or everything, depending.
     var tilesComing: Int?
+    /// Occupy: the match clock, and the stall countdown when one is running,
+    /// in place of the deal. Nothing lands from a clock there.
+    var clock: HeaderClock?
     /// Nil hides the pause button — a battle can't be paused, and neither can
     /// a game that's already over.
     var onPause: (() -> Void)?
@@ -32,7 +35,15 @@ struct GameHeaderView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(headlineLabel)
 
-            if let secondsToTiles {
+            if let clock {
+                Text(clock.text)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(clock.stallSeconds == nil ? Palette.inkSoft : Palette.gaugeWarn)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel(clock.spoken)
+            } else if let secondsToTiles {
                 Text(Self.dealText(tiles: tilesComing, seconds: secondsToTiles))
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Palette.inkSoft)
@@ -87,6 +98,69 @@ struct GameHeaderView: View {
     /// Under a minute reads as "14s"; past it, "1:45".
     static func clockText(_ seconds: Int) -> String {
         seconds < 60 ? "\(seconds)s" : formatSeconds(Double(seconds))
+    }
+}
+
+/// Occupy's header clock: the match clock, or — once the board has been
+/// quiet long enough for the stall rule to be close — how long until that
+/// ends it, so the ending is never a surprise.
+struct HeaderClock: Equatable {
+    var secondsLeft: Int
+    var stallSeconds: Int?
+
+    var text: String {
+        if let stallSeconds { return "Stuck? Ends in \(stallSeconds)s" }
+        return formatSeconds(Double(secondsLeft))
+    }
+
+    var spoken: String {
+        if let stallSeconds { return "Nobody has placed a word; the game ends in \(stallSeconds) seconds" }
+        return "\(secondsLeft) seconds left"
+    }
+}
+
+/// Occupy's balanced bar, in place of the pile gauge: everyone's share of
+/// the value on the board, in one strip — yours first, in green, then each
+/// rival in their colour. The divider is the whole story: push it their way.
+struct OccupyBarView: View {
+    struct Segment: Identifiable, Equatable {
+        var id: Int
+        var name: String
+        var value: Int
+        var colors: SeatColors
+    }
+
+    var segments: [Segment]
+
+    var body: some View {
+        let total = max(1, segments.reduce(0) { $0 + $1.value })
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                ForEach(segments) { segment in
+                    Rectangle()
+                        .fill(segment.colors.ink)
+                        .frame(width: proxy.size.width * Double(segment.value) / Double(total))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.surface)
+            .overlay {
+                // The half-way mark, so a two-player game reads as ahead or
+                // behind at a glance.
+                if segments.count == 2 {
+                    Rectangle()
+                        .fill(Palette.bg)
+                        .frame(width: 2)
+                }
+            }
+        }
+        .frame(height: 10)
+        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+        .animation(.easeOut(duration: 0.25), value: segments)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Board held")
+        .accessibilityValue(
+            segments.map { "\($0.name) \($0.value)" }.joined(separator: ", "))
     }
 }
 

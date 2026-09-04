@@ -21,6 +21,10 @@ struct BoardScene {
     var aimIsGood = true
     /// The words each placed tile reads in, for its spoken label (plan §6.6).
     var wordsAt: [CellKey: [String]] = [:]
+    /// Occupy: which seat holds each tile, and which seat is looking. A tile
+    /// with no owner wears the word green.
+    var owners: [CellKey: Int] = [:]
+    var viewerSeat: Int? = nil
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -52,10 +56,14 @@ struct BoardContentView: View {
             }
 
             // Placed tiles: every one is part of a real word, and wears the
-            // word colour.
+            // word colour — or, in Occupy, its owner's.
             ForEach(scene.tiles, id: \.key) { tile in
                 let rect = metrics.rect(of: parseKey(tile.key))
-                BoardTileView(letter: tile.letter, cellSize: metrics.cellSize)
+                BoardTileView(
+                    letter: tile.letter, cellSize: metrics.cellSize,
+                    colors: scene.owners[tile.key].map {
+                        SeatColors.of(seat: $0, viewer: scene.viewerSeat)
+                    })
                     .frame(width: rect.width, height: rect.height)
                     .position(x: rect.midX, y: rect.midY)
                     .accessibilityElement()
@@ -109,26 +117,31 @@ struct BoardContentView: View {
         if let words = scene.wordsAt[key], !words.isEmpty {
             parts.append("part of \(words.map { $0.uppercased() }.joined(separator: " and "))")
         }
+        if let owner = scene.owners[key] {
+            parts.append(owner == scene.viewerSeat ? "yours" : "a rival’s")
+        }
         parts.append("tap to place your word through it")
         return parts.joined(separator: ", ")
     }
 }
 
 /// A placed tile. Every word on the board got there by reading, so a placed
-/// tile is always a correct one — and wears the green that says so.
+/// tile is always a correct one — and wears the green that says so, unless
+/// it's a rival's on an Occupy board.
 struct BoardTileView: View {
     var letter: String
     var cellSize: Double
+    var colors: SeatColors? = nil
 
     var body: some View {
         RoundedRectangle(
             cornerRadius: BoardContentView.cornerRadius(for: cellSize), style: .continuous
         )
-        .fill(Palette.accentBg)
+        .fill(colors?.fill ?? Palette.accentBg)
         .overlay(
             Text(letter.uppercased())
                 .font(.system(size: cellSize * 0.56, weight: .bold))
-                .foregroundStyle(Palette.accent)
+                .foregroundStyle(colors?.ink ?? Palette.accent)
         )
     }
 }

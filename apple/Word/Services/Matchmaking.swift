@@ -63,12 +63,14 @@ final class Matchmaking: NSObject {
     // MARK: Invites — the road that works everywhere
 
     /// Raise Game Center's own matchmaker, invite-only. Returns once the
-    /// player has a match, or throws if they backed out.
-    func findMatchByInvite() async throws -> GKMatch {
+    /// player has a match, or throws if they backed out. The room is sized
+    /// for the game being played — eight for a Battle, four for Occupy.
+    func findMatchByInvite(mode: GameMode = .battle) async throws -> GKMatch {
         let request = GKMatchRequest()
-        request.minPlayers = BATTLE_MIN_PLAYERS
-        request.maxPlayers = BATTLE_MAX_PLAYERS
-        request.inviteMessage = "Come play a battle of Time Tiles."
+        request.minPlayers = mode == .occupy ? OCCUPY_MIN_PLAYERS : BATTLE_MIN_PLAYERS
+        request.maxPlayers = mode == .occupy ? OCCUPY_MAX_PLAYERS : BATTLE_MAX_PLAYERS
+        request.inviteMessage =
+            mode == .occupy ? "Come play Occupy in Time Tiles." : "Come play a battle of Time Tiles."
 
         guard let controller = GKMatchmakerViewController(matchRequest: request) else {
             throw Failure.unavailable("Game Center couldn't open matchmaking.")

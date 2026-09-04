@@ -67,11 +67,113 @@ final class ScreenSnapshotTests: XCTestCase {
 
     func testHomeScreenRenders() throws {
         try render(
-            HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {}),
+            HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {}, onOccupy: {}),
             name: "home")
         try render(
-            HomeScreen(hasSavedGame: false, onResume: {}, onSolo: {}, onBattle: {}),
+            HomeScreen(hasSavedGame: false, onResume: {}, onSolo: {}, onBattle: {}, onOccupy: {}),
             name: "home-fresh")
+    }
+
+    // MARK: Occupy
+
+    /// An Occupy game a few words in, through the real rules: two sessions
+    /// on a mesh, the host's opener, and the rival borrowing through it.
+    private func playedOccupy() async throws -> (model: GameModel, session: BattleSession) {
+        let mesh = MemoryMesh()
+        let hostTransport = mesh.add("host")
+        let rivalTransport = mesh.add("rival")
+        let hostModel = GameModel()
+        let rivalModel = GameModel()
+        let host = BattleSession(
+            role: .host, mode: .occupy, transport: hostTransport, model: hostModel,
+            displayName: { $0 == "host" ? "Ada" : "Grace" }, makeSeed: { "snapshot-occupy" })
+        let rival = BattleSession(role: .client, mode: .occupy, transport: rivalTransport, model: rivalModel)
+        mesh.connect("host")
+        mesh.connect("rival")
+        await hostModel.loadDictionary()
+        await rivalModel.loadDictionary()
+        host.start()
+        try TestPlays.placeOpener(on: hostModel)
+        try TestPlays.attachWord(on: rivalModel)
+        try TestPlays.attachWord(on: hostModel)
+        // Held so the rival's seat outlives this function.
+        withExtendedLifetime(rival) {}
+        return (hostModel, host)
+    }
+
+    func testOccupyGameScreenRenders() async throws {
+        let (model, session) = try await playedOccupy()
+        model.togglePick(0)
+        model.addGap()
+        model.togglePick(1)
+        try render(GameScreen(model: model, battle: session), name: "occupy-game")
+    }
+
+    /// The balanced bar at a few scores, and the header's two clocks.
+    func testTheOccupyHeaderRendersTheBarAndBothClocks() throws {
+        let you = SeatColors.of(seat: 0, viewer: 0)
+        let rivals = (1...3).map { SeatColors.of(seat: $0, viewer: 0) }
+        try render(
+            VStack(spacing: Spacing.gap) {
+                VStack(spacing: Spacing.gap / 2) {
+                    GameHeaderView(
+                        headline: "84", headlineLabel: "Board value 84",
+                        clock: HeaderClock(secondsLeft: 151, stallSeconds: nil), onMenu: {})
+                    OccupyBarView(segments: [
+                        .init(id: 0, name: "Ada", value: 84, colors: you),
+                        .init(id: 1, name: "Grace", value: 60, colors: rivals[0]),
+                    ])
+                }
+                VStack(spacing: Spacing.gap / 2) {
+                    GameHeaderView(
+                        headline: "31", headlineLabel: "Board value 31",
+                        clock: HeaderClock(secondsLeft: 40, stallSeconds: 12), onMenu: {})
+                    OccupyBarView(segments: [
+                        .init(id: 0, name: "Ada", value: 31, colors: you),
+                        .init(id: 1, name: "Grace", value: 45, colors: rivals[0]),
+                        .init(id: 2, name: "Katherine", value: 20, colors: rivals[1]),
+                        .init(id: 3, name: "Dorothy", value: 52, colors: rivals[2]),
+                    ])
+                }
+            }
+            .padding(Spacing.margin),
+            name: "occupy-header", size: CGSize(width: Self.phone.width, height: 160))
+    }
+
+    func testOccupyLobbyAndEntryRender() throws {
+        let state = BattleState(
+            phase: .lobby,
+            players: [
+                BattlePlayer(id: "a", name: "Ada", host: true),
+                BattlePlayer(id: "b", name: "Grace"),
+            ],
+            game: 0, winnerId: nil, mode: .occupy)
+        try render(
+            BattleLobbyScreen(
+                mode: .occupy, state: state, selfID: "a", isHost: true, canStart: true,
+                isReconnecting: false, rejection: nil, onStart: {}, onLeave: {}),
+            name: "occupy-lobby")
+        try render(
+            BattleEntryScreen(
+                mode: .occupy, supportsPartyCodes: true, partyCode: nil, isBusy: false, error: nil,
+                onHost: {}, onJoin: { _ in }, onInvite: {}, onClose: {}),
+            name: "occupy-entry")
+    }
+
+    func testOccupyResultsRender() throws {
+        try render(
+            GameEndView(
+                score: 84,
+                words: [ScoredWord(word: "stare", points: 25), ScoredWord(word: "cat", points: 9)],
+                placing: "1st",
+                standings: [
+                    .init(id: "a", rank: 1, name: "Ada", isSelf: true, note: "84"),
+                    .init(id: "b", rank: 2, name: "Grace", isSelf: false, note: "60"),
+                ],
+                note: "Time.",
+                restart: {}, onSeeGame: {}, onLobby: {}, leaveLabel: "LEAVE", onLeave: {},
+                scrollable: false),
+            name: "results-occupy", size: CGSize(width: Self.phone.width, height: 1_100))
     }
 
     func testGameScreenRenders() async throws {

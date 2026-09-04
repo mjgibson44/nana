@@ -184,3 +184,28 @@ All of the following exists solely for signaling/NAT traversal and would be dele
 - State broadcasts include every player's data to everyone (full BattleState, battleSession.ts:629-633); harmless here, but note names are the only user content and are sanitized host-side only (battleSession.ts:245-251)
 - The visibilitychange/wake healing paths (battleSession.ts:307-310, 777-786) are browser-specific; iOS backgrounding suspends GKMatch sessions entirely — the resume-from-background story must be redesigned, not ported
 - TURN credentials are deliberately committed in .env.production (Metered free tier) and ship in the JS bundle; if any web build remains alongside the GameKit port, rotating/retiring them is a manual dashboard task (.env.production:1-14, infra/README.md:96-100)
+## 10. Apple-only additions (protocol v6 and v7)
+
+Documented in `apple/Packages/WordNet/Sources/WordNet/Protocol.swift`; summarised here so
+this appendix stays the one place the whole wire is described.
+
+- **v6 — `host`.** `{ t: 'host', proto }`, host → client. A GKMatch formed from a party
+  code is a mesh with no marked owner, so the lobby's creator announces itself on match
+  formation and again to every later connection; a client that hears nothing for 3s falls
+  back to the lowest player id.
+- **v7 — Occupy.** A second game the same lobby can play (`BattleState.mode`, defaulting
+  to `battle` when absent), with the shared board riding in every `state` snapshot as
+  `BattleState.occupy` (`OccupyState`: size, seats, board, owners, opened, scores,
+  settledAt, end). Three messages:
+  - `{ t: 'place', serial, placement }` client → host. `placement` is the outcome —
+    `tiles` (new cell → letter) and `borrowed` (the gap squares) — not the picks. The
+    host runs `occupyApply` (WordCore) against its board and dictionary.
+  - `{ t: 'placed', serial }` host → sender, sent **after** the `state` that carries the
+    word, so a sender's optimistic copy is never taken back between the two.
+  - `{ t: 'refused', serial, reason }` host → sender. The sender takes the word back off
+    its board and returns the letters.
+
+  Scores are the board's, so no `progress` reports travel in this mode. The clock and the
+  stall rule are the host's alone (`occupyEnd`); each screen shows its own reading of
+  them from the moment `start` arrived. Seats are capped at four; `hello` past that is
+  rejected with "That game is full."

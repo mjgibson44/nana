@@ -172,5 +172,10 @@ public func submissions(
     case .tutorial:
         // A lesson isn't a game and has no score.
         return []
+
+    case .occupy:
+        // No board is configured for it yet; the win is counted locally
+        // (`Progression`) and nothing is posted.
+        return []
     }
 }

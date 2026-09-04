@@ -10,6 +10,8 @@ import WordNet
 /// battle plays on without a disconnected player rather than pausing for
 /// them (plan §7.4), so their seat has to read as held rather than gone.
 struct BattleLobbyScreen: View {
+    /// Which game the room plays: how many it seats, and what the note says.
+    var mode: GameMode = .battle
     var state: BattleState?
     var selfID: String
     var isHost: Bool
@@ -30,7 +32,11 @@ struct BattleLobbyScreen: View {
             VStack(spacing: Spacing.tileGap) {
                 TileWord(text: "LOBBY", style: .accent)
                     .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, Spacing.tileGap)
+                if mode == .occupy {
+                    TileWord(text: "OCCUPY", style: .dim)
+                        .accessibilityLabel("Occupy")
+                }
+                Color.clear.frame(height: 0)
 
                 if let rejection {
                     note(rejection, tone: Palette.gaugeBad)
@@ -49,7 +55,10 @@ struct BattleLobbyScreen: View {
                         text: "START", style: canStart ? .accentButton : .plain,
                         disabled: !canStart, action: onStart)
                     if !canStart {
-                        note("A battle needs at least \(BATTLE_MIN_PLAYERS) players.")
+                        note(
+                            mode == .occupy
+                                ? "Occupy needs \(OCCUPY_MIN_PLAYERS) to \(OCCUPY_MAX_PLAYERS) players."
+                                : "A battle needs at least \(BATTLE_MIN_PLAYERS) players.")
                     }
                 } else {
                     note("Waiting for the host to start.")

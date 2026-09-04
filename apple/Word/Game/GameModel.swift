@@ -106,6 +106,44 @@ struct GameOutcome: Equatable {
     var score: Int { report.score }
 }
 
+/// Occupy's side of the model: whose seat this is, the host's board, and the
+/// words let go of that the host hasn't answered for yet.
+///
+/// The board a player looks at is the host's latest snapshot with their own
+/// unanswered words laid over it (`view`), so a word appears the moment it's
+/// let go of — and is taken back, tiles and all, if the host says someone got
+/// there first. The rules that lay it over are the host's own (`occupyApply`),
+/// so the two can only disagree about a square someone else reached first.
+struct OccupyRun: Equatable {
+    var seed: String
+    var selfID: String
+    var seat: Int?
+    /// The host's latest word on the board.
+    var host: OccupyState?
+    /// What's drawn: `host` with `pending` laid over it.
+    var view: OccupyState?
+    /// When the deal arrived here, for the match clock.
+    var startedAt: Date
+    /// When the board last changed here, for the stall countdown.
+    var lastChangeAt: Date
+    var serial = 0
+    var refillSerial = 0
+    var pending: [PendingPlacement] = []
+
+    var players: Int { host?.seats.count ?? OCCUPY_MIN_PLAYERS }
+}
+
+/// A word let go of, and everything needed to take it back.
+struct PendingPlacement: Equatable {
+    var serial: Int
+    var placement: OccupyPlacement
+    /// The letters it took from the pile, and the ones dealt in their place.
+    var spent: [String]
+    var refill: [String]
+    /// The word as it was typed — gaps nil — to put back in the row.
+    var typed: [String?]
+}
+
 /// How long a word that doesn't read stays on the board in red before it's
 /// taken back. Long enough to read what you spelled — which is the whole
 /// point of showing it — and short enough not to be a punishment.
@@ -159,8 +197,21 @@ final class GameModel {
     /// Bumped per deal so the viewport knows to go home.
     private(set) var gameSerial = 0
 
-    /// Which mode is being played: Solo (`endless`) or Battle.
+    /// Which mode is being played: Solo (`endless`), Battle, or Occupy.
     private(set) var mode: GameMode = .endless
+
+    /// Occupy's shared board and seat, while `mode == .occupy`.
+    private(set) var occupy: OccupyRun?
+    /// Which seat owns each tile on the board, in Occupy. Empty otherwise.
+    private(set) var owners: [CellKey: Int] = [:]
+    /// The words this player put down in an Occupy game, each worth what it
+    /// gained — the results screen's list.
+    private(set) var occupyWords: [ScoredWord] = []
+    /// A fixed board, for the modes that have one; nil lets the board grow.
+    private var fixedBounds: Bounds?
+
+    /// A word let go of in Occupy, for the session to send the host.
+    var onOccupyPlace: ((Int, OccupyPlacement) -> Void)?
 
     /// The battle's clock and deal position, while `mode == .battle`.
     private(set) var battle: BattleRun?
@@ -225,6 +276,26 @@ final class GameModel {
     static let startCell = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2)
     static var startKey: CellKey { keyOf(startCell.row, startCell.col) }
 
+    /// This game's start square: the middle of a growing board, or this
+    /// seat's corner of an Occupy board.
+    var startCell: Cell {
+        if let occupy, let seat = occupy.seat, let view = occupy.view {
+            return view.startCell(seat: seat)
+        }
+        return Self.startCell
+    }
+
+    /// Where the opener would start from, heading across. Occupy's right-hand
+    /// seats head left toward the middle, so their anchor is worked back from
+    /// the start square; nil when the word wouldn't fit.
+    var openerAnchor: Cell? {
+        guard mode == .occupy else { return Self.startCell }
+        guard let seat = occupy?.seat else { return nil }
+        return occupyOpenerAnchor(
+            board: board, bounds: bounds, start: startCell,
+            headsRight: occupyOpenerHeadsRight(seat: seat), picks: pickList)
+    }
+
     // MARK: Derived word-building state
 
     var pickList: [Pick] {
@@ -236,16 +307,24 @@ final class GameModel {
     /// Whether the staged word borrows a letter from the board.
     var hasGap: Bool { picks.contains(GAP) }
 
-    /// The board is empty: the word in hand is the opener.
-    var isFirstWord: Bool { board.isEmpty }
+    /// The board is empty: the word in hand is the opener. In Occupy it's
+    /// *this seat's* board that counts — everyone opens from their own corner
+    /// however much is already down elsewhere.
+    var isFirstWord: Bool {
+        guard mode == .occupy else { return board.isEmpty }
+        guard let occupy, let seat = occupy.seat, let view = occupy.view else { return true }
+        return !view.opened[seat]
+    }
+
+    var isOccupy: Bool { mode == .occupy }
 
     /// Where the opener would land, laid out from the start square. Nil once
     /// anything is on the board — later words have no home until a letter is
     /// tapped.
     var plan: PlacementPlan? {
-        guard isFirstWord, !pickList.isEmpty else { return nil }
+        guard isFirstWord, !pickList.isEmpty, let anchor = openerAnchor else { return nil }
         return planPlacement(
-            board: board, bounds: bounds, anchor: Self.startCell, dir: .across, picks: pickList)
+            board: board, bounds: bounds, anchor: anchor, dir: .across, picks: pickList)
     }
 
     /// Ghost letters on the board: the opener, previewing as it's typed.
@@ -276,8 +355,8 @@ final class GameModel {
     var canBackspace: Bool { !picks.isEmpty }
     var canShuffle: Bool { rack.count > 1 }
     /// A gap borrows from the board, so it means nothing until there's a
-    /// board to borrow from.
-    var canAddGap: Bool { !isFirstWord }
+    /// board to borrow from — anyone's board, in Occupy.
+    var canAddGap: Bool { mode == .occupy ? !board.isEmpty : !isFirstWord }
 
     // MARK: Derived session state
 
@@ -310,15 +389,54 @@ final class GameModel {
             + (boardScore.bonusEarned ? ENDLESS_CONNECT_BONUS : 0)
     }
 
-    var score: Int { isComplete ? finalScore : runningScore }
+    var score: Int { isComplete ? finalScore : liveScore }
+
+    /// What the game is worth right now: the words down, or in Occupy the
+    /// value of the tiles this seat holds.
+    private var liveScore: Int {
+        mode == .occupy ? occupyScore : runningScore
+    }
 
     var isBattle: Bool { mode == .battle }
+
+    // MARK: Occupy, as seen from this seat
+
+    /// Every seat's value on the board as drawn — the host's board with this
+    /// player's unanswered words on it.
+    var occupyScores: [Int] { occupy?.view?.scores ?? [] }
+
+    var occupySeat: Int? { occupy?.seat }
+
+    var occupyScore: Int {
+        guard let seat = occupy?.seat, occupyScores.indices.contains(seat) else { return 0 }
+        return occupyScores[seat]
+    }
+
+    /// Seconds left on the match clock, or nil when there isn't one running.
+    func occupySecondsLeft(at now: Date) -> Int? {
+        guard mode == .occupy, !isComplete, let occupy else { return nil }
+        let total = Double(occupySeconds(players: occupy.players))
+        return Int(ceil(max(0, total - now.timeIntervalSince(occupy.startedAt))))
+    }
+
+    /// Seconds until the stall rule ends the game, once that's close enough
+    /// to show. Read off this screen's own clocks: they trail the host's by
+    /// a message's flight, which is close enough for a warning.
+    func occupyStallSecondsLeft(at now: Date) -> Int? {
+        guard mode == .occupy, !isComplete, let occupy else { return nil }
+        return WordCore.occupyStallSecondsLeft(
+            elapsed: now.timeIntervalSince(occupy.startedAt),
+            sinceLastWord: now.timeIntervalSince(occupy.lastChangeAt)
+        ).map { Int(ceil($0)) }
+    }
 
     /// How many tiles are in hand — the gauge, and the only thing that can
     /// end a game.
     var pileCount: Int { rack.count }
 
     var pileTone: PileTone {
+        // A full pile is the normal state of an Occupy hand, not a warning.
+        if mode == .occupy { return .ok }
         if rack.count >= PILE_URGENT { return .urgent }
         if rack.count >= PILE_WARN { return .warn }
         return .ok
@@ -330,6 +448,7 @@ final class GameModel {
 
     /// Seconds until the next batch lands, whichever clock is running.
     func secondsToNextTiles(at now: Date) -> Int? {
+        if mode == .occupy { return nil }
         if let battle {
             return isComplete ? nil : battle.secondsToNextDrip(at: now)
         }
@@ -341,7 +460,7 @@ final class GameModel {
     /// they're about to move to, which is what makes the number the player
     /// sees the number they get.
     var nextTileCount: Int? {
-        guard !isComplete, !spectating else { return nil }
+        guard !isComplete, !spectating, mode != .occupy else { return nil }
         if let battle {
             return battleDripTilesAt(dripIndex: battle.dripIndex)
         }
@@ -392,6 +511,171 @@ final class GameModel {
         resetPlayState()
     }
 
+    /// The host said go on an Occupy board. The seat, the board's size and
+    /// the opening hand all wait on the host's first snapshot, which may
+    /// already be here (the host's own `state` lands before its `start`) or
+    /// be one message behind (a client's `start` comes first) — either order
+    /// ends up in the same place.
+    func newOccupy(
+        seed: String, selfID: String, state: OccupyState? = nil, spectating: Bool = false,
+        now: Date = .now
+    ) {
+        self.seed = seed
+        mode = .occupy
+        clearBattle()
+        self.spectating = spectating
+        solo = SoloSession(battleAt: now)
+        gameSerial += 1
+        occupy = OccupyRun(seed: seed, selfID: selfID, startedAt: now, lastChangeAt: now)
+        owners = [:]
+        setBoard(TileMap())
+        rack = []
+        resetPlayState()
+        if let state { adoptOccupy(state, now: now) }
+    }
+
+    /// The host's latest board. The first one to name this player's seat also
+    /// fixes the board's size and deals the opening hand; every one after it
+    /// is laid under whatever words are still waiting on an answer.
+    func adoptOccupy(_ state: OccupyState, now: Date = .now) {
+        guard mode == .occupy, var run = occupy else { return }
+        let changed = run.host?.board != state.board || run.host?.owners != state.owners
+        run.host = state
+        if changed { run.lastChangeAt = now }
+        if run.seat == nil, let seat = state.seat(of: run.selfID) {
+            run.seat = seat
+            spectating = false
+            fixedBounds = state.bounds
+            // The board just took its real shape: the camera has to look again.
+            gameSerial += 1
+        } else if run.seat == nil {
+            // Not dealt in — joined mid-game, watching this one out.
+            spectating = true
+        }
+        occupy = run
+        refreshOccupyView()
+        if let seat = run.seat, rack.isEmpty, !isComplete {
+            rack = occupyRefill(count: OCCUPY_HAND, seat: seat)
+        }
+    }
+
+    /// The host put the word numbered `serial` down. It's already on the
+    /// board here, so nothing moves — it just stops being provisional. The
+    /// snapshot carrying it lands first under ordered delivery; should the
+    /// answer ever arrive alone, the word is folded into the host's board
+    /// rather than vanishing until the next snapshot.
+    func confirmPlacement(serial: Int) {
+        guard var run = occupy, let index = run.pending.firstIndex(where: { $0.serial == serial })
+        else { return }
+        let confirmed = run.pending.remove(at: index)
+        if let host = run.host, let seat = run.seat,
+            let folded = try? occupyApply(
+                confirmed.placement, seat: seat, at: 0, to: host, isWord: { _ in true })
+        {
+            run.host = folded
+        }
+        occupy = run
+        refreshOccupyView()
+    }
+
+    /// The host turned the word numbered `serial` away: take it back off
+    /// the board, put its letters back in the pile in place of the ones
+    /// dealt for them, and — if nothing else has been typed since — back
+    /// into the row, ready to try somewhere else.
+    func refusePlacement(serial: Int, reason: String) {
+        guard var run = occupy, let index = run.pending.firstIndex(where: { $0.serial == serial })
+        else { return }
+        let refused = run.pending.remove(at: index)
+        occupy = run
+
+        var pile = rack
+        for letter in refused.refill {
+            if let at = pile.firstIndex(of: letter) { pile.remove(at: at) }
+        }
+        pile.append(contentsOf: refused.spent)
+        rack = pile
+        refreshOccupyView()
+        rejectToast(reason)
+
+        guard picks.isEmpty else { return }
+        var taken = Set<Int>()
+        var restored: [Int] = []
+        for letter in refused.typed {
+            guard let letter else {
+                restored.append(GAP)
+                continue
+            }
+            let at = findAvailable(rack: rack, letter: letter, taken: taken)
+            guard at != -1 else { continue }
+            taken.insert(at)
+            restored.append(at)
+        }
+        picks = restored
+    }
+
+    /// The board is decided. Whatever was still waiting on an answer is
+    /// dropped — the host's final board is the only one that counts.
+    func finishOccupy(won: Bool, players: Int) {
+        guard mode == .occupy else { return }
+        battlePlayerCount = players
+        if var run = occupy {
+            run.pending = []
+            occupy = run
+            refreshOccupyView()
+        }
+        guard !isComplete else {
+            showSummary = true
+            return
+        }
+        battleWon = won
+        finishGame(reason: .battleOver)
+    }
+
+    /// Redraw the board as this player sees it: the host's latest snapshot
+    /// with every unanswered word laid over it by the host's own rules. A
+    /// word the host has since put down lays over as nothing; one the host
+    /// will refuse shows until the refusal lands.
+    private func refreshOccupyView() {
+        guard var run = occupy, let host = run.host else { return }
+        var view = host
+        if let seat = run.seat {
+            for pending in run.pending {
+                guard
+                    let next = try? occupyApply(
+                        pending.placement, seat: seat, at: 0, to: view, isWord: { _ in true })
+                else { continue }
+                view = next
+            }
+        }
+        run.view = view
+        occupy = run
+        owners = view.owners
+        setBoard(view.board)
+    }
+
+    /// Deal an Occupy hand back up to `OCCUPY_HAND`: letters grown off the
+    /// board as it stands — anyone's letters — so every one of them has a
+    /// known way onto it. Private to the seat and numbered, so a refused word
+    /// puts back exactly what was dealt for it.
+    private func occupyRefill(count: Int, seat: Int) -> [String] {
+        guard count > 0, var run = occupy else { return [] }
+        let serial = run.refillSerial
+        run.refillSerial += 1
+        occupy = run
+        let rng = seededRng("\(seed)/occupy/\(seat)/\(serial)")
+        var letters: [String] = []
+        if let deal = try? extendPuzzle(
+            board: board, bounds: bounds, wordPool: commonWords, tileCount: count, rng: rng)
+        {
+            letters = Array(deal.letters.prefix(count))
+        }
+        if letters.count < count {
+            let stream = TileStream(seed: "\(seed)/occupy/\(seat)/\(serial)/more")
+            letters += stream.next(count - letters.count)
+        }
+        return letters
+    }
+
     /// Our share of a rival's word. Only the count crossed the wire; the
     /// letters come off this player's private stream.
     func receiveAttack(_ count: Int) {
@@ -432,6 +716,10 @@ final class GameModel {
         battleWon = false
         battlePlayerCount = 0
         attackTilesSent = 0
+        occupy = nil
+        owners = [:]
+        occupyWords = []
+        fixedBounds = nil
     }
 
     /// Everything a fresh board resets, whatever dealt it.
@@ -476,6 +764,8 @@ final class GameModel {
             advanceBattle(at: now)
             return
         }
+        // Occupy's clocks are the host's; nothing lands from them here.
+        if mode == .occupy { return }
         if let tiles = solo.advance(at: now) {
             dealBonusTiles(tiles, message: "+\(tiles) tile\(tiles == 1 ? "" : "s")")
         }
@@ -520,7 +810,7 @@ final class GameModel {
     /// game ends only when the pile is actually full. Digging back out
     /// re-arms it, and is the comeback the badge is for.
     private func soundPileAlarm() {
-        guard !isComplete else {
+        guard !isComplete, mode != .occupy else {
             inTheRed = false
             return
         }
@@ -533,7 +823,7 @@ final class GameModel {
 
     /// One rule, every mode: a full pile ends the game on the spot.
     private func checkBurial() {
-        guard !isComplete, !spectating, rack.count >= PILE_LIMIT else { return }
+        guard !isComplete, !spectating, mode != .occupy, rack.count >= PILE_LIMIT else { return }
         finishGame(reason: .buried)
     }
 
@@ -557,12 +847,15 @@ final class GameModel {
     func finishGame(reason: SoloEndReason) {
         guard !finishRecorded else { return }
         finishRecorded = true
-        finalScore = runningScore
+        finalScore = liveScore
         finalTilesLeft = rack.count
         finalBonusEarned = boardScore.bonusEarned
-        finalWords = (validation?.runs ?? [])
-            .filter(\.valid)
-            .map { ScoredWord(word: $0.word, points: wordScore($0.word)) }
+        finalWords =
+            mode == .occupy
+            ? occupyWords
+            : (validation?.runs ?? [])
+                .filter(\.valid)
+                .map { ScoredWord(word: $0.word, points: wordScore($0.word)) }
         solo.finish(reason: reason)
         showSummary = true
         picks = []
@@ -703,8 +996,8 @@ final class GameModel {
 
     /// The opener: from the start square, heading across.
     func confirmFirstWord() {
-        guard canConfirm else { return }
-        commit(Self.startKey, .across)
+        guard canConfirm, let anchor = openerAnchor else { return }
+        commit(keyOf(anchor.row, anchor.col), .across)
     }
 
     /// Tap a placed letter: the staged word lands with its gap on it. A word
@@ -959,6 +1252,12 @@ final class GameModel {
         if picksToPlace.contains(where: { $0.letter == nil }) { usedGapTile = true }
         longestWordPlaced = max(longestWordPlaced, newRuns.map(\.word.count).max() ?? 0)
 
+        if mode == .occupy {
+            return commitOccupy(
+                anchor: parseKey(anchor), dir: dir, plan: result, picks: picksToPlace,
+                newRuns: newRuns, dictionary: dictionary)
+        }
+
         // Captured before the board changes: an attack is priced against the
         // words that were already down.
         let oldRuns = mode == .battle ? extractRuns(board) : []
@@ -997,6 +1296,70 @@ final class GameModel {
                     "Sent \(attack) tile\(attack == 1 ? "" : "s") across your rivals!")
             }
         }
+        return true
+    }
+
+    /// Occupy's landing: the word goes on this screen's board at once and
+    /// off to the host, with the pile refilled behind it. The host's answer
+    /// (`confirmPlacement` / `refusePlacement`) settles it.
+    private func commitOccupy(
+        anchor: Cell, dir: Direction, plan: PlacementPlan, picks: [Pick], newRuns: [WordRun],
+        dictionary: Set<String>
+    ) -> Bool {
+        guard var run = occupy, let seat = run.seat, let view = run.view else {
+            rejectToast("Waiting for the board…")
+            return false
+        }
+        let tiles = Dictionary(uniqueKeysWithValues: plan.steps.map { ($0.key, $0.letter) })
+        let borrowed = gapCells(board: board, bounds: bounds, anchor: anchor, dir: dir, picks: picks)
+        let placement = OccupyPlacement(tiles: tiles, borrowed: borrowed)
+
+        // Judged by the host's own rules before it's shown — the one thing
+        // this can't know is whether someone else got there first.
+        let landed: OccupyState
+        do {
+            landed = try occupyApply(
+                placement, seat: seat, at: Date.now.timeIntervalSince1970, to: view,
+                isWord: { dictionary.contains($0) })
+        } catch let refusal as OccupyRefusal {
+            rejectToast(refusal.message)
+            return false
+        } catch {
+            return false
+        }
+
+        let before = view.scores[seat]
+        let typed: [String?] = picks.map(\.letter)
+        let spentIndices = Set(plan.steps.map(\.rackIndex))
+        let spent = plan.steps.map(\.letter)
+        let captured = borrowed.filter { view.owners[$0] != seat }.count
+
+        run.serial += 1
+        let serial = run.serial
+        occupy = run
+        // Emptied before the board changes, so the word row has nothing left
+        // to judge against a board it is no longer waiting on.
+        self.picks = []
+        rack = rack.enumerated().filter { !spentIndices.contains($0.offset) }.map(\.element)
+        let refill = occupyRefill(count: OCCUPY_HAND - rack.count, seat: seat)
+        rack.append(contentsOf: refill)
+
+        guard var updated = occupy else { return false }
+        updated.pending.append(
+            PendingPlacement(
+                serial: serial, placement: placement, spent: spent, refill: refill, typed: typed))
+        occupy = updated
+        refreshOccupyView()
+        clearAim()
+        cues?.play(.commit)
+
+        let gained = landed.scores[seat] - before
+        let word = newRuns.max { $0.word.count < $1.word.count }?.word ?? ""
+        occupyWords.append(ScoredWord(word: word, points: gained))
+        if captured > 0 {
+            rejectToast("Captured \(captured) tile\(captured == 1 ? "" : "s")!")
+        }
+        onOccupyPlace?(serial, placement)
         return true
     }
 
@@ -1094,7 +1457,7 @@ final class GameModel {
     }
 
     private func refreshBoardCaches() {
-        bounds = boardBounds(board)
+        bounds = fixedBounds ?? boardBounds(board)
         tileBounds = tileBox(of: board)
         validation = dictionary.map { validateBoard(board, dictionary: $0) }
 

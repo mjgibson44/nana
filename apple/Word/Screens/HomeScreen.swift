@@ -1,7 +1,7 @@
 import SwiftUI
 import WordCore
 
-/// The screen the app opens on: the game's name, and the two ways to play,
+/// The screen the app opens on: the game's name, and the three ways to play,
 /// each spelled out in tiles. A game the OS took away mid-run comes back
 /// first — it's the one thing here the player didn't choose to leave.
 struct HomeScreen: View {
@@ -12,6 +12,7 @@ struct HomeScreen: View {
     var onResume: () -> Void
     var onSolo: () -> Void
     var onBattle: () -> Void
+    var onOccupy: () -> Void = {}
 
     var body: some View {
         ScreenColumn {
@@ -25,6 +26,7 @@ struct HomeScreen: View {
                 }
                 TileWordButton(text: "SOLO", action: onSolo)
                 TileWordButton(text: "BATTLE", action: onBattle)
+                TileWordButton(text: "OCCUPY", action: onOccupy)
             }
             Spacer()
         }
@@ -32,6 +34,6 @@ struct HomeScreen: View {
 }
 
 #Preview {
-    HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {})
+    HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {}, onOccupy: {})
         .preferredColorScheme(.dark)
 }
