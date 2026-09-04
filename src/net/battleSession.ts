@@ -748,9 +748,10 @@ export function hostBattle(name: string, events: BattleEvents): Promise<BattleHa
         settled = true;
         window.clearTimeout(timeout);
         peer.destroy();
-        // Someone else holds this code — extraordinarily unlikely, so a
-        // couple of fresh draws is all it should ever take.
-        if ((err as { type?: string }).type === 'unavailable-id' && attempts < 3) {
+        // Someone else holds this code. With only 12k three-letter codes
+        // this is a real possibility rather than a freak one, so it draws
+        // again a few more times before giving up on the player.
+        if ((err as { type?: string }).type === 'unavailable-id' && attempts < 8) {
           attempts += 1;
           tryCode();
           return;

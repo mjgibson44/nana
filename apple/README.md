@@ -22,7 +22,7 @@ The iPhone app was reworked around a much smaller rule set and a minimalist, til
 dark UI. The rules, in one breath:
 
 - **Build a word from the pile** by tapping letters (or typing, on a hardware keyboard).
-  They line up in the word row, ten to a line.
+  They line up in the word row, eight to a line.
 - **The first word** lands from the start square heading across, with the ✓ button that
   takes the gap button's place until it's down. It is the only word placed by fiat, and
   the only one that previews on the board as it's typed.
@@ -30,12 +30,31 @@ dark UI. The rules, in one breath:
   borrowed letter goes and tap that letter. The word arranges itself around it, across
   or down, whichever spells real words. There is no tapping the board to choose a
   square, no typing onto the board, and no direction to pick.
+- **Or press and hold that letter** to see the word on the board before it lands: amber
+  where it would go if it reads, red if it doesn't. Sliding the finger carries the aim
+  from letter to letter; letting go lands an amber word. A red one stays up for a second
+  — long enough to read what you spelled — and is then taken back with the reason
+  ("XYZZY isn’t a real word"), the word still in the row, ready to fix.
 - **Words are permanent.** Nothing on the board moves, turns, comes back off, or undoes —
   so only real words are allowed down, in Solo as much as in Battle.
-- **The pile is the only pressure.** Reach `PILE_LIMIT` (30) tiles in hand and the game
+- **The pile is the only pressure.** Reach `PILE_LIMIT` (24) tiles in hand and the game
   ends on the spot, in either mode. The gauge under the header fills toward it and turns
-  amber at 21 and red at 25; the pile is drawn as three rows of ten whatever it holds, so
-  a full pile looks like the end.
+  amber at 17 and red at 20; the pile is drawn as three rows of eight whatever it holds,
+  so a full pile looks like the end. Solo opens on `SOLO_START_TILES` (16) and Battle on
+  `BATTLE_OPENING_TILES` (12) — the app's own numbers, kept apart from
+  `WordCore.ENDLESS_START_TILES` / `BATTLE_START_TILES`, which are the web game's and are
+  held byte-identical to it by the parity fixtures. Each keeps exactly the share of the
+  pile it had at thirty, so neither mode opens closer to buried than it used to.
+- **A battle shows the whole field.** Under your own gauge is one row of small bars, one
+  per rival, on the same scale and the same colours; a player who's out reads as a full
+  red bar.
+
+The header reads the score (or the battle placing), then what the clock is about to hand
+you — "5 tiles in 24s", the count and the countdown as one sentence — then the pause and
+menu buttons. The menu is the game's own screen of tile words, not a platform context
+menu, and speed is no longer in it: a Solo game's pace is chosen on the way in
+(`Screens/SoloSetupScreen.swift`), because picking it from the menu silently threw the
+game away and dealt another.
 
 Retired with it: undo/redo, dragging tiles, the selected-word controls, the loose-tile
 deadline, the Daily Deal, the tutorial, and the stats and settings pages. Sound and
@@ -52,7 +71,7 @@ launch environment opens straight onto a game so a simulator can be screenshotte
 | Package / target | What it is |
 |---|---|
 | `Packages/WordCore` | The game core in pure Swift — **bit-exact with the web game** via golden fixtures generated from the TypeScript core (`npm run gen:fixtures`), so the same seed deals the same letters on both platforms. |
-| `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold-to-drag, locked-board semantics, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
+| `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold — to drag, or to aim a gapped word through a placed letter — locked-board semantics, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
 | `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
 | `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for placed cells, one gesture pipeline for board taps and pans, the word-building loop, the paced Solo session, the battle session and its results, the tile-lettered home and battle screens, synthesized audio + haptics, and save/restore across process death. `Board/BoardInputBridge.swift` is the one place that reaches past SwiftUI into UIKit/AppKit, for the three things SwiftUI won't report: the live pinch midpoint, the pointer's actual device kind, and Mac scroll wheels. |
 

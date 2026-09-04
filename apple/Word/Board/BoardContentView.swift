@@ -9,6 +9,13 @@ struct BoardScene {
     var tiles: [(key: CellKey, letter: String)]
     /// Letters that would land if the opener were confirmed.
     var preview: [CellKey: String] = [:]
+    /// The word being held over a board letter by press-and-hold, drawn
+    /// solid over everything: every cell it would occupy, borrowed letter
+    /// included. Nil when nothing is being aimed.
+    var aim: [CellKey: String]? = nil
+    /// Whether that word reads. False draws it red — the "this isn't a word"
+    /// answer, given before anything is committed rather than after.
+    var aimIsGood = true
     /// The words each placed tile reads in, for its spoken label (plan §6.6).
     var wordsAt: [CellKey: [String]] = [:]
 }
@@ -63,6 +70,21 @@ struct BoardContentView: View {
                         .position(x: rect.midX, y: rect.midY)
                 }
             }
+
+            // The aimed word, drawn solid and over the placed tiles: the
+            // borrowed letter is part of the word being aimed, so it has to
+            // change colour with the rest of it.
+            if let aim = scene.aim {
+                ForEach(Array(aim.keys.sorted()), id: \.self) { key in
+                    let rect = metrics.rect(of: parseKey(key))
+                    AimTileView(
+                        letter: aim[key] ?? "", isGood: scene.aimIsGood,
+                        cellSize: metrics.cellSize)
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                }
+                .accessibilityHidden(true)
+            }
         }
         .frame(width: metrics.contentSize.width, height: metrics.contentSize.height)
         .background(Palette.bg)
@@ -101,6 +123,27 @@ struct BoardTileView: View {
             Text(letter.uppercased())
                 .font(.system(size: cellSize * 0.56, weight: .bold))
                 .foregroundStyle(Palette.accent)
+        )
+    }
+}
+
+/// A letter of the word being aimed by press-and-hold: solid, so it reads as
+/// a word sitting on the board rather than a hint about one. Amber when it's
+/// good to land, red when it isn't.
+struct AimTileView: View {
+    var letter: String
+    var isGood: Bool
+    var cellSize: Double
+
+    var body: some View {
+        RoundedRectangle(
+            cornerRadius: BoardContentView.cornerRadius(for: cellSize), style: .continuous
+        )
+        .fill(isGood ? Palette.accentButton : Palette.gaugeBadTrack)
+        .overlay(
+            Text(letter.uppercased())
+                .font(.system(size: cellSize * 0.56, weight: .bold))
+                .foregroundStyle(isGood ? Palette.accent : Palette.badInk)
         )
     }
 }

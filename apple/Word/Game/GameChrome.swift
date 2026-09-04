@@ -1,20 +1,25 @@
 import SwiftUI
 import WordCore
 
-/// The top of the game screen: the score (or, in a battle, the placing), the
-/// clock to the next tiles, and the menu.
-struct GameHeaderView<MenuItems: View>: View {
+/// The top of the game screen: the score (or, in a battle, the placing), what
+/// the clock is about to hand you, and the two controls — pause and the menu.
+struct GameHeaderView: View {
     /// "4444" in Solo, "1st" in Battle.
     var headline: String
     var headlineLabel: String
     /// Seconds until the next batch lands; nil when no clock is running.
     var secondsToTiles: Int?
-    @ViewBuilder var menuItems: MenuItems
-
-    @Environment(\.snapshotRendering) private var snapshotRendering
+    /// How many tiles that batch brings. The count and the clock are one
+    /// sentence — "5 tiles in 24s" — because they only mean anything together:
+    /// twenty seconds is nothing to fear or everything, depending.
+    var tilesComing: Int?
+    /// Nil hides the pause button — a battle can't be paused, and neither can
+    /// a game that's already over.
+    var onPause: (() -> Void)?
+    var onMenu: () -> Void
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             HStack(spacing: 5) {
                 Image(systemName: "rosette")
                     .font(.system(size: 22, weight: .semibold))
@@ -23,46 +28,60 @@ struct GameHeaderView<MenuItems: View>: View {
                     .monospacedDigit()
             }
             .foregroundStyle(Palette.ink)
+            .fixedSize()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(headlineLabel)
 
             if let secondsToTiles {
-                (Text("Tiles in ").foregroundStyle(Palette.inkSoft)
-                    + Text(Self.clockText(secondsToTiles)).foregroundStyle(Palette.ink).bold())
-                    .font(.system(size: 20, weight: .medium))
+                Text(Self.dealText(tiles: tilesComing, seconds: secondsToTiles))
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Palette.inkSoft)
                     .monospacedDigit()
                     .lineLimit(1)
-                    .accessibilityLabel("Next tiles in \(secondsToTiles) seconds")
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel(
+                        Self.dealSpoken(tiles: tilesComing, seconds: secondsToTiles))
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
 
-            if snapshotRendering {
-                menuLabel
-            } else {
-                Menu {
-                    menuItems
-                } label: {
-                    menuLabel
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityLabel("Game menu")
+            if let onPause {
+                headerButton(
+                    systemImage: "pause.fill", label: "Pause the game", action: onPause)
             }
+            headerButton(systemImage: "line.3.horizontal", label: "Game menu", action: onMenu)
         }
         .frame(height: 30)
     }
 
-    private var menuLabel: some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(Palette.inkSoft)
-            .frame(width: 30, height: 30)
-            .background(
-                RoundedRectangle(cornerRadius: Spacing.tileRadius, style: .continuous)
-                    .fill(Palette.surface))
-            .contentShape(Rectangle())
+    /// The two controls in the corner, sized and dressed like the actions
+    /// under the pile so the whole screen reads as one set of buttons.
+    private func headerButton(
+        systemImage: String, label: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Palette.inkSoft)
+                .frame(width: 30, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: Spacing.tileRadius, style: .continuous)
+                        .fill(Palette.surface))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressedTileStyle())
+        .accessibilityLabel(label)
+    }
+
+    /// "5 tiles in 24s" — and just the clock when the batch size isn't known.
+    static func dealText(tiles: Int?, seconds: Int) -> String {
+        guard let tiles else { return "Tiles in \(clockText(seconds))" }
+        return "\(tiles) tile\(tiles == 1 ? "" : "s") in \(clockText(seconds))"
+    }
+
+    static func dealSpoken(tiles: Int?, seconds: Int) -> String {
+        guard let tiles else { return "Next tiles in \(seconds) seconds" }
+        return "\(tiles) more tile\(tiles == 1 ? "" : "s") in \(seconds) seconds"
     }
 
     /// Under a minute reads as "14s"; past it, "1:45".
@@ -95,7 +114,68 @@ struct PileGaugeView: View {
         .accessibilityValue("\(count) of \(limit) tiles")
     }
 
-    private var fill: Color {
+    private var fill: Color { RivalGaugesView.fill(tone) }
+    private var track: Color { RivalGaugesView.track(tone) }
+}
+
+/// Everyone else's pile, in one row of small bars under your own.
+///
+/// A battle is a race to *not* fill up, so a rival's pile is the only thing
+/// worth watching about them — and it's the same measure as the gauge above,
+/// drawn small enough that eight of them fit the width of one. A player who's
+/// out reads as a full red bar: buried is what a full pile means.
+struct RivalGaugesView: View {
+    struct Rival: Identifiable, Equatable {
+        var id: String
+        var name: String
+        var tiles: Int
+        /// Buried, or gone. Either way they're not in the race any more.
+        var isOut: Bool
+    }
+
+    var rivals: [Rival]
+    var limit: Int = PILE_LIMIT
+
+    var body: some View {
+        HStack(spacing: Spacing.tileGap) {
+            ForEach(rivals) { rival in
+                bar(for: rival)
+            }
+        }
+        .frame(height: 5)
+        .animation(.easeOut(duration: 0.25), value: rivals)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Rivals’ piles")
+    }
+
+    private func bar(for rival: Rival) -> some View {
+        let tone = rival.isOut ? PileTone.urgent : pileTone(rival.tiles)
+        let fraction =
+            rival.isOut ? 1 : min(1, max(0, Double(rival.tiles) / Double(max(1, limit))))
+        return GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Rectangle().fill(Self.track(tone))
+                Rectangle().fill(Self.fill(tone))
+                    .frame(width: proxy.size.width * fraction)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+        .opacity(rival.isOut ? 0.5 : 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(rival.name)
+        .accessibilityValue(rival.isOut ? "out" : "\(rival.tiles) of \(limit) tiles")
+    }
+
+    /// The same thresholds the model applies to your own pile, so a rival's
+    /// bar and yours never mean different things at the same colour.
+    private func pileTone(_ tiles: Int) -> PileTone {
+        if tiles >= PILE_URGENT { return .urgent }
+        if tiles >= PILE_WARN { return .warn }
+        return .ok
+    }
+
+    static func fill(_ tone: PileTone) -> Color {
         switch tone {
         case .ok: Palette.gaugeOk
         case .warn: Palette.gaugeWarn
@@ -103,7 +183,7 @@ struct PileGaugeView: View {
         }
     }
 
-    private var track: Color {
+    static func track(_ tone: PileTone) -> Color {
         switch tone {
         case .ok: Palette.gaugeOkTrack
         case .warn: Palette.gaugeWarnTrack
@@ -112,8 +192,8 @@ struct PileGaugeView: View {
     }
 }
 
-/// The word being built, in amber tiles, ten to a row. Tapping a tile takes
-/// that letter back out.
+/// The word being built, in amber tiles, `Spacing.columns` to a row. Tapping
+/// a tile takes that letter back out.
 struct WordRowView: View {
     var picks: [Pick]
     var tileSize: CGFloat
@@ -172,8 +252,9 @@ struct GapTile: View {
     }
 }
 
-/// The pile: three rows of ten, always drawn in full. Letters fill the slots
-/// from the top left; a picked letter lifts to the lighter grey.
+/// The pile: three rows of eight, always drawn in full — twenty-four slots,
+/// which is the limit, so the field you see is the danger you're in. Letters
+/// fill the slots from the top left; a picked letter lifts to the lighter grey.
 struct PileView: View {
     var letters: [String]
     var picked: Set<Int>

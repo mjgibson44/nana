@@ -52,7 +52,7 @@ final class GameCenterTests: XCTestCase {
         // Solo asks GameCenter nothing at all.
         let model = GameModel()
         model.newGame(pace: .regular)
-        XCTAssertEqual(model.rack.count, ENDLESS_START_TILES)
+        XCTAssertEqual(model.rack.count, SOLO_START_TILES)
     }
 
     func testScoresEarnedSignedOutAreHeldAndFlushOnSignIn() async {

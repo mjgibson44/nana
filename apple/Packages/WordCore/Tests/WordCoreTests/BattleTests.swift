@@ -115,7 +115,7 @@ private func isLowercase(_ s: String) -> Bool {
     func generatesLettersOnlyNeverADigit() {
         for _ in 0..<200 {
             let code = newBattleCode()
-            #expect(code.count == 5 && code.allSatisfy { $0 >= "A" && $0 <= "Z" })
+            #expect(code.count == CODE_LENGTH && code.allSatisfy { $0 >= "A" && $0 <= "Z" })
         }
     }
 
@@ -129,10 +129,11 @@ private func isLowercase(_ s: String) -> Bool {
     @Test("rejects the wrong shape")
     func rejectsTheWrongShape() {
         #expect(isValidBattleCode("") == false)
-        #expect(isValidBattleCode("ABC") == false)
-        #expect(isValidBattleCode("ABCDEF") == false)
-        #expect(isValidBattleCode("AB1DE") == false) // digits are out entirely
-        #expect(isValidBattleCode("ABIDE") == false) // I is not in the alphabet
+        #expect(isValidBattleCode("AB") == false)
+        #expect(isValidBattleCode("ABCD") == false)
+        #expect(isValidBattleCode("A1C") == false) // digits are out entirely
+        #expect(isValidBattleCode("AIC") == false) // I is not in the alphabet
+        #expect(isValidBattleCode("ABC") == true) // three letters is the shape
     }
 }
 

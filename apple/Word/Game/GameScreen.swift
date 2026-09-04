@@ -28,7 +28,10 @@ struct GameScreen: View {
     /// vocabulary (`BoardInputBridge`); nil when nothing is pinching.
     @State private var pinchMidpoint: CGPoint?
     @State private var clockNow = Date.now
-    /// The column's inner width, which sizes the tiles: ten across, always.
+    /// The tile-lettered menu, in place of the platform's.
+    @State private var menuOpen = false
+    /// The column's inner width, which sizes the tiles: `Spacing.columns`
+    /// across, always.
     @State private var columnWidth: CGFloat = 358
     @FocusState private var gameFocused: Bool
     @Environment(\.snapshotRendering) private var snapshotRendering
@@ -44,6 +47,9 @@ struct GameScreen: View {
                 VStack(spacing: Spacing.gap / 2) {
                     header
                     PileGaugeView(count: model.pileCount, tone: model.pileTone)
+                    if !rivals.isEmpty {
+                        RivalGaugesView(rivals: rivals)
+                    }
                 }
                 boardArea
                 WordRowView(picks: model.pickList, tileSize: tileSize) { position in
@@ -90,6 +96,11 @@ struct GameScreen: View {
                 }
                 .transition(.opacity)
             }
+
+            if menuOpen {
+                GameMenuView(items: menuItems, onClose: closeMenu)
+                    .transition(.opacity)
+            }
         }
         .coordinateSpace(name: Self.space)
         .background(Palette.bg.ignoresSafeArea())
@@ -125,6 +136,18 @@ struct GameScreen: View {
             model.dismissSplash(at: .now)
             focusGame()
         }
+        // A word that doesn't read stays up in red long enough to be read,
+        // and is then taken back with the reason.
+        .task(id: model.aim?.serial) {
+            guard model.aimRejected, let serial = model.aim?.serial else { return }
+            do {
+                try await Task.sleep(for: .seconds(REJECTED_AIM_SECONDS))
+            } catch {
+                return
+            }
+            model.finishRejectedAim(serial: serial)
+            focusGame()
+        }
         .task(id: model.boardClearReady) {
             guard model.boardClearReady else { return }
             do {
@@ -155,17 +178,27 @@ struct GameScreen: View {
     // MARK: Header
 
     private var header: some View {
-        GameHeaderView(
+        let pause: (() -> Void)? = model.canPause ? { pauseGame() } : nil
+        return GameHeaderView(
             headline: headline,
             headlineLabel: headlineLabel,
-            secondsToTiles: model.secondsToNextTiles(at: clockNow)
-        ) {
-            if model.isBattle {
-                battleMenu
-            } else {
-                soloMenu
+            secondsToTiles: model.secondsToNextTiles(at: clockNow),
+            tilesComing: model.nextTileCount,
+            onPause: pause,
+            onMenu: openMenu)
+    }
+
+    /// Everyone else in the battle, in roster order, for the row of small
+    /// gauges under your own.
+    private var rivals: [RivalGaugesView.Rival] {
+        guard let battle else { return [] }
+        return battle.contestants
+            .filter { $0.id != battle.selfID }
+            .map { player in
+                RivalGaugesView.Rival(
+                    id: player.id, name: player.name, tiles: player.tiles,
+                    isOut: player.buried || player.left)
             }
-        }
     }
 
     /// The score — or, in a battle, where this player stands.
@@ -183,45 +216,62 @@ struct GameScreen: View {
         return model.isComplete ? "Final score \(model.score)" : "Score \(model.score)"
     }
 
-    @ViewBuilder
-    private var soloMenu: some View {
-        if model.canPause {
-            Button("Pause", action: pauseGame)
-        }
+    private var menuItems: [GameMenuView.Item] {
+        var items: [GameMenuView.Item] = []
         if model.isComplete {
-            Button("Results") { model.setSummaryPresented(true) }
+            items.append(
+                GameMenuView.Item(title: "RESULTS", accent: true) {
+                    closeMenu()
+                    model.setSummaryPresented(true)
+                })
         }
-        Button("New game") { startNewGame(pace: model.pace) }
-        Section("Speed") {
-            ForEach(PACE_OPTIONS, id: \.pace) { option in
-                Button {
-                    startNewGame(pace: option.pace)
-                } label: {
-                    if model.pace == option.pace {
-                        Label(option.name, systemImage: "checkmark")
-                    } else {
-                        Text(option.name)
-                    }
+        if model.isBattle {
+            if let battle, battle.isHost {
+                if battle.canRestart {
+                    items.append(
+                        GameMenuView.Item(title: "RESTART") {
+                            closeMenu()
+                            battle.restart()
+                        })
                 }
+                items.append(
+                    GameMenuView.Item(title: "LOBBY") {
+                        closeMenu()
+                        battle.toLobby()
+                    })
             }
+            items.append(
+                GameMenuView.Item(title: "LEAVE") {
+                    closeMenu()
+                    onLeave()
+                })
+        } else {
+            items.append(
+                GameMenuView.Item(title: "NEW GAME") {
+                    closeMenu()
+                    startNewGame(pace: model.pace)
+                })
+            items.append(
+                GameMenuView.Item(title: "HOME") {
+                    closeMenu()
+                    onLeave()
+                })
         }
-        Divider()
-        Button("Home", action: onLeave)
+        return items
     }
 
-    @ViewBuilder
-    private var battleMenu: some View {
-        if model.isComplete {
-            Button("Results") { model.setSummaryPresented(true) }
-        }
-        if let battle, battle.isHost {
-            if battle.canRestart {
-                Button("Restart", action: battle.restart)
-            }
-            Button("Everyone to the lobby", action: battle.toLobby)
-        }
-        Divider()
-        Button("Leave battle", action: onLeave)
+    private func openMenu() {
+        // The board must not be mid-gesture behind a modal.
+        holdTask?.cancel()
+        holdTask = nil
+        machine = GestureMachine()
+        model.clearAim()
+        menuOpen = true
+    }
+
+    private func closeMenu() {
+        menuOpen = false
+        focusGame()
     }
 
     // MARK: The board viewport
@@ -288,13 +338,20 @@ struct GameScreen: View {
             metrics: camera.metrics,
             tiles: model.board.entries.map { (key: $0.key, letter: $0.value) },
             preview: model.preview,
+            aim: model.aim?.cells,
+            aimIsGood: model.aim?.isGood ?? true,
             wordsAt: model.wordsByCell.mapValues { $0.map(\.word) })
     }
 
     /// Placed words are permanent in every mode, and nothing is ever picked
-    /// up off the board: the machine only needs taps and pans.
+    /// up off the board: the machine needs taps, pans, and — with a gapped
+    /// word in hand — the press-and-hold that aims it through a letter.
     private var machineContext: GestureMachine.Context {
-        GestureMachine.Context(boardLocked: true, hasStagedPicks: false, externalDragActive: false)
+        GestureMachine.Context(
+            boardLocked: true,
+            hasStagedPicks: !model.picks.isEmpty,
+            externalDragActive: false,
+            hasGapPick: model.hasGap)
     }
 
     /// The press-time hit-test, as coordinate math.
@@ -304,6 +361,25 @@ struct GameScreen: View {
             return .boardTile(cell: cell, letter: letter)
         }
         return .boardEmpty(cell: cell)
+    }
+
+    /// The board letter under a point, if there is one.
+    private func letterKey(at point: CGPoint) -> CellKey? {
+        guard let cell = camera.cell(atGame: point) else { return nil }
+        let key = keyOf(cell.row, cell.col)
+        return model.board[key] == nil ? nil : key
+    }
+
+    /// Aim the staged word through whatever letter is under the finger. Off
+    /// the letters there is nothing to aim through, so the preview goes away
+    /// rather than sticking to the last one — the board says what a release
+    /// here would do, which is nothing.
+    private func aim(at point: CGPoint) {
+        guard let key = letterKey(at: point) else {
+            model.clearAim()
+            return
+        }
+        model.aimThroughLetter(key)
     }
 
     /// SwiftUI recognizes the pinch and reports its scale; the live midpoint
@@ -351,9 +427,17 @@ struct GameScreen: View {
             case .cancelHold:
                 holdTask?.cancel()
                 holdTask = nil
+            case let .beginPreviewDrag(point), let .previewDragMoved(point):
+                // Holding a gapped word over the board: show where it would
+                // go, and let the finger carry it from letter to letter.
+                aim(at: point)
+            case let .endPreviewDrag(point):
+                model.releaseAim(over: letterKey(at: point))
+                focusGame()
+            case .cancelPreviewDrag:
+                model.clearAim()
             case .tapBoardCell, .doubleTapBoardTile, .tapRackTile,
-                .beginDrag, .dragMoved, .endDrag,
-                .beginPreviewDrag, .previewDragMoved, .endPreviewDrag, .cancelPreviewDrag:
+                .beginDrag, .dragMoved, .endDrag:
                 // Nothing lands by tapping empty board, nothing is dragged,
                 // and the pile has no pointer surface: none of these can
                 // happen with the context above, and none mean anything now.
@@ -462,6 +546,13 @@ struct GameScreen: View {
     // MARK: Hardware keyboard (iPad)
 
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        if menuOpen {
+            // The menu owns the screen while it's up: escape closes it, and
+            // nothing else reaches the word behind it.
+            guard press.key == .escape else { return .ignored }
+            closeMenu()
+            return .handled
+        }
         if model.isPaused, press.key == .escape {
             model.resume(at: .now)
             focusGame()
@@ -494,6 +585,7 @@ struct GameScreen: View {
         holdTask?.cancel()
         holdTask = nil
         machine = GestureMachine()
+        model.clearAim()
         model.pause(at: .now)
     }
 
@@ -503,6 +595,7 @@ struct GameScreen: View {
         holdTask?.cancel()
         holdTask = nil
         machine = GestureMachine()
+        model.clearAim()
         if let onNewGame {
             onNewGame(pace)
         } else {

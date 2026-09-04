@@ -32,7 +32,8 @@ import WordCore
 ///    with letters staged; movement past slop before the timer cancels into
 ///    a pan; release aims a cell without committing;
 ///  - a locked (battle) board keeps taps but loses tile drags, selection and
-///    double-press;
+///    double-press — and, with a gapped word staged, a press on one of its
+///    letters forks: release lands the word, hold aims it;
 ///  - every gesture is keyed to the pointer that started it — a second
 ///    finger can't hijack it — and a pinch cancels pans, not tile drags.
 public struct GestureMachine {
@@ -70,15 +71,22 @@ public struct GestureMachine {
         /// An externally run drag (the word-controls grab) owns the pointer;
         /// board presses must stay inert under it.
         public var externalDragActive: Bool
+        /// The staged word has a gap in it, so it has somewhere to go over a
+        /// letter already on the board. This is what arms press-and-hold on a
+        /// *placed tile*: without a gap the word can't lie over one at all,
+        /// and holding would preview nothing.
+        public var hasGapPick: Bool
 
         public init(
             boardLocked: Bool = false,
             hasStagedPicks: Bool = false,
-            externalDragActive: Bool = false
+            externalDragActive: Bool = false,
+            hasGapPick: Bool = false
         ) {
             self.boardLocked = boardLocked
             self.hasStagedPicks = hasStagedPicks
             self.externalDragActive = externalDragActive
+            self.hasGapPick = hasGapPick
         }
     }
 
@@ -144,6 +152,9 @@ public struct GestureMachine {
         /// A press on empty board: could still become a tap, a pan, or (if
         /// armed) the hold preview.
         case emptyPress(id: Int, start: CGPoint, cell: Cell?, holdArmed: Bool)
+        /// A press on a placed tile with an aimable word in hand: a quick
+        /// release lands it, holding turns it into the aim preview.
+        case tilePress(id: Int, start: CGPoint, cell: Cell)
         case panning(id: Int, last: CGPoint)
         case previewDrag(id: Int)
         /// The press was fully handled at down (double-press, locked-board
@@ -166,6 +177,13 @@ public struct GestureMachine {
         case .idle, .emptyPress: return false
         default: return true
         }
+    }
+
+    /// True while the staged word is being held over the board — the aim
+    /// preview is up and following the pointer.
+    public var isAiming: Bool {
+        if case .previewDrag = state { return true }
+        return false
     }
 
     // MARK: The machine
@@ -204,11 +222,18 @@ public struct GestureMachine {
 
         case let .boardTile(cell, letter):
             // A locked board's tiles are permanent: no dragging, no
-            // double-tap return. The tap still lands — and it lands at press
-            // time, like the web (App.tsx:2561–2566).
+            // double-tap return.
             if context.boardLocked {
-                state = .spent(id: id)
-                return [.tapBoardTile(cell)]
+                // With an aimable word in hand the press is a fork — release
+                // to land, hold to aim — so the tap has to wait for the
+                // release to know which it was. Otherwise it lands at press
+                // time, like the web (App.tsx:2561–2566).
+                guard context.hasStagedPicks, context.hasGapPick else {
+                    state = .spent(id: id)
+                    return [.tapBoardTile(cell)]
+                }
+                state = .tilePress(id: id, start: location, cell: cell)
+                return [.scheduleHold(id: id)]
             }
             if let last = lastBoardTilePress, last.cell == cell,
                 time - last.time < DOUBLE_PRESS_SECONDS
@@ -252,6 +277,12 @@ public struct GestureMachine {
         case let .previewDrag(previewID) where previewID == id:
             return [.previewDragMoved(location)]
 
+        case let .tilePress(pressID, _, _) where pressID == id:
+            // Tiles never pan, and a finger creeping while it waits for the
+            // hold is a finger holding still. Travel is simply ignored — the
+            // aim, once it starts, re-targets on move anyway.
+            return []
+
         default:
             return []
         }
@@ -288,6 +319,11 @@ public struct GestureMachine {
             state = .idle
             return [.endPreviewDrag(at: location)]
 
+        case let .tilePress(pressID, _, cell) where pressID == id:
+            // Let go before the hold fired: an ordinary tap.
+            state = .idle
+            return [.cancelHold, .tapBoardTile(cell)]
+
         case let .spent(spentID) where spentID == id:
             state = .idle
             return []
@@ -311,6 +347,9 @@ public struct GestureMachine {
         case let .previewDrag(previewID) where previewID == id:
             state = .idle
             return [.cancelPreviewDrag]
+        case let .tilePress(pressID, _, _) where pressID == id:
+            state = .idle
+            return [.cancelHold]
         case let .spent(spentID) where spentID == id:
             state = .idle
             return []
@@ -320,14 +359,19 @@ public struct GestureMachine {
     }
 
     private mutating func handleHoldFired(id: Int) -> [Effect] {
-        // Only an armed press that hasn't moved or resolved can become the
-        // preview drag; anything else means the timer raced a state change
-        // and is stale.
-        guard case let .emptyPress(pressID, start, _, holdArmed) = state,
-            pressID == id, holdArmed
-        else { return [] }
-        state = .previewDrag(id: id)
-        return [.beginPreviewDrag(at: start)]
+        // Only a press that hasn't moved or resolved can become the preview
+        // drag; anything else means the timer raced a state change and is
+        // stale.
+        switch state {
+        case let .emptyPress(pressID, start, _, holdArmed) where pressID == id && holdArmed:
+            state = .previewDrag(id: id)
+            return [.beginPreviewDrag(at: start)]
+        case let .tilePress(pressID, start, _) where pressID == id:
+            state = .previewDrag(id: id)
+            return [.beginPreviewDrag(at: start)]
+        default:
+            return []
+        }
     }
 
     private mutating func handlePinchBegan() -> [Effect] {
@@ -344,6 +388,9 @@ public struct GestureMachine {
         case let .emptyPress(_, _, _, holdArmed):
             state = .idle
             return holdArmed ? [.cancelHold] : []
+        case .tilePress:
+            state = .idle
+            return [.cancelHold]
         case .panning:
             state = .idle
             return [.endPan(velocity: .zero)]

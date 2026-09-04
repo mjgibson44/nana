@@ -47,6 +47,24 @@ final class ScreenSnapshotTests: XCTestCase {
         return model
     }
 
+    func testSoloSetupRenders() throws {
+        try render(
+            SoloSetupScreen(pace: .regular, onPlay: { _ in }, onClose: {}), name: "solo-setup")
+        try render(
+            SoloSetupScreen(pace: .fast, onPlay: { _ in }, onClose: {}), name: "solo-setup-fast")
+    }
+
+    func testTheGameMenuRenders() throws {
+        try render(
+            GameMenuView(
+                items: [
+                    .init(title: "RESULTS", accent: true, action: {}),
+                    .init(title: "NEW GAME", action: {}),
+                    .init(title: "HOME", action: {}),
+                ], onClose: {}),
+            name: "game-menu")
+    }
+
     func testHomeScreenRenders() throws {
         try render(
             HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {}),
@@ -173,18 +191,59 @@ final class ScreenSnapshotTests: XCTestCase {
     func testTheGaugeRendersEveryTone() throws {
         try render(
             VStack(spacing: Spacing.gap) {
-                ForEach([(5, PileTone.ok), (18, .warn), (26, .urgent)], id: \.0) { count, tone in
+                ForEach([(5, PileTone.ok), (18, .warn), (22, .urgent)], id: \.0) { count, tone in
                     VStack(spacing: Spacing.gap / 2) {
                         GameHeaderView(
-                            headline: "4444", headlineLabel: "Score", secondsToTiles: 14
-                        ) {
-                            Button("Home") {}
-                        }
+                            headline: "4444", headlineLabel: "Score", secondsToTiles: 14,
+                            tilesComing: 5, onPause: {}, onMenu: {})
                         PileGaugeView(count: count, tone: tone)
                     }
                 }
             }
             .padding(Spacing.margin),
             name: "gauge", size: CGSize(width: Self.phone.width, height: 260))
+    }
+
+    /// A battle header: the placing, the drip, and the field's piles in one
+    /// row of small bars under your own.
+    func testTheBattleHeaderRendersEveryonesPile() throws {
+        try render(
+            VStack(spacing: Spacing.gap / 2) {
+                GameHeaderView(
+                    headline: "2nd", headlineLabel: "Standing 2nd", secondsToTiles: 8,
+                    tilesComing: 2, onPause: nil, onMenu: {})
+                PileGaugeView(count: 11, tone: .ok)
+                RivalGaugesView(rivals: [
+                    .init(id: "a", name: "Ada", tiles: 4, isOut: false),
+                    .init(id: "b", name: "Grace", tiles: 14, isOut: false),
+                    .init(id: "c", name: "Katherine", tiles: 18, isOut: false),
+                    .init(id: "d", name: "Dorothy", tiles: 21, isOut: false),
+                    .init(id: "e", name: "Joan", tiles: 24, isOut: true),
+                ])
+            }
+            .padding(Spacing.margin),
+            name: "battle-header", size: CGSize(width: Self.phone.width, height: 120))
+    }
+
+    /// The word held over a letter: amber when it reads, red when it doesn't.
+    func testTheAimPreviewRendersBothVerdicts() async throws {
+        let model = try await playedModel()
+        let scene = BoardScene(
+            metrics: BoardMetrics(bounds: model.bounds, cellBase: CELL_BASE_COMPACT, zoom: 1),
+            tiles: model.board.entries.map { (key: $0.key, letter: $0.value) })
+        let aimed = model.board.entries.reduce(into: [CellKey: String]()) { into, entry in
+            into[entry.key] = entry.value
+        }
+        for isGood in [true, false] {
+            var withAim = scene
+            withAim.aim = aimed
+            withAim.aimIsGood = isGood
+            try render(
+                BoardContentView(scene: withAim)
+                    .frame(width: 1_600, height: 1_600, alignment: .center)
+                    .scaleEffect(0.25),
+                name: "aim-\(isGood ? "good" : "bad")",
+                size: CGSize(width: 402, height: 402))
+        }
     }
 }

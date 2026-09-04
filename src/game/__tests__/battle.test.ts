@@ -98,7 +98,7 @@ describe('battle codes', () => {
 
   it('generates letters only — never a digit', () => {
     for (let i = 0; i < 200; i++) {
-      expect(newBattleCode()).toMatch(/^[A-Z]{5}$/);
+      expect(newBattleCode()).toMatch(/^[A-Z]{3}$/);
     }
   });
 
@@ -110,10 +110,11 @@ describe('battle codes', () => {
 
   it('rejects the wrong shape', () => {
     expect(isValidBattleCode('')).toBe(false);
-    expect(isValidBattleCode('ABC')).toBe(false);
-    expect(isValidBattleCode('ABCDEF')).toBe(false);
-    expect(isValidBattleCode('AB1DE')).toBe(false); // digits are out entirely
-    expect(isValidBattleCode('ABIDE')).toBe(false); // I is not in the alphabet
+    expect(isValidBattleCode('AB')).toBe(false);
+    expect(isValidBattleCode('ABCD')).toBe(false);
+    expect(isValidBattleCode('A1C')).toBe(false); // digits are out entirely
+    expect(isValidBattleCode('AIC')).toBe(false); // I is not in the alphabet
+    expect(isValidBattleCode('ABC')).toBe(true); // three letters is the shape
   });
 });
 

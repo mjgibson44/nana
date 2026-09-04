@@ -26,13 +26,20 @@ enum Palette {
     static let accentButton = Color(hex: 0x63450F)
 
     // The pile gauge: purple while there's room, amber as it fills, red when
-    // the next batch could end the game.
+    // the next batch could end the game. Purple rather than the usual
+    // progress-bar green — good standing is the game's calm state, not a
+    // "pass", and green would fight the amber that means "word".
     static let gaugeOk = Color(hex: 0x8023B6)
     static let gaugeOkTrack = Color(hex: 0x3F095B)
     static let gaugeWarn = Color(hex: 0xA66C00)
     static let gaugeWarnTrack = Color(hex: 0x4D3711)
     static let gaugeBad = Color(hex: 0xB73131)
     static let gaugeBadTrack = Color(hex: 0x5D1F1F)
+
+    /// A word that isn't a word, held over the board in red. As bright
+    /// against its dark red as `accent` is against its dark amber — it is
+    /// the same "here is your word" moment, answered differently.
+    static let badInk = Color(hex: 0xFF5C5C)
 }
 
 /// The one spacing system every screen uses: the same margin around the
@@ -44,9 +51,12 @@ enum Spacing {
     static let gap: CGFloat = 16
     /// Between tiles in a row.
     static let tileGap: CGFloat = 4
-    /// The word row and the pile are ten tiles wide.
-    static let columns = 10
-    /// Rows the pile always draws, full or not — thirty slots, the limit.
+    /// The word row and the pile are eight tiles wide — fewer, bigger tiles
+    /// than the original ten, which is what makes them thumb-sized on a phone.
+    static let columns = 8
+    /// Rows the pile always draws, full or not. Eight across by three down is
+    /// twenty-four slots, which *is* `PILE_LIMIT`: a full pile looks like the
+    /// end because it is the end.
     static let pileRows = 3
     /// Tile size on screens that aren't fitted to the width (home, results).
     static let tile: CGFloat = 32
@@ -56,7 +66,7 @@ enum Spacing {
     /// Phone-first: wider screens get the same column, centred.
     static let maxWidth: CGFloat = 520
 
-    /// How wide a tile is when ten of them fill `width`.
+    /// How wide a tile is when `columns` of them fill `width`.
     static func tileSize(fitting width: CGFloat) -> CGFloat {
         max(20, (width - CGFloat(columns - 1) * tileGap) / CGFloat(columns))
     }

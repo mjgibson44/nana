@@ -71,10 +71,15 @@ export interface BattleState {
  * Letters only — no digits at all, so a code is always read and typed as a
  * word. I, L and O stay out too: they're the letters that get mistaken for
  * 1 and 0 when a code is read off a screen or spelled out down the phone.
- * Twenty-three letters over five places is still 6.4M codes.
+ *
+ * Three places, not five: a code exists to be read out loud across a room and
+ * typed on a phone, and three letters is what fits in one glance. Twenty-three
+ * letters over three places is 12,167 codes — small enough that two lobbies
+ * can genuinely collide, which is why claiming one retries (`hostBattle`)
+ * rather than trusting the draw.
  */
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ';
-export const CODE_LENGTH = 5;
+export const CODE_LENGTH = 3;
 
 export function newBattleCode(): string {
   let code = '';

@@ -5,15 +5,26 @@ import WordCore
 
 /// The pile's hard limit, the same in Solo and Battle: the moment it holds
 /// this many tiles the game is over. It is also the pile's size on screen —
-/// three rows of ten — so a full pile *looks* like the end.
-let PILE_LIMIT = 30
+/// three rows of eight — so a full pile *looks* like the end.
+let PILE_LIMIT = 24
 
-/// Where the gauge turns amber: past Solo's opening twenty, so a fresh deal
+/// Tiles in the opening Solo deal, and in the opening Battle deal.
+///
+/// The app's own numbers rather than `WordCore.ENDLESS_START_TILES` and
+/// `BATTLE_START_TILES`, which are the web game's and are held byte-identical
+/// to it by the parity fixtures. The phone's pile is smaller, so its opening
+/// hands are too — each keeps exactly the share of the pile it had before
+/// (Solo two thirds, Battle a half), so both modes open with the same room to
+/// work in that they had at thirty.
+let SOLO_START_TILES = 16
+let BATTLE_OPENING_TILES = 12
+
+/// Where the gauge turns amber: past Solo's opening deal, so a fresh hand
 /// reads as room to work rather than as trouble.
-let PILE_WARN = 21
+let PILE_WARN = 17
 
 /// …and where it turns red: one more Solo batch could end the game.
-let PILE_URGENT = 25
+let PILE_URGENT = 20
 
 /// The single toast slot, keyed by serial so repeats replay (App.tsx:415).
 struct GameToast: Equatable {
@@ -43,6 +54,28 @@ enum PileTone: Equatable {
     case urgent
 }
 
+/// The staged word, held over a board letter and not yet let go of: where
+/// every one of its letters would land, and whether that spells real words.
+///
+/// This is what press-and-hold shows. It is deliberately *not* a commit —
+/// aiming can wander from letter to letter without anything landing, and a
+/// word that doesn't read stays visible in red long enough to be read before
+/// it is taken back.
+struct AimPreview: Equatable {
+    /// The board letter the gap is sitting on.
+    var through: CellKey
+    /// Every cell the word would occupy, borrowed letter included, so the
+    /// whole word lights up as one thing.
+    var cells: [CellKey: String]
+    /// The words this placement would make or change that aren't in the
+    /// dictionary. Empty means it's good to land.
+    var badWords: [String]
+    /// Bumped when a rejected aim is put up, so its red second is timed once.
+    var serial = 0
+
+    var isGood: Bool { badWords.isEmpty }
+}
+
 /// A finished game, frozen — what the stats funnel and Game Center are
 /// handed. Carrying the whole report rather than just a score is what lets
 /// one funnel serve Solo and Battle.
@@ -59,6 +92,11 @@ struct GameOutcome: Equatable {
     var mode: GameMode { report.mode }
     var score: Int { report.score }
 }
+
+/// How long a word that doesn't read stays on the board in red before it's
+/// taken back. Long enough to read what you spelled — which is the whole
+/// point of showing it — and short enough not to be a punishment.
+let REJECTED_AIM_SECONDS = 1.0
 
 /// How many seconds before the tiles land the clock ticks. Three beats is
 /// long enough to be a warning and short enough not to be a metronome.
@@ -151,7 +189,14 @@ final class GameModel {
     private(set) var boardClears = 0
     private(set) var recoveredFromOverLimit = false
 
+    /// The word being aimed through a board letter by press-and-hold, or the
+    /// red one being held up for a second before it's taken back.
+    private(set) var aim: AimPreview?
+    /// Set while a refused aim is showing in red; the view times it out.
+    private(set) var aimRejected = false
+
     private var toastSerial = 0
+    private var aimSerial = 0
     private var dealSerial = 0
     private var finishRecorded = false
 
@@ -227,9 +272,11 @@ final class GameModel {
     var endReason: SoloEndReason? { solo.endReason }
 
     /// Overlays own input while visible. A finished board remains viewable
-    /// but cannot be changed after the summary is dismissed.
+    /// but cannot be changed after the summary is dismissed. The second a
+    /// refused word is held up in red counts too: it is the game answering,
+    /// and a tap landing in the middle of it would be answering back.
     var canAcceptInput: Bool {
-        !isComplete && !isPaused && splash == nil && !showSummary && !spectating
+        !isComplete && !isPaused && splash == nil && !showSummary && !spectating && !aimRejected
     }
 
     var canPause: Bool { mode == .endless && !isComplete && !isPaused && splash == nil }
@@ -270,6 +317,19 @@ final class GameModel {
         return solo.remaining(at: now).map { Int(ceil($0)) }
     }
 
+    /// How many tiles that batch will bring — the other half of the header's
+    /// "5 tiles in 24s". Both clocks size the *next* batch from the position
+    /// they're about to move to, which is what makes the number the player
+    /// sees the number they get.
+    var nextTileCount: Int? {
+        guard !isComplete, !spectating else { return nil }
+        if let battle {
+            return battleDripTilesAt(dripIndex: battle.dripIndex)
+        }
+        guard countdown != nil else { return nil }
+        return endlessDripTiles(phase == .drip ? dripsElapsed + 1 : 0, pace)
+    }
+
     func remainingSeconds(at now: Date) -> Int? {
         solo.remaining(at: now).map { Int(ceil($0)) }
     }
@@ -286,13 +346,13 @@ final class GameModel {
         gameSerial += 1
         setBoard(TileMap())
         let puzzle = try? generatePuzzle(
-            wordPool: commonWords, tileCount: ENDLESS_START_TILES, rng: seededRng(seed))
+            wordPool: commonWords, tileCount: SOLO_START_TILES, rng: seededRng(seed))
         rack = puzzle?.letters ?? []
         resetPlayState()
     }
 
     /// The host said go. Grow the shared deal from the seed and dive in. The
-    /// opening batch is `BATTLE_START_TILES` for everyone, which is what keeps
+    /// opening batch is `BATTLE_OPENING_TILES` for everyone, which is what keeps
     /// the shared stream in step — every client asks the stream for the same
     /// first number.
     func newBattle(
@@ -309,7 +369,7 @@ final class GameModel {
         solo = SoloSession(battleAt: now)
         gameSerial += 1
         setBoard(TileMap())
-        rack = spectating ? [] : stream.next(BATTLE_START_TILES)
+        rack = spectating ? [] : stream.next(BATTLE_OPENING_TILES)
         resetPlayState()
     }
 
@@ -358,6 +418,8 @@ final class GameModel {
     /// Everything a fresh board resets, whatever dealt it.
     private func resetPlayState() {
         picks = []
+        aim = nil
+        aimRejected = false
         toast = nil
         bankedBonus = 0
         finalScore = 0
@@ -594,6 +656,7 @@ final class GameModel {
     /// The trash button: put every picked tile back.
     func clearWord() {
         picks = []
+        clearAim()
     }
 
     /// Reshuffle the pile. The word in hand survives: it's re-found in the
@@ -628,6 +691,10 @@ final class GameModel {
     /// Tap a placed letter: the staged word lands with its gap on it. A word
     /// with no gap has nowhere to borrow from, and says so rather than doing
     /// nothing (App.tsx selectTile).
+    ///
+    /// A word that fits but doesn't read gets the same answer a held one
+    /// does — itself, in red, on the board — rather than a bare banner: the
+    /// two gestures are the same move, so they say the same thing.
     func selectTile(_ key: CellKey) {
         guard let letter = board[key] else { return }
         guard !picks.isEmpty else { return }
@@ -635,15 +702,38 @@ final class GameModel {
             rejectToast("Put a gap in your word where the \(letter.uppercased()) goes.")
             return
         }
-        commitThroughLetter(key)
+        guard let fit = fitThroughLetter(key) else {
+            rejectToast("That word doesn’t fit over this letter.")
+            return
+        }
+        guard fit.isGood else {
+            rejectAim(preview(of: fit, through: key))
+            return
+        }
+        commit(keyOf(fit.anchor.row, fit.anchor.col), fit.dir)
     }
 
-    /// Place the staged word so its first gap sits on the letter at `key`
-    /// (App.tsx commitThroughLetter, 2168–2217).
-    @discardableResult
-    func commitThroughLetter(_ key: CellKey) -> Bool {
-        guard board[key] != nil else { return false }
-        guard pickList.contains(where: { $0.letter == nil }) else { return false }
+    /// One way the staged word can lie over a board letter, and what it would
+    /// spell if it did.
+    private struct Fit {
+        var anchor: Cell
+        var dir: Direction
+        var plan: PlacementPlan
+        /// Runs this placement would make or change that aren’t words.
+        var badWords: [String]
+
+        var isGood: Bool { badWords.isEmpty }
+    }
+
+    /// Where the staged word would lie with its first gap on the letter at
+    /// `key`, or nil when it can’t lie there at all.
+    ///
+    /// Both the aim preview and the landing itself come through here, so what
+    /// press-and-hold shows is by construction the placement that a release
+    /// would commit — the preview can never promise one thing and do another.
+    private func fitThroughLetter(_ key: CellKey) -> Fit? {
+        guard board[key] != nil else { return nil }
+        guard pickList.contains(where: { $0.letter == nil }) else { return nil }
 
         let cell = parseKey(key)
         // Crossing the word the clicked letter already reads in is the
@@ -654,34 +744,125 @@ final class GameModel {
             ? [.across, .down]
             : (runDirs.contains(.across) ? [.down, .across] : [.across, .down])
 
-        let fits: [(anchor: Cell, dir: Direction, plan: PlacementPlan)] = ordered.compactMap { dir in
+        let fits: [Fit] = ordered.compactMap { dir in
             guard
                 let anchor = anchorForGapTarget(
                     board: board, bounds: bounds, target: cell, dir: dir, picks: pickList)
             else { return nil }
             let plan = planPlacement(
                 board: board, bounds: bounds, anchor: anchor, dir: dir, picks: pickList)
-            return plan.complete && !plan.steps.isEmpty ? (anchor, dir, plan) : nil
+            guard plan.complete, !plan.steps.isEmpty else { return nil }
+            return Fit(anchor: anchor, dir: dir, plan: plan, badWords: badWords(of: plan, through: key))
         }
-        guard !fits.isEmpty else {
+        // When the word fits both ways, prefer the way that spells real words.
+        return fits.first(where: \.isGood) ?? fits.first
+    }
+
+    /// The runs a plan would make or change that aren’t in the dictionary.
+    /// A dictionary that hasn’t loaded judges nothing — `commit` refuses
+    /// separately rather than calling a real word fake.
+    private func badWords(of plan: PlacementPlan, through key: CellKey?) -> [String] {
+        guard let dictionary else { return [] }
+        var next = board
+        for step in plan.steps { next[step.key] = step.letter }
+        var placed = Set(plan.steps.map(\.key))
+        if let key { placed.insert(key) }
+        return extractRuns(next)
+            .filter { $0.cells.contains { placed.contains($0) } }
+            .filter { $0.word.count < MIN_WORD_LENGTH || !dictionary.contains($0.word) }
+            .map(\.word)
+    }
+
+    /// Place the staged word so its first gap sits on the letter at `key`
+    /// (App.tsx commitThroughLetter, 2168–2217).
+    @discardableResult
+    func commitThroughLetter(_ key: CellKey) -> Bool {
+        guard board[key] != nil else { return false }
+        guard pickList.contains(where: { $0.letter == nil }) else { return false }
+        guard let fit = fitThroughLetter(key) else {
             rejectToast("That word doesn’t fit over this letter.")
             return false
         }
+        return commit(keyOf(fit.anchor.row, fit.anchor.col), fit.dir)
+    }
 
-        // When the word fits both ways, prefer the way that spells real words.
-        let best =
-            fits.first { fit in
-                guard let dictionary else { return false }
-                var next = board
-                for step in fit.plan.steps { next[step.key] = step.letter }
-                var placed = Set(fit.plan.steps.map(\.key))
-                placed.insert(key)
-                return extractRuns(next)
-                    .filter { $0.cells.contains { placed.contains($0) } }
-                    .allSatisfy { $0.word.count >= MIN_WORD_LENGTH && dictionary.contains($0.word) }
-            } ?? fits[0]
+    // MARK: Aiming — press and hold to see where the word goes
 
-        return commit(keyOf(best.anchor.row, best.anchor.col), best.dir)
+    /// Hold the staged word over the letter at `key` without landing it: the
+    /// whole word appears on the board, amber if it reads and red if it
+    /// doesn’t. Aiming somewhere it can’t lie simply shows nothing, so a
+    /// finger sliding across the board isn’t chased by refusals.
+    func aimThroughLetter(_ key: CellKey) {
+        // `canAcceptInput` is what holds the red second still: it goes false
+        // the moment a word is refused, so the finger can't re-aim over the
+        // answer.
+        guard canAcceptInput else { return }
+        guard let fit = fitThroughLetter(key) else {
+            aim = nil
+            return
+        }
+        let next = preview(of: fit, through: key)
+        // A finger held still re-reports the same letter many times a second;
+        // writing the same preview back would redraw the board each time.
+        guard aim != next else { return }
+        aim = next
+    }
+
+    /// What a fit looks like on the board: every cell the word would occupy,
+    /// with the borrowed letter among them so the whole word lights up as one
+    /// thing rather than a word with a hole in it.
+    private func preview(of fit: Fit, through key: CellKey) -> AimPreview {
+        var cells = Dictionary(uniqueKeysWithValues: fit.plan.steps.map { ($0.key, $0.letter) })
+        cells[key] = board[key]
+        return AimPreview(through: key, cells: cells, badWords: fit.badWords)
+    }
+
+    /// Put a word that doesn't read up in red and start its second. Every
+    /// road to a refused word — tapped or held — ends here.
+    private func rejectAim(_ preview: AimPreview) {
+        aimSerial += 1
+        aim = preview
+        aim?.serial = aimSerial
+        aimRejected = true
+    }
+
+    /// Fingers up on an aimed word. A word that reads lands; one that doesn’t
+    /// stays up in red, and `finishRejectedAim` takes it back a second later.
+    /// Nothing aimed means the hold wandered off the board — fall back on the
+    /// tap, which says why.
+    func releaseAim(over key: CellKey?) {
+        guard let aim else {
+            // Nothing was aimed, so there is no preview to clear — and
+            // clearing here would wipe the red answer the tap just put up.
+            if let key { selectTile(key) }
+            return
+        }
+        guard aim.isGood else {
+            rejectAim(aim)
+            return
+        }
+        // The dictionary being mid-load is the one way a good aim can still
+        // refuse, and `commit` says so itself.
+        commitThroughLetter(aim.through)
+        clearAim()
+    }
+
+    /// The red second is up: take the word back and say what was wrong with
+    /// it. The word itself never left the row, so there is nothing to undo.
+    func finishRejectedAim(serial: Int) {
+        guard aimRejected, aim?.serial == serial else { return }
+        let words = aim?.badWords.map { $0.uppercased() } ?? []
+        clearAim()
+        guard let first = words.first else { return }
+        rejectToast(
+            words.count == 1
+                ? "\(first) isn’t a real word"
+                : "\(words.joined(separator: ", ")) aren’t real words")
+    }
+
+    func clearAim() {
+        aim = nil
+        aimRejected = false
     }
 
     // MARK: Commit — every landing goes through it (App.tsx:2024–2145)
@@ -735,6 +916,7 @@ final class GameModel {
         let spent = Set(result.steps.map(\.rackIndex))
         rack = rack.enumerated().filter { !spent.contains($0.offset) }.map(\.element)
         picks = []
+        clearAim()
         cues?.play(.commit)
         soundPileAlarm()
 

@@ -187,6 +187,45 @@ struct GestureMachineTests {
         #expect(second == [.tapBoardTile(cell)])
     }
 
+    @Test func lockedBoardTileHoldsIntoTheAimPreview() {
+        // With a gapped word in hand a press on a placed letter is a fork:
+        // hold to aim it, release to land it.
+        var m = M()
+        let aimable = M.Context(boardLocked: true, hasStagedPicks: true, hasGapPick: true)
+        #expect(down(&m, target: .boardTile(cell: cell, letter: "c"), context: aimable)
+            == [.scheduleHold(id: 1)])
+        #expect(m.handle(.holdFired(id: 1)) == [.beginPreviewDrag(at: CGPoint(x: 100, y: 100))])
+        #expect(m.isAiming)
+        // The finger carries the aim from letter to letter.
+        #expect(move(&m, to: CGPoint(x: 140, y: 100)) == [.previewDragMoved(CGPoint(x: 140, y: 100))])
+        #expect(up(&m, at: CGPoint(x: 140, y: 100)) == [.endPreviewDrag(at: CGPoint(x: 140, y: 100))])
+        #expect(!m.isAiming)
+    }
+
+    @Test func lockedBoardTileReleasedBeforeTheHoldIsStillATap() {
+        var m = M()
+        let aimable = M.Context(boardLocked: true, hasStagedPicks: true, hasGapPick: true)
+        _ = down(&m, target: .boardTile(cell: cell, letter: "c"), context: aimable)
+        #expect(up(&m) == [.cancelHold, .tapBoardTile(cell)])
+    }
+
+    @Test func lockedBoardTileTapsAtPressTimeWithoutAGapToAimWith() {
+        // Letters staged but no gap: the word has nowhere to lie over a
+        // letter, so there is nothing to preview and the tap is immediate.
+        var m = M()
+        let noGap = M.Context(boardLocked: true, hasStagedPicks: true)
+        #expect(down(&m, target: .boardTile(cell: cell, letter: "c"), context: noGap)
+            == [.tapBoardTile(cell)])
+    }
+
+    @Test func anAimingTilePressIsAbandonedByAPinch() {
+        var m = M()
+        let aimable = M.Context(boardLocked: true, hasStagedPicks: true, hasGapPick: true)
+        _ = down(&m, target: .boardTile(cell: cell, letter: "c"), context: aimable)
+        #expect(m.handle(.pinchBegan) == [.cancelHold])
+        #expect(up(&m) == [])
+    }
+
     @Test func lockedBoardStillArmsTheHoldPreview() {
         // Aiming the staged word stays allowed on locked boards.
         var m = M()
