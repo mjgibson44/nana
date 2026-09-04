@@ -54,6 +54,19 @@ enum PileTone: Equatable {
     case urgent
 }
 
+/// What the word row says about the word in hand, before anything is aimed
+/// or landed. The answer a player would otherwise only get by trying it.
+enum WordVerdict: Equatable {
+    /// Nothing to say yet: no letters, no dictionary, or too few letters to
+    /// be a word at all.
+    case unjudged
+    /// It reads, and there is somewhere it could go.
+    case good
+    /// It isn't a word — or, with a gap in it, there is no letter on the
+    /// board it could borrow that would make it one.
+    case bad
+}
+
 /// The staged word, held over a board letter and not yet let go of: where
 /// every one of its letters would land, and whether that spells real words.
 ///
@@ -80,7 +93,7 @@ struct AimPreview: Equatable {
 /// handed. Carrying the whole report rather than just a score is what lets
 /// one funnel serve Solo and Battle.
 struct GameOutcome: Equatable {
-    /// What the game saw, in the shape the achievement evaluator wants.
+    /// What the game saw.
     var report: GameReport
     var words: Int
     var tilesLeft: Int
@@ -125,7 +138,14 @@ final class GameModel {
     private(set) var board = TileMap()
     private(set) var rack: [String] = []
     /// Pile indices claimed for the word, in picked order; `GAP` for a gap.
-    private(set) var picks: [Int] = []
+    private(set) var picks: [Int] = [] {
+        didSet { judgeWord() }
+    }
+    /// Whether the word in hand reads — recomputed whenever the word or the
+    /// board changes, rather than per render: judging a gapped word means
+    /// trying it against every letter on the board, which is far too much to
+    /// do four times a second behind the clock.
+    private(set) var wordVerdict: WordVerdict = .unjudged
     private(set) var toast: GameToast?
     private(set) var dictionary: Set<String>?
     private(set) var seed = ""
@@ -183,7 +203,7 @@ final class GameModel {
     private(set) var wordsByCell: [CellKey: [WordRun]] = [:]
     private(set) var tileBounds: Bounds?
 
-    // What this game has seen, for the achievement evaluator (plan §8.3).
+    // What this game has seen, for the record a finished game reports.
     private(set) var usedGapTile = false
     private(set) var longestWordPlaced = 0
     private(set) var boardClears = 0
@@ -240,8 +260,7 @@ final class GameModel {
         guard let dictionary, let plan, plan.complete else { return nil }
         var next = board
         for step in plan.steps { next[step.key] = step.letter }
-        let placed = Set(plan.steps.map(\.key))
-        let runs = extractRuns(next).filter { $0.cells.contains { placed.contains($0) } }
+        let runs = runsTouching(plan.steps.map(\.key), in: next)
         if runs.isEmpty { return nil }
         return runs.allSatisfy { $0.word.count >= MIN_WORD_LENGTH && dictionary.contains($0.word) }
     }
@@ -765,10 +784,9 @@ final class GameModel {
         guard let dictionary else { return [] }
         var next = board
         for step in plan.steps { next[step.key] = step.letter }
-        var placed = Set(plan.steps.map(\.key))
-        if let key { placed.insert(key) }
-        return extractRuns(next)
-            .filter { $0.cells.contains { placed.contains($0) } }
+        var placed = plan.steps.map(\.key)
+        if let key { placed.append(key) }
+        return runsTouching(placed, in: next)
             .filter { $0.word.count < MIN_WORD_LENGTH || !dictionary.contains($0.word) }
             .map(\.word)
     }
@@ -786,10 +804,44 @@ final class GameModel {
         return commit(keyOf(fit.anchor.row, fit.anchor.col), fit.dir)
     }
 
+    // MARK: Judging the word in hand
+
+    /// Answer the word row's one question — is this a word? — the same way
+    /// landing it would, so the colour a player is looking at is a promise
+    /// about what the board would do.
+    private func judgeWord() {
+        wordVerdict = judgedWord()
+    }
+
+    private func judgedWord() -> WordVerdict {
+        guard let dictionary else { return .unjudged }
+        let staged = pickList
+        guard staged.count >= MIN_WORD_LENGTH else { return .unjudged }
+
+        // The opener has one home — the start square, heading across — so it
+        // is judged exactly where it would land.
+        if isFirstWord { return verdictOK == true ? .good : .bad }
+
+        // A gap is a letter the board has to supply, and which letter that is
+        // decides whether this is a word at all: PL_NT is PLANT over an A and
+        // nothing over an E. So the question isn't whether the letters spell
+        // something, it's whether *any* letter down there would make them —
+        // which is the same search the release of a hold does, run over the
+        // whole board instead of the one letter under the finger.
+        if hasGap {
+            return board.keys.contains { fitThroughLetter($0)?.isGood == true } ? .good : .bad
+        }
+
+        // No gap: there is nowhere for it to go yet, so all that can be
+        // judged is whether the letters picked spell a word.
+        let typed = staged.compactMap(\.letter).joined()
+        return dictionary.contains(typed) ? .good : .bad
+    }
+
     // MARK: Aiming — press and hold to see where the word goes
 
     /// Hold the staged word over the letter at `key` without landing it: the
-    /// whole word appears on the board, amber if it reads and red if it
+    /// whole word appears on the board, green if it reads and red if it
     /// doesn’t. Aiming somewhere it can’t lie simply shows nothing, so a
     /// finger sliding across the board isn’t chased by refusals.
     func aimThroughLetter(_ key: CellKey) {
@@ -880,8 +932,7 @@ final class GameModel {
 
         var next = board
         for step in result.steps { next[step.key] = step.letter }
-        let placed = Set(result.steps.map(\.key))
-        let newRuns = extractRuns(next).filter { $0.cells.contains { placed.contains($0) } }
+        let newRuns = runsTouching(result.steps.map(\.key), in: next)
 
         guard let dictionary else {
             rejectToast("Hold on — the dictionary is still loading.")
@@ -912,10 +963,12 @@ final class GameModel {
         // words that were already down.
         let oldRuns = mode == .battle ? extractRuns(board) : []
 
+        // Emptied before the board changes, so the word row has nothing left
+        // to judge against a board it is no longer waiting on.
+        picks = []
         setBoard(next)
         let spent = Set(result.steps.map(\.rackIndex))
         rack = rack.enumerated().filter { !spent.contains($0.offset) }.map(\.element)
-        picks = []
         clearAim()
         cues?.play(.commit)
         soundPileAlarm()
@@ -954,17 +1007,6 @@ final class GameModel {
     func rejectToast(_ text: String) {
         toastSerial += 1
         toast = GameToast(text: text, serial: toastSerial)
-    }
-
-    /// Say so when a game earns something. The toast is the game's only
-    /// "well done" channel, and it's the right one here: Game Center's own
-    /// achievement banner needs an account, and this has to work without one.
-    func announceAchievements(_ ids: [AchievementID]) {
-        guard let first = ids.first else { return }
-        rejectToast(
-            ids.count == 1
-                ? "Achievement: \(first.title)"
-                : "Achievement: \(first.title) +\(ids.count - 1) more")
     }
 
     func clearToast(serial: Int) {
@@ -1061,5 +1103,9 @@ final class GameModel {
             for cell in run.cells { byCell[cell, default: []].append(run) }
         }
         wordsByCell = byCell
+
+        // A word in hand is only as good as the board it would join, so a
+        // board that changed — or a dictionary that just arrived — re-asks.
+        judgeWord()
     }
 }

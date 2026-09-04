@@ -22,7 +22,12 @@ The iPhone app was reworked around a much smaller rule set and a minimalist, til
 dark UI. The rules, in one breath:
 
 - **Build a word from the pile** by tapping letters (or typing, on a hardware keyboard).
-  They line up in the word row, eight to a line.
+  They line up in the word row, always on one line — past eight letters the tiles narrow
+  rather than wrap.
+- **The word row says whether it's a word** as you build it: green when it reads, red
+  when it doesn't. A word with a gap in it is judged against the whole board — green if
+  *some* letter down there would make it a word, red if none would — so the colour is a
+  promise about what landing it would do, not a guess about the letters.
 - **The first word** lands from the start square heading across, with the ✓ button that
   takes the gap button's place until it's down. It is the only word placed by fiat, and
   the only one that previews on the board as it's typed.
@@ -30,16 +35,16 @@ dark UI. The rules, in one breath:
   borrowed letter goes and tap that letter. The word arranges itself around it, across
   or down, whichever spells real words. There is no tapping the board to choose a
   square, no typing onto the board, and no direction to pick.
-- **Or press and hold that letter** to see the word on the board before it lands: amber
+- **Or press and hold that letter** to see the word on the board before it lands: green
   where it would go if it reads, red if it doesn't. Sliding the finger carries the aim
-  from letter to letter; letting go lands an amber word. A red one stays up for a second
+  from letter to letter; letting go lands a green word. A red one stays up for a second
   — long enough to read what you spelled — and is then taken back with the reason
   ("XYZZY isn’t a real word"), the word still in the row, ready to fix.
 - **Words are permanent.** Nothing on the board moves, turns, comes back off, or undoes —
   so only real words are allowed down, in Solo as much as in Battle.
 - **The pile is the only pressure.** Reach `PILE_LIMIT` (24) tiles in hand and the game
-  ends on the spot, in either mode. The gauge under the header fills toward it and turns
-  amber at 17 and red at 20; the pile is drawn as three rows of eight whatever it holds,
+  ends on the spot, in either mode. The gauge under the header fills toward it in green
+  and turns amber at 17 and red at 20; the pile is drawn as three rows of eight whatever it holds,
   so a full pile looks like the end. Solo opens on `SOLO_START_TILES` (16) and Battle on
   `BATTLE_OPENING_TILES` (12) — the app's own numbers, kept apart from
   `WordCore.ENDLESS_START_TILES` / `BATTLE_START_TILES`, which are the web game's and are
@@ -49,6 +54,11 @@ dark UI. The rules, in one breath:
   per rival, on the same scale and the same colours; a player who's out reads as a full
   red bar.
 
+Under the pile are the actions on the word — clear it, add a gap (or ✓ the opener),
+backspace — while **shuffle stands on its own to the right of the pile**, as tall as it:
+it rearranges the tiles rather than acting on the word, and as one icon in four a mis-tap
+there cost a word.
+
 The header reads the score (or the battle placing), then what the clock is about to hand
 you — "5 tiles in 24s", the count and the countdown as one sentence — then the pause and
 menu buttons. The menu is the game's own screen of tile words, not a platform context
@@ -57,7 +67,9 @@ menu, and speed is no longer in it: a Solo game's pace is chosen on the way in
 game away and dealt another.
 
 Retired with it: undo/redo, dragging tiles, the selected-word controls, the loose-tile
-deadline, the Daily Deal, the tutorial, and the stats and settings pages. Sound and
+deadline, the Daily Deal, the tutorial, the stats and settings pages, and — since the
+redesign owns every corner of the screen — Game Center's floating access point and the
+achievement set behind it. Sound and
 haptics stay on unless a stored preference says otherwise. Battle keeps its lobby,
 codes and invites; its header shows the player's placing ("1st") instead of a score, and
 the results screen carries the standings and the player's words.
@@ -104,7 +116,7 @@ come back. The seed is salted so the day's letters aren't derivable from the dat
 (§8.4), and `TileStream` grows its deal off a *hidden* board so one seed yields the same
 letters however differently two people play them.
 
-### Progression, leaderboards and achievements
+### Progression and leaderboards
 
 Phase 3's logic layer. `Services/GameCenter.swift` now sits on top of it with the real
 GameKit calls — auth, `GameKitSubmitter`, and `UbiquitousSyncStore` putting the merge below
@@ -121,13 +133,14 @@ on iCloud:
   not an error: the web game needs no account and the port must not regress that. Scores
   earned signed out are held (best-per-board-occurrence only) and flush when auth arrives.
   Queueing happens *before* the send, so a crash mid-submission is lossless.
-- **`Achievements.swift` — the launch fifteen (§8.3).** Every one falls out of a funnel the
-  game already had (`finishGame`, `commit`, the overflow alarm). Reported as a percent,
-  which GameKit is happy to receive twice — that idempotence is what makes re-reporting on
-  sign-in safe. Six are battle-only and stay dark until phase 4 fills the battle fields of
-  `GameReport`; nine can be earned today.
+- **`GameReport.swift` — what a finished game saw.** One record covers Solo and Battle,
+  which is what lets a single funnel (`GameModel.onFinish` → `Progression.record`) serve
+  both.
 
-`Services/Progression.swift` binds them together and leaves the GameKit call sites as one
+There are no achievements: the launch set was cut along with Game Center's floating access
+point, so the only thing the app posts is a score.
+
+`Services/Progression.swift` binds them together and leaves the GameKit call site as one
 small protocol, `ProgressionSubmitter`, so all of the above still tests without an account —
 which is what kept the rules testable while the account was pending, and what keeps them
 testable in CI now that it isn't. `UbiquitousSyncStore` supplies the real iCloud store;
@@ -194,10 +207,9 @@ Xcode's UI because `xcodegen generate` would wipe the latter; entitlements live 
 and overwrites anything hand-written there.
 
 **Still to do, and only doable in Xcode's UI:** create the GameKit bundle (File → New →
-File → GameKit) holding the leaderboard and achievement definitions, which syncs to App
-Store Connect. The identifiers it must match are already fixed in code — `LeaderboardID`
-(four boards, one the Daily Deal's *recurring* 24h/24h board) and `AchievementID`
-(fifteen) — and a test asserts those strings don't drift.
+File → GameKit) holding the leaderboard definitions, which syncs to App Store Connect. The
+identifiers it must match are already fixed in code — `LeaderboardID` (four boards, one the
+Daily Deal's *recurring* 24h/24h board) — and a test asserts those strings don't drift.
 
 ### Shipping a build
 
@@ -297,7 +309,7 @@ rather than a designed mark. Fine for TestFlight, worth replacing before the App
 - **Phase 3 needs exercising, not writing.** The app signs with Game Center and iCloud KVS
   entitlements in the binary (verified: `codesign -d --entitlements`), but *none of the
   runtime behavior has been seen work* — the sign-in sheet, a score landing on a real
-  board, an achievement banner, two devices merging through iCloud. That needs the GameKit
+  board, two devices merging through iCloud. That needs the GameKit
   bundle (below) and test Apple IDs. Note unreleased leaderboards are visible to friends of
   test accounts (TN2417).
 - **The §7.4 spike is the last unknown**, which the plan puts in week one precisely because its
@@ -315,12 +327,14 @@ rather than a designed mark. Fine for TestFlight, worth replacing before the App
 ```
 
 Idempotent, and it lives in the repo rather than a web form because the identifiers have
-to stay in lockstep with what the app submits against — `LeaderboardID`, `AchievementID`
-and `Matchmaking.battleActivityID`. A drifted identifier doesn't fail loudly; the score
+to stay in lockstep with what the app submits against — `LeaderboardID` and
+`Matchmaking.battleActivityID`. A drifted identifier doesn't fail loudly; the score
 just silently never arrives.
 
-Currently configured: the `battle` activity (party codes, 2–8 players), four leaderboards,
-and fifteen achievements totalling 700 points.
+Currently configured: the `battle` activity (party codes, 2–8 players) and four
+leaderboards. Achievements already created in App Store Connect are left alone — the
+script only ever adds — so any from the retired set stay there, unused, until they're
+removed by hand.
 
 **The Daily Deal board is the one to be careful with.** It's recurring — 24h duration,
 daily rule — and its start instant has to agree with `DailyRules.resetHourUTC`, or players

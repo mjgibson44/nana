@@ -17,23 +17,23 @@ struct BoardMetricsTests {
 
     @Test func cellSizeScalesWithZoom() {
         #expect(metrics.cellSize == 44)
-        #expect(metrics.step == 45)
+        #expect(metrics.step == 46)
         var zoomed = metrics
         zoomed.zoom = 0.55
         #expect(zoomed.cellSize == 44 * 0.55)
-        #expect(zoomed.step == 44 * 0.55 + 1)
+        #expect(zoomed.step == 44 * 0.55 + 2)
     }
 
     @Test func contentSizeCountsHairlinesBetweenCellsOnly() {
-        // 33 cells and 32 hairlines: 33*45 - 1.
-        #expect(metrics.contentSize == CGSize(width: 1484, height: 1484))
+        // 33 cells and 32 hairlines: 33*46 - 2.
+        #expect(metrics.contentSize == CGSize(width: 1516, height: 1516))
     }
 
     @Test func rectOfCellAtOriginAndBeyond() {
         #expect(metrics.rect(of: Cell(row: 0, col: 0)) == CGRect(x: 0, y: 0, width: 44, height: 44))
         #expect(
             metrics.rect(of: Cell(row: 2, col: 5))
-                == CGRect(x: 5 * 45, y: 2 * 45, width: 44, height: 44))
+                == CGRect(x: 5 * 46, y: 2 * 46, width: 44, height: 44))
     }
 
     @Test func rectHonorsNegativeBounds() {
@@ -42,7 +42,7 @@ struct BoardMetricsTests {
             cellBase: 44, zoom: 1)
         // The first rendered cell is (-3,-2), at the content origin.
         #expect(grown.rect(of: Cell(row: -3, col: -2)).origin == CGPoint(x: 0, y: 0))
-        #expect(grown.rect(of: Cell(row: 0, col: 0)).origin == CGPoint(x: 2 * 45, y: 3 * 45))
+        #expect(grown.rect(of: Cell(row: 0, col: 0)).origin == CGPoint(x: 2 * 46, y: 3 * 46))
     }
 
     @Test func cellAtRoundTripsRect() {
@@ -54,14 +54,14 @@ struct BoardMetricsTests {
     }
 
     @Test func hairlineGapCountsTowardThePrecedingCell() {
-        // x = 44.5 sits in the gap after column 0.
-        #expect(metrics.cell(at: CGPoint(x: 44.5, y: 10)) == Cell(row: 0, col: 0))
+        // x = 45 sits in the gap after column 0.
+        #expect(metrics.cell(at: CGPoint(x: 45, y: 10)) == Cell(row: 0, col: 0))
     }
 
     @Test func pointsOutsideContentMissEveryCell() {
         #expect(metrics.cell(at: CGPoint(x: -1, y: 10)) == nil)
         #expect(metrics.cell(at: CGPoint(x: 10, y: -0.001)) == nil)
-        #expect(metrics.cell(at: CGPoint(x: 33 * 45, y: 10)) == nil)
+        #expect(metrics.cell(at: CGPoint(x: 33 * 46, y: 10)) == nil)
         #expect(metrics.cell(at: CGPoint(x: 10, y: 5000)) == nil)
     }
 
@@ -77,7 +77,7 @@ struct BoardMetricsTests {
         let box = Bounds(minRow: 10, minCol: 12, maxRow: 14, maxCol: 20)
         let rect = metrics.rect(ofTileBox: box)
         // 9 cols / 5 rows of cells and the hairlines between them.
-        #expect(rect == CGRect(x: 12 * 45, y: 10 * 45, width: 9 * 45 - 1, height: 5 * 45 - 1))
+        #expect(rect == CGRect(x: 12 * 46, y: 10 * 46, width: 9 * 46 - 2, height: 5 * 46 - 2))
     }
 
     @Test func tileBoxOfBoard() {
@@ -240,7 +240,7 @@ struct AutoFitTests {
         // 10×5 tiles, padded to 12×7: across is the constraint.
         let box = Bounds(minRow: 0, minCol: 0, maxRow: 4, maxCol: 9)
         let target = autoFitZoom(tileBox: box, viewport: viewport, cellBase: 44, currentZoom: 1)
-        let expected = (400.0 / 12 - 1) / 44
+        let expected = (400.0 / 12 - CELL_HAIRLINE) / 44
         #expect(target != nil)
         #expect(abs(target! - expected) < 1e-9)
     }
@@ -319,14 +319,14 @@ struct GrowthCompensationTests {
     @Test func prependedRowsAndColsNudgeTheOffsetByWholeSteps() {
         let old = Bounds(minRow: 0, minCol: 0, maxRow: 32, maxCol: 32)
         let new = Bounds(minRow: -3, minCol: -2, maxRow: 32, maxCol: 32)
-        let nudge = growthCompensation(from: old, to: new, step: 45)
-        #expect(nudge == CGSize(width: 90, height: 135))
+        let nudge = growthCompensation(from: old, to: new, step: 46)
+        #expect(nudge == CGSize(width: 2 * 46, height: 3 * 46))
     }
 
     @Test func growthAtBottomRightNeedsNoCompensation() {
         let old = Bounds(minRow: 0, minCol: 0, maxRow: 32, maxCol: 32)
         let new = Bounds(minRow: 0, minCol: 0, maxRow: 40, maxCol: 38)
-        #expect(growthCompensation(from: old, to: new, step: 45) == .zero)
+        #expect(growthCompensation(from: old, to: new, step: 46) == .zero)
     }
 
     @Test func aWatchedCellDoesNotMoveOnScreen() {

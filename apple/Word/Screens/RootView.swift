@@ -41,7 +41,6 @@ struct RootView: View {
             case .home:
                 HomeScreen(
                     hasSavedGame: savedGame != nil,
-                    showsGameCenter: gameCenter.isSignedIn,
                     onResume: resumeSavedGame,
                     onSolo: { route = .soloSetup },
                     onBattle: chooseBattle)
@@ -93,8 +92,8 @@ struct RootView: View {
         .task {
             savedGame = settings.loadSavedGame()
             // Kicked off at launch and never blocking: Solo plays signed out
-            // (§7.1), and anything earned meanwhile is held by Progression
-            // and flushed if this succeeds.
+            // (§7.1), and any score made meanwhile is held by Progression and
+            // flushed if this succeeds.
             gameCenter.authenticate(feeding: progression)
             model.cues = audio
             audio.isSoundEnabled = { [settings] in settings.soundEnabled }
@@ -133,12 +132,9 @@ struct RootView: View {
     /// Every finished game lands here — the local stats, and the Game Center
     /// submission that hangs off the same funnel.
     private func recordFinish(_ outcome: GameOutcome) {
-        // Cross-device progress, achievements, and the leaderboard queue —
-        // all of which work signed out and flush when auth arrives (§7.1).
-        let recorded = progression.record(outcome)
-        if !recorded.completed.isEmpty {
-            model.announceAchievements(recorded.completed)
-        }
+        // Cross-device progress and the leaderboard queue — both of which
+        // work signed out and flush when auth arrives (§7.1).
+        progression.record(outcome)
         settings.record(score: outcome.score, words: outcome.words)
         // A finished game is not a game to come back to.
         settings.save(nil)

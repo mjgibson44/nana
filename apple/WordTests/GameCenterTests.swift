@@ -63,7 +63,6 @@ final class GameCenterTests: XCTestCase {
                 submitted.append(score)
                 return true
             }
-            func report(_ achievement: AchievementProgress) async -> Bool { true }
         }
 
         let progression = Progression(store: MemoryStore())
@@ -82,14 +81,12 @@ final class GameCenterTests: XCTestCase {
 
     // MARK: Config the GameKit bundle has to agree with
 
-    func testLeaderboardAndAchievementIDsAreStable() {
+    func testLeaderboardIDsAreStable() {
         // These strings are the contract with App Store Connect. Changing one
-        // silently orphans a board or a badge.
+        // silently orphans a board.
         XCTAssertEqual(
             Set(LeaderboardID.allCases.map(\.rawValue)),
             ["solo.regular", "solo.fast", "daily.deal", "battle.wins"])
-        XCTAssertEqual(AchievementID.allCases.count, 15)
-        XCTAssertEqual(Set(AchievementID.allCases.map(\.rawValue)).count, 15)
     }
 
     func testTheEntitlementsDeclareGameCenterAndICloud() throws {

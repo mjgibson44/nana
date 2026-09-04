@@ -6,13 +6,9 @@ import WordCore
 /// first — it's the one thing here the player didn't choose to leave.
 struct HomeScreen: View {
     /// The name, as the home screen spells it. One place to change.
-    static let title = "FEWTILES"
+    static let title = "TIMETILES"
 
     var hasSavedGame: Bool
-    /// Shows Game Center's own access point over the home screen. Off in
-    /// snapshot tests and previews — it's a UIKit/AppKit overlay the renderer
-    /// can't draw, and it needs a signed-in player to say anything.
-    var showsGameCenter = false
     var onResume: () -> Void
     var onSolo: () -> Void
     var onBattle: () -> Void
@@ -32,7 +28,6 @@ struct HomeScreen: View {
             }
             Spacer()
         }
-        .modifier(GameCenterAccessPoint(active: showsGameCenter))
     }
 }
 

@@ -3,8 +3,9 @@ import WordBoard
 import WordCore
 
 /// The game screen, top to bottom: header and pile gauge, the board, the
-/// word being built, the pile, and the four actions — one column with the
-/// same margin all round and the same gap between every section.
+/// word being built, the pile with shuffle beside it, and the row of word
+/// actions — one column with the same margin all round and the same gap
+/// between every section.
 struct GameScreen: View {
     /// The shared coordinate space every pointer event and frame reads —
     /// the port's stand-in for the web's client coordinates.
@@ -30,8 +31,8 @@ struct GameScreen: View {
     @State private var clockNow = Date.now
     /// The tile-lettered menu, in place of the platform's.
     @State private var menuOpen = false
-    /// The column's inner width, which sizes the tiles: `Spacing.columns`
-    /// across, always.
+    /// The column's inner width, which sizes the tiles: eight of them and
+    /// the shuffle button across, always.
     @State private var columnWidth: CGFloat = 358
     @FocusState private var gameFocused: Bool
     @Environment(\.snapshotRendering) private var snapshotRendering
@@ -52,18 +53,16 @@ struct GameScreen: View {
                     }
                 }
                 boardArea
-                WordRowView(picks: model.pickList, tileSize: tileSize) { position in
+                WordRowView(
+                    picks: model.pickList, verdict: model.wordVerdict, tileSize: tileSize,
+                    width: columnWidth
+                ) { position in
                     model.removePick(at: position)
                     focusGame()
                 }
                 .allowsHitTesting(model.canAcceptInput)
-                PileView(
-                    letters: model.rack, picked: Set(model.picks), tileSize: tileSize
-                ) { index in
-                    model.togglePick(index)
-                    focusGame()
-                }
-                .allowsHitTesting(model.canAcceptInput)
+                pile
+                    .allowsHitTesting(model.canAcceptInput)
                 actions
                     .allowsHitTesting(model.canAcceptInput)
             }
@@ -338,6 +337,7 @@ struct GameScreen: View {
             metrics: camera.metrics,
             tiles: model.board.entries.map { (key: $0.key, letter: $0.value) },
             preview: model.preview,
+            previewIsGood: model.wordVerdict != .bad,
             aim: model.aim?.cells,
             aimIsGood: model.aim?.isGood ?? true,
             wordsAt: model.wordsByCell.mapValues { $0.map(\.word) })
@@ -446,7 +446,30 @@ struct GameScreen: View {
         }
     }
 
-    // MARK: The actions
+    // MARK: The pile and the actions
+
+    /// The pile, with shuffle beside it: the one button that acts on the
+    /// tiles rather than on the word stands with the tiles.
+    private var pile: some View {
+        HStack(alignment: .top, spacing: Spacing.gap) {
+            PileView(
+                letters: model.rack, picked: Set(model.picks), tileSize: tileSize
+            ) { index in
+                model.togglePick(index)
+                focusGame()
+            }
+            .frame(width: Spacing.pileWidth(tileSize: tileSize))
+            PileShuffleButton(height: pileHeight, disabled: !model.canShuffle) {
+                model.shufflePile()
+                focusGame()
+            }
+        }
+    }
+
+    /// Three rows of tiles and the gaps between them.
+    private var pileHeight: CGFloat {
+        CGFloat(Spacing.pileRows) * tileSize + CGFloat(Spacing.pileRows - 1) * Spacing.tileGap
+    }
 
     private var actions: some View {
         HStack(spacing: Spacing.tileGap) {
@@ -455,13 +478,6 @@ struct GameScreen: View {
                 disabled: !model.canClearWord
             ) {
                 model.clearWord()
-                focusGame()
-            }
-            ActionButton(
-                systemImage: "repeat", label: "Shuffle the pile",
-                disabled: !model.canShuffle
-            ) {
-                model.shufflePile()
                 focusGame()
             }
             if model.isFirstWord {

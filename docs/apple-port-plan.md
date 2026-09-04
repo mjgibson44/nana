@@ -564,6 +564,10 @@ Why this earns its place in an Apple-platform plan specifically:
 
 ### 8.3 Achievements
 
+**Cut.** The launch set was built and then removed along with Game Center's floating
+access point (see `apple/README.md`); the app posts scores and nothing else. The rest of
+this section is what was planned, kept for the record.
+
 Cap: 100 achievements / 1,000 points. Launch set (~15, all detectable from existing
 core events — `finishGame`, `commit`, referee outputs, stats):
 

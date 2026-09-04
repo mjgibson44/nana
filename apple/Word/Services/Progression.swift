@@ -2,16 +2,16 @@ import Foundation
 import Observation
 import WordCore
 
-/// Everything a player accumulates across games and devices, and everything
+/// Everything a player accumulates across games and devices, and every score
 /// waiting to reach Game Center.
 ///
-/// This is phase 3's logic layer with the GameKit call sites left as one
-/// small protocol (`ProgressionSubmitter`). That split is deliberate: the
-/// plan's §7.1 requires the game to be fully playable **signed out** — auth
-/// declined, restricted, or simply never attempted — so the interesting
-/// behavior is all in what happens when there is nobody to submit to. That
-/// behavior is testable today; the submission is a dozen lines that need an
-/// Apple Developer account to run at all.
+/// This is phase 3's logic layer with the GameKit call site left as one small
+/// protocol (`ProgressionSubmitter`). That split is deliberate: the plan's
+/// §7.1 requires the game to be fully playable **signed out** — auth declined,
+/// restricted, or simply never attempted — so the interesting behavior is all
+/// in what happens when there is nobody to submit to. That behavior is
+/// testable today; the submission is a dozen lines that need an Apple
+/// Developer account to run at all.
 @Observable @MainActor
 final class Progression {
     /// Stable per install. Only this device ever writes its own blob, which
@@ -25,10 +25,6 @@ final class Progression {
     /// The merged picture across every device the player owns.
     private(set) var merged: MergedProgress
     private(set) var pendingScores: PendingScores
-    private(set) var pendingAchievements: PendingAchievements
-    /// Achievements this device has seen completed, so the Stats page can show
-    /// them without an account.
-    private(set) var earned: Set<AchievementID> = []
 
     /// Set once Game Center auth succeeds. Nil means signed out, which is a
     /// designed state, not an error.
@@ -50,13 +46,10 @@ final class Progression {
         self.sync = sync ?? LocalSyncStore(store: store)
         merged = loadProgress(from: self.sync)
         pendingScores = PendingScores.load(from: store)
-        pendingAchievements = PendingAchievements.load(from: store)
-        earned = Set(
-            pendingAchievements.ordered.filter(\.isComplete).map(\.id))
     }
 
     /// Fold a finished game in: update this device's blob, work out what it
-    /// earned, and either submit or queue it.
+    /// scored, and either submit or queue it.
     @discardableResult
     func record(_ outcome: GameOutcome, at now: Date = .now) -> RecordedProgress {
         let stamp = now.timeIntervalSince1970 * 1_000
@@ -82,17 +75,7 @@ final class Progression {
         saveDeviceProgress(device, to: sync)
         merged = loadProgress(from: sync)
 
-        // 2. What it earned. Evaluated against the merged picture *including*
-        //    this game, so a badge earned by two devices between them counts.
-        let today = outcome.daily.map(\.day) ?? dailyDayNumber(at: now)
-        let progress = achievementProgress(
-            for: outcome.report,
-            progress: merged,
-            consecutiveBattleWins: merged.battleWins,
-            today: today)
-        earned.formUnion(progress.filter(\.isComplete).map(\.id))
-
-        // 3. What it should post.
+        // 2. What it should post.
         let scores = submissions(
             mode: outcome.mode,
             pace: outcome.report.pace,
@@ -102,20 +85,17 @@ final class Progression {
             battleWins: merged.battleWins,
             at: stamp)
 
-        queue(scores: scores, achievements: progress, now: stamp)
-        return RecordedProgress(merged: merged, achievements: progress, scores: scores)
+        queue(scores: scores, now: stamp)
+        return RecordedProgress(merged: merged, scores: scores)
     }
 
-    /// Hold everything locally, then try to send. Queueing *first* is what
+    /// Hold the score locally, then try to send. Queueing *first* is what
     /// makes a mid-submission crash lossless — the worst case is submitting
     /// the same score twice, which Game Center already tolerates.
-    private func queue(
-        scores: [PendingScore], achievements: [AchievementProgress], now: Double
-    ) {
+    private func queue(scores: [PendingScore], now: Double) {
         for score in scores { pendingScores.add(score) }
-        pendingAchievements.add(achievements)
         pendingScores.prune(now: now)
-        persistQueues()
+        persistQueue()
         Task { await flush() }
     }
 
@@ -125,8 +105,8 @@ final class Progression {
     /// **One at a time.** `record` fires a flush of its own and `signedIn`
     /// runs another, so two can easily overlap — and `submit` is a suspension
     /// point that leaves the main actor, so an overlapping pair really does
-    /// run concurrently. Submitting twice would be harmless (both GameKit
-    /// calls are idempotent), but hammering the network with a duplicate of
+    /// run concurrently. Submitting twice would be harmless (a leaderboard
+    /// keeps the best score), but hammering the network with a duplicate of
     /// every queued score isn't, and it makes the queue's mutations
     /// interleave for no reason. A second caller arriving mid-flush instead
     /// marks the queue dirty, and the flush in progress goes round again —
@@ -142,21 +122,17 @@ final class Progression {
 
         repeat {
             flushAgain = false
-            await drainQueues()
+            await drainQueue()
         } while flushAgain
     }
 
-    private func drainQueues() async {
+    private func drainQueue() async {
         guard let submitter else { return }
         for score in pendingScores.ordered {
             guard await submitter.submit(score) else { continue }
             pendingScores.clear(score)
         }
-        for achievement in pendingAchievements.ordered {
-            guard await submitter.report(achievement) else { continue }
-            pendingAchievements.clear(achievement.id)
-        }
-        persistQueues()
+        persistQueue()
     }
 
     /// Called when Game Center auth succeeds — the moment a signed-out
@@ -170,9 +146,8 @@ final class Progression {
         submitter = nil
     }
 
-    private func persistQueues() {
+    private func persistQueue() {
         pendingScores.save(to: store)
-        pendingAchievements.save(to: store)
     }
 
     var dailyStreak: Int { merged.dailyStreak(today: dailyDayNumber(at: .now)) }
@@ -181,22 +156,15 @@ final class Progression {
 /// What one finished game did.
 struct RecordedProgress: Equatable {
     var merged: MergedProgress
-    var achievements: [AchievementProgress]
     var scores: [PendingScore]
-
-    /// Badges completed by this game — what a "you earned…" toast would show.
-    var completed: [AchievementID] {
-        achievements.filter(\.isComplete).map(\.id)
-    }
 }
 
-/// The GameKit call sites, kept behind a protocol so everything above is
+/// The GameKit call site, kept behind a protocol so everything above is
 /// testable without an account. Phase 3's remaining half implements this with
-/// `GKLeaderboard.submitScore` and `GKAchievement.report`.
+/// `GKLeaderboard.submitScore`.
 protocol ProgressionSubmitter: Sendable {
     /// True once the score is accepted; false leaves it queued.
     func submit(_ score: PendingScore) async -> Bool
-    func report(_ achievement: AchievementProgress) async -> Bool
 }
 
 /// Progress storage backed by the same local defaults as everything else.

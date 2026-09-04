@@ -2,8 +2,9 @@ import SwiftUI
 
 /// The redesign's palette: one dark theme, sampled from the reference
 /// mockups. Everything structural is a near-black warm grey; the only colour
-/// is the amber that marks a word — typed, placed, or a title — and the
-/// gauge that says how close the pile is to burying you.
+/// is the green that marks a word — typed, placed, or a title — the red that
+/// says a word isn't one, and the gauge that says how close the pile is to
+/// burying you.
 enum Palette {
     /// The screen.
     static let bg = Color(hex: 0x151110)
@@ -19,27 +20,34 @@ enum Palette {
     static let inkSoft = Color(hex: 0x848484)
     /// Disabled controls.
     static let inkFaint = Color(hex: 0x4B4B4B)
-    /// The word: typed, placed, or a title.
-    static let accent = Color(hex: 0xFFA600)
-    static let accentBg = Color(hex: 0x4D3711)
-    /// The confirm button, a step brighter than a word tile.
-    static let accentButton = Color(hex: 0x63450F)
+    /// A word that reads: green, because green is the answer "yes, that is a
+    /// word" — given while it is still being built, not only once it lands.
+    static let accent = Color(hex: 0xB6DA97)
+    static let accentBg = Color(hex: 0x253F18)
+    /// A word held over the board, a step brighter than one already down, so
+    /// the thing being aimed reads above the board it is aimed at.
+    static let accentRaised = Color(hex: 0x2F5620)
+    /// The confirm button: solid green with a dark mark on it. The one "go"
+    /// on the screen, and the only place the bright green is a fill.
+    static let accentButton = Color(hex: 0x23B626)
+    static let accentButtonInk = Color(hex: 0x151110)
 
-    // The pile gauge: purple while there's room, amber as it fills, red when
-    // the next batch could end the game. Purple rather than the usual
-    // progress-bar green — good standing is the game's calm state, not a
-    // "pass", and green would fight the amber that means "word".
-    static let gaugeOk = Color(hex: 0x8023B6)
-    static let gaugeOkTrack = Color(hex: 0x3F095B)
+    /// A word that isn't a word — in the row while it's being built, and on
+    /// the board when it's held somewhere it can't land. As bright against
+    /// its dark red as `accent` is against its dark green: it is the same
+    /// "here is your word" moment, answered differently.
+    static let badInk = Color(hex: 0xFF5C5C)
+    static let badBg = Color(hex: 0x5D1F1F)
+
+    // The pile gauge: green while there's room, amber as it fills, red when
+    // the next batch could end the game — the reading every progress bar
+    // has, in a game where a full bar is the end of it.
+    static let gaugeOk = Color(hex: 0x23B626)
+    static let gaugeOkTrack = Color(hex: 0x193A16)
     static let gaugeWarn = Color(hex: 0xA66C00)
     static let gaugeWarnTrack = Color(hex: 0x4D3711)
     static let gaugeBad = Color(hex: 0xB73131)
-    static let gaugeBadTrack = Color(hex: 0x5D1F1F)
-
-    /// A word that isn't a word, held over the board in red. As bright
-    /// against its dark red as `accent` is against its dark amber — it is
-    /// the same "here is your word" moment, answered differently.
-    static let badInk = Color(hex: 0xFF5C5C)
+    static let gaugeBadTrack = badBg
 }
 
 /// The one spacing system every screen uses: the same margin around the
@@ -51,9 +59,14 @@ enum Spacing {
     static let gap: CGFloat = 16
     /// Between tiles in a row.
     static let tileGap: CGFloat = 4
-    /// The word row and the pile are eight tiles wide — fewer, bigger tiles
-    /// than the original ten, which is what makes them thumb-sized on a phone.
+    /// The pile is eight tiles wide — fewer, bigger tiles than the original
+    /// ten, which is what makes them thumb-sized on a phone.
     static let columns = 8
+    /// The shuffle button stands to the right of the pile, on its own: it
+    /// rearranges the tiles rather than acting on the word, so it doesn't
+    /// belong in the row of word actions. One and a half tiles wide, so it
+    /// reads as a control and not as a ninth letter.
+    static let shuffleTiles: CGFloat = 1.5
     /// Rows the pile always draws, full or not. Eight across by three down is
     /// twenty-four slots, which *is* `PILE_LIMIT`: a full pile looks like the
     /// end because it is the end.
@@ -66,9 +79,38 @@ enum Spacing {
     /// Phone-first: wider screens get the same column, centred.
     static let maxWidth: CGFloat = 520
 
-    /// How wide a tile is when `columns` of them fill `width`.
+    /// How wide a pile tile is when `columns` of them, the gap, and the
+    /// shuffle button beside them share `width`. Every tile on the game
+    /// screen is sized from this, so the word row and the pile stay the same
+    /// tiles even though only one of them shares its row.
     static func tileSize(fitting width: CGFloat) -> CGFloat {
-        max(20, (width - CGFloat(columns - 1) * tileGap) / CGFloat(columns))
+        let slots = CGFloat(columns) + shuffleTiles
+        return max(20, (width - CGFloat(columns - 1) * tileGap - gap) / slots)
+    }
+
+    /// How wide the pile itself draws at that tile size — the other side of
+    /// the row is whatever is left for the shuffle button.
+    static func pileWidth(tileSize: CGFloat) -> CGFloat {
+        CGFloat(columns) * tileSize + CGFloat(columns - 1) * tileGap
+    }
+
+    /// The word being built never wraps. Up to the point where `cap`-sized
+    /// tiles fill the row it is laid out at that size; past it every tile
+    /// shrinks so the whole word stays on one line, and a word long enough
+    /// to make the letters small gives up the gaps between tiles first.
+    static func wordRow(count: Int, fitting width: CGFloat, cap: CGFloat)
+        -> (size: CGFloat, gap: CGFloat)
+    {
+        guard count > 0, width > 0 else { return (cap, tileGap) }
+        let tiles = CGFloat(count)
+        func fitted(gap: CGFloat) -> CGFloat { (width - (tiles - 1) * gap) / tiles }
+        var gap = tileGap
+        var size = fitted(gap: gap)
+        if size < cap / 2 {
+            gap = 1
+            size = fitted(gap: gap)
+        }
+        return (min(cap, max(6, size)), gap)
     }
 }
 

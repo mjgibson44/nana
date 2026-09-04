@@ -83,6 +83,14 @@ final class ScreenSnapshotTests: XCTestCase {
         try render(GameScreen(model: model), name: "game")
     }
 
+    /// A word longer than the row is wide: it has to shrink onto one line
+    /// rather than wrap, and the pile below it must not move.
+    func testGameScreenRendersALongWord() async throws {
+        let model = try await playedModel()
+        for index in model.rack.indices { model.togglePick(index) }
+        try render(GameScreen(model: model), name: "game-long-word")
+    }
+
     func testGameScreenRendersTheOpener() async throws {
         let model = GameModel()
         model.newGame(seed: "snapshot")

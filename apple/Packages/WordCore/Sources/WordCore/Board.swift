@@ -85,6 +85,62 @@ public func extractRuns(_ tiles: TileMap) -> [WordRun] {
     return runs
 }
 
+/// The runs that pass through any of `cells`, found by walking out from those
+/// cells rather than reading the whole board.
+///
+/// Same answer as `extractRuns(tiles).filter { $0.cells.contains { cells.contains($0) } }`
+/// (`runsTouchingMatchExtractRuns` pins that), for a cost that depends on the
+/// length of the runs rather than the size of the board. Which matters
+/// because judging a placement asks this question and nothing else — and the
+/// live word verdict asks it once per letter on the board, on every tap.
+///
+/// No TS counterpart: the web game judged one placement at a time and could
+/// afford to re-read everything.
+public func runsTouching(_ cells: some Sequence<CellKey>, in tiles: TileMap) -> [WordRun] {
+    var runs: [WordRun] = []
+    // The head of a run identifies it, so a word touched by three of its own
+    // letters is still emitted once.
+    var seenAcross = Set<CellKey>()
+    var seenDown = Set<CellKey>()
+
+    for key in cells {
+        guard tiles.contains(key) else { continue }
+        let cell = parseKey(key)
+
+        var col = cell.col
+        while tiles.contains(keyOf(cell.row, col - 1)) { col -= 1 }
+        if seenAcross.insert(keyOf(cell.row, col)).inserted {
+            var run: [CellKey] = []
+            var c = col
+            while tiles.contains(keyOf(cell.row, c)) {
+                run.append(keyOf(cell.row, c))
+                c += 1
+            }
+            if run.count >= 2 {
+                runs.append(WordRun(
+                    word: run.map { tiles[$0]! }.joined(), direction: .across, cells: run))
+            }
+        }
+
+        var row = cell.row
+        while tiles.contains(keyOf(row - 1, cell.col)) { row -= 1 }
+        if seenDown.insert(keyOf(row, cell.col)).inserted {
+            var run: [CellKey] = []
+            var r = row
+            while tiles.contains(keyOf(r, cell.col)) {
+                run.append(keyOf(r, cell.col))
+                r += 1
+            }
+            if run.count >= 2 {
+                runs.append(WordRun(
+                    word: run.map { tiles[$0]! }.joined(), direction: .down, cells: run))
+            }
+        }
+    }
+
+    return runs
+}
+
 /// Split the board into orthogonally-connected groups of tiles, largest first.
 /// A finished board is a single group; anything else is islands to be joined
 /// up. Ties keep traversal order (the TS relies on stable sort; Swift's
