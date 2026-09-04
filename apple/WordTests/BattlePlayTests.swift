@@ -98,7 +98,7 @@ final class BattlePlayTests: XCTestCase {
         table.host.start()
 
         XCTAssertEqual(table.host.state?.phase, .playing)
-        XCTAssertEqual(table.hostModel.rack.count, BATTLE_START_TILES)
+        XCTAssertEqual(table.hostModel.rack.count, BATTLE_OPENING_TILES)
         XCTAssertEqual(
             table.hostModel.rack, table.clientModel.rack,
             "one seed, one shared stream — the whole point")

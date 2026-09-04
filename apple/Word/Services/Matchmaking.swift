@@ -17,8 +17,9 @@ import AppKit
 ///     code and URL that the system understands, and `findMatch` turns the
 ///     party into a `GKMatch`. This is the OS-blessed version of the web
 ///     game's typed join codes. Note the code *format* is Apple's, not ours:
-///     two same-length parts joined by a dash, so `newBattleCode`'s five
-///     letters don't apply here.
+///     two same-length parts joined by a dash. `newBattleCode`'s three letters
+///     are the web broker's codes and have no say here — Game Center issues
+///     the code this screen shows, and there is no API to shorten it.
 ///  2. **Invites (everywhere)** — `GKMatchmakerViewController` in invite-only
 ///     mode: friends, Messages threads, nearby players. Ships on every OS the
 ///     app supports, and stays the fallback below 26.

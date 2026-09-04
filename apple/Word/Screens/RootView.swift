@@ -5,6 +5,8 @@ import WordCore
 /// The app's one router state, plus the overlays each screen raises.
 enum Route: Equatable {
     case home
+    /// Picking a Solo game's speed, on the way in.
+    case soloSetup
     /// Getting into a battle: opening a room or joining one.
     case battleEntry
     /// In a battle's lobby, waiting for the host to start.
@@ -41,8 +43,14 @@ struct RootView: View {
                     hasSavedGame: savedGame != nil,
                     showsGameCenter: gameCenter.isSignedIn,
                     onResume: resumeSavedGame,
-                    onSolo: { startSolo(pace: settings.pace) },
+                    onSolo: { route = .soloSetup },
                     onBattle: chooseBattle)
+
+            case .soloSetup:
+                SoloSetupScreen(
+                    pace: settings.pace,
+                    onPlay: startSolo(pace:),
+                    onClose: { route = .home })
 
             case .battleEntry:
                 BattleEntryScreen(

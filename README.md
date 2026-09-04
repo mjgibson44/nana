@@ -94,7 +94,7 @@ down.
   end the game by itself; still being over when the round's clock runs out is
   what buries you.
 - **Battle** — a free-for-all of **2–8 players**, through a host/join lobby
-  flow: one player hosts and shares a 5-letter code (or an invite link that
+  flow: one player hosts and shares a 3-letter code (or an invite link that
   carries it); everyone enters a name to join, and every player draws the
   identical letters. A placed word is **permanent** — no moving, no taking
   back — and only real words are allowed down. Every word you place sends

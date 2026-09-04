@@ -78,9 +78,15 @@ public struct BattleState: Codable, Equatable {
 
 /// Letters only — no digits at all, so a code is always read and typed as a
 /// word. I, L and O stay out too: they're the letters that get mistaken for
-/// 1 and 0. Twenty-three letters over five places is still 6.4M codes.
+/// 1 and 0.
+///
+/// Three places, not five: a code exists to be read out loud across a room
+/// and typed on a phone, and three letters is what fits in one glance.
+/// Twenty-three letters over three places is 12,167 codes — small enough that
+/// two lobbies can genuinely collide, which is why claiming one retries
+/// (`hostBattle`) rather than trusting the draw.
 let CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ"
-public let CODE_LENGTH = 5
+public let CODE_LENGTH = 3
 
 public func newBattleCode() -> String {
     var code = ""

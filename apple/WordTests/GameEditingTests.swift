@@ -150,7 +150,8 @@ final class GameEditingTests: XCTestCase {
         let model = await makeGame()
         try TestPlays.placeOpener(on: model)
         let placed = model.board
-        // A word that can't possibly fit: a gap followed by every rack tile.
+        // A gap followed by every rack tile: it lies over the letter, but it
+        // is nobody's idea of a word.
         model.addGap()
         for index in model.rack.indices { model.togglePick(index) }
         let staged = model.picks
@@ -159,6 +160,13 @@ final class GameEditingTests: XCTestCase {
 
         XCTAssertEqual(model.board, placed)
         XCTAssertEqual(model.picks, staged, "a refusal never discards the word")
+        // The refusal is the word itself, in red, for a second — then the
+        // reason, in the usual banner.
+        XCTAssertTrue(model.aimRejected)
+        XCTAssertEqual(model.aim?.isGood, false)
+        model.finishRejectedAim(serial: try XCTUnwrap(model.aim?.serial))
+        XCTAssertNil(model.aim)
+        XCTAssertEqual(model.picks, staged, "and it comes back to the row")
         XCTAssertNotNil(model.toast)
     }
 
@@ -214,12 +222,12 @@ final class GameEditingTests: XCTestCase {
         XCTAssertNil(model.countdown, "the clock stops with the game")
     }
 
-    func testTheGaugeStartsCalmAndTurnsRedAtTwentyFive() {
+    func testTheGaugeStartsCalmAndTurnsRedShortOfTheLimit() {
         let model = GameModel()
         let start = Date(timeIntervalSince1970: 1_000)
         model.newGame(seed: "gauge", pace: .regular, now: start)
         model.dismissSplash(at: start)
-        XCTAssertEqual(model.pileCount, ENDLESS_START_TILES)
+        XCTAssertEqual(model.pileCount, SOLO_START_TILES)
         XCTAssertEqual(model.pileTone, .ok, "a fresh deal is room to work, not trouble")
 
         // One tile past the opening deal turns it amber…
@@ -227,11 +235,20 @@ final class GameEditingTests: XCTestCase {
         XCTAssertEqual(model.pileTone, .ok, "picking doesn't change what's in hand")
         model.clearWord()
 
-        // …and one regular batch lands five: twenty-five is in the red.
+        // …and one regular batch lands five: twenty-one is in the red.
         model.advanceClock(at: start.addingTimeInterval(Double(endlessInitialSeconds(.regular)) + 1))
-        XCTAssertEqual(model.pileCount, ENDLESS_START_TILES + ENDLESS_SMALL_BATCH)
+        XCTAssertEqual(model.pileCount, SOLO_START_TILES + ENDLESS_SMALL_BATCH)
         XCTAssertEqual(model.pileTone, .urgent)
         XCTAssertFalse(model.isComplete, "red is a warning; only a full pile ends it")
-        XCTAssertEqual(PILE_WARN, ENDLESS_START_TILES + 1, "amber starts one tile past the opening deal")
+        XCTAssertEqual(PILE_WARN, SOLO_START_TILES + 1, "amber starts one tile past the opening deal")
+        XCTAssertLessThan(PILE_URGENT, PILE_LIMIT, "red has to have somewhere to warn from")
+        XCTAssertEqual(
+            PILE_LIMIT, Spacing.columns * Spacing.pileRows,
+            "the pile on screen is the limit — a full field means a full pile")
+        // Both modes open on the share of the pile they were tuned at. A
+        // limit that moves without these moving with it deals a game that
+        // starts nearly buried.
+        XCTAssertEqual(Double(SOLO_START_TILES) / Double(PILE_LIMIT), 2.0 / 3, accuracy: 0.02)
+        XCTAssertEqual(Double(BATTLE_OPENING_TILES) / Double(PILE_LIMIT), 0.5, accuracy: 0.02)
     }
 }

@@ -44,7 +44,7 @@ struct SplashView: View {
     private var note: String {
         switch splash {
         case .start:
-            "\(ENDLESS_START_TILES) tiles · "
+            "\(SOLO_START_TILES) tiles · "
                 + "\(formatSeconds(Double(endlessInitialSeconds(pace)))) until more arrive"
         case let .speedUp(seconds, tiles):
             "+\(tiles) tiles every \(formatSeconds(Double(seconds))) from here"
@@ -74,6 +74,52 @@ struct PauseView: View {
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         .task { resumeFocused = true }
+    }
+}
+
+/// The game menu, in the game's own lettering rather than the system's.
+///
+/// It replaced a `Menu` full of `Button`s: on a screen where every other
+/// control is a word spelled in tiles, a platform context menu was the one
+/// thing that looked borrowed. Speed left with it — a game's pace is chosen
+/// before it starts (`SoloSetupScreen`), not changed halfway through, because
+/// changing it here silently dealt a whole new game.
+struct GameMenuView: View {
+    struct Item: Identifiable {
+        var id: String { title }
+        var title: String
+        var accent = false
+        var action: () -> Void
+    }
+
+    var items: [Item]
+    var onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            Palette.bg.opacity(0.92)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onClose)
+                .accessibilityHidden(true)
+            TileBlock {
+                TileWord(text: "MENU", style: .accent)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.bottom, Spacing.tileGap)
+                ForEach(items) { item in
+                    TileWordButton(
+                        text: item.title, style: item.accent ? .accentButton : .plain,
+                        action: item.action)
+                }
+                TileWordButton(text: "CLOSE", action: onClose)
+                    .padding(.top, Spacing.tileGap)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(Spacing.margin)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(named: "Close", onClose)
     }
 }
 
