@@ -150,6 +150,12 @@ xcodebuild -exportArchive \
 PACKAGE="$(find "$EXPORT_DIR" -maxdepth 1 \( -name '*.ipa' -o -name '*.pkg' \) | head -1)"
 echo "==> Built ${PACKAGE}"
 
+# A correctly signed app with no entitlements passes every signature check
+# there is, and App Store Connect accepts it on iOS without a murmur. This is
+# the only thing that catches it, so it runs before anything can be uploaded.
+echo "==> Verifying entitlements"
+"${HERE}/verify-entitlements.py" "$PLATFORM" "$EXPORT_DIR"
+
 if [ "$ACTION" != "upload" ]; then
   echo "==> Not uploading. Re-run with 'upload', or drop the package into Transporter."
   exit 0
