@@ -89,6 +89,37 @@ struct GestureMachineTests {
         ])
     }
 
+    // MARK: Staged tiles — dropped on the board, not yet confirmed
+
+    @Test func stagedTilePressLiftsItEvenOnALockedBoard() {
+        var m = M()
+        let locked = M.Context(boardLocked: true, hasStagedPicks: true, hasGapPick: true)
+        let effects = down(&m, target: .stagedTile(cell: cell, letter: "s"), context: locked)
+        #expect(effects == [
+            .beginDrag(source: .board(cell: cell, letter: "s"), at: CGPoint(x: 100, y: 100))
+        ])
+        #expect(m.ownsPointer)
+    }
+
+    @Test func stagedTileTapIsATapAndDragIsADrop() {
+        var m = M()
+        let locked = M.Context(boardLocked: true)
+        _ = down(&m, target: .stagedTile(cell: cell, letter: "s"), context: locked)
+        #expect(up(&m, at: CGPoint(x: 102, y: 101)) == [.endDrag(drop: nil), .tapBoardTile(cell)])
+        #expect(m.state == .idle)
+
+        _ = down(&m, target: .stagedTile(cell: cell, letter: "s"), context: locked)
+        #expect(move(&m, to: CGPoint(x: 150, y: 160)) == [.dragMoved(CGPoint(x: 150, y: 160))])
+        #expect(up(&m, at: CGPoint(x: 150, y: 160)) == [.endDrag(drop: CGPoint(x: 150, y: 160))])
+    }
+
+    @Test func aPinchTakesTheStagedTileBack() {
+        var m = M()
+        _ = down(&m, target: .stagedTile(cell: cell, letter: "s"), context: M.Context(boardLocked: true))
+        #expect(m.handle(.pinchBegan) == [.endDrag(drop: nil)])
+        #expect(m.state == .idle)
+    }
+
     // MARK: Board tiles (ui.md §3.4, 3.6, 3.7)
 
     @Test func boardTileTapSelects() {

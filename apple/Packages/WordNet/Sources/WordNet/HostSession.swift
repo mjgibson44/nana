@@ -131,6 +131,13 @@ public final class HostSession {
     /// The host is the only one whose reading counts.
     private var occupyStartedAt: Date?
     private var occupyLastWordAt: Date?
+    /// The seed of the game in progress, which also rolls where each zone
+    /// goes.
+    private var occupySeed: String?
+    /// How many zone slots the clock has handed out. A slot that found
+    /// nowhere to go is skipped rather than retried, so a crowded board
+    /// can't pile zones up later.
+    private var occupyZoneSlots = 0
 
     /// Write-once elimination stamps, monotonic per game (spec §2).
     private var outCounter = 0
@@ -437,6 +444,24 @@ public final class HostSession {
         }
     }
 
+    /// Put down every zone the clock has made due. Where each goes is rolled
+    /// off the game's seed and the slot's number, so a replayed game grows
+    /// the same zones in the same places.
+    private func spawnOccupyZones(elapsed: TimeInterval) -> Bool {
+        guard var occupy = state.occupy else { return false }
+        var spawned = false
+        while occupyZoneSlots < occupyZonesDue(elapsed: elapsed) {
+            let slot = occupyZoneSlots
+            occupyZoneSlots += 1
+            let roll = seededRng("\(occupySeed ?? "")/zones/\(slot)")
+            guard let zone = occupySpawnZone(occupy, rng: roll) else { continue }
+            occupy.zones.append(zone)
+            spawned = true
+        }
+        if spawned { state.occupy = occupy }
+        return spawned
+    }
+
     // MARK: Host controls
 
     /// Deal a fresh game to everyone present. Anyone disconnected or counted
@@ -464,9 +489,11 @@ public final class HostSession {
             // Seats are dealt in roster order, so the host is always seat 0
             // and the second player sits diagonal from it.
             let seats = state.players.map(\.id)
-            state.occupy = OccupyState(size: occupyBoardSize(players: seats.count), seats: seats)
+            state.occupy = OccupyState(seats: seats)
             occupyStartedAt = now
             occupyLastWordAt = now
+            occupySeed = seed
+            occupyZoneSlots = 0
         } else {
             state.occupy = nil
         }
@@ -504,6 +531,7 @@ public final class HostSession {
         state.occupy = nil
         occupyStartedAt = nil
         occupyLastWordAt = nil
+        occupySeed = nil
 
         if let data = Wire.encode(HostMessage.stop) {
             transport.broadcast(data)
@@ -582,16 +610,20 @@ public final class HostSession {
             announceHost(to: due)
         }
 
-        // Occupy's two clocks, read by the referee alone.
-        if state.phase == .playing, let occupy = state.occupy, occupy.end == nil,
-            let startedAt = occupyStartedAt, let lastWordAt = occupyLastWordAt,
-            let end = occupyEnd(
-                elapsed: now.timeIntervalSince(startedAt),
-                sinceLastWord: now.timeIntervalSince(lastWordAt),
-                players: occupy.seats.count)
-        {
-            finishOccupy(end)
-            changed = true
+        // Occupy's clocks, read by the referee alone: the zones it's time
+        // to put down, and the two ways time can end the game.
+        if state.phase == .playing, state.occupy?.end == nil, let startedAt = occupyStartedAt {
+            let elapsed = now.timeIntervalSince(startedAt)
+            if spawnOccupyZones(elapsed: elapsed) {
+                changed = true
+            }
+            if let lastWordAt = occupyLastWordAt,
+                let end = occupyEnd(
+                    elapsed: elapsed, sinceLastWord: now.timeIntervalSince(lastWordAt))
+            {
+                finishOccupy(end)
+                changed = true
+            }
         }
 
         if changed {

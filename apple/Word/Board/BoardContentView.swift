@@ -12,6 +12,12 @@ struct BoardScene {
     /// Whether those letters spell a word. False ghosts them in red, so the
     /// opener answers on the board as well as in the word row.
     var previewIsGood = true
+    /// Tiles dragged onto the board and not yet confirmed: the player's own,
+    /// sitting where they were dropped, waiting on the ✓.
+    var staged: [CellKey: String] = [:]
+    /// Whether the staged tiles would land as they stand. False draws them
+    /// red — the same answer the word row gives.
+    var stagedIsGood = true
     /// The word being held over a board letter by press-and-hold, drawn
     /// solid over everything: every cell it would occupy, borrowed letter
     /// included. Nil when nothing is being aimed.
@@ -25,6 +31,9 @@ struct BoardScene {
     /// with no owner wears the word green.
     var owners: [CellKey: Int] = [:]
     var viewerSeat: Int? = nil
+    /// Occupy's zones, in this seat's frame: the patches where a tile is
+    /// worth double.
+    var zones: [OccupyZone] = []
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -38,20 +47,47 @@ struct BoardContentView: View {
         let metrics = scene.metrics
         ZStack(alignment: .topLeading) {
             // The empty lattice: rounded cell fills over the board background,
-            // the gaps between them reading as hairlines.
+            // the gaps between them reading as hairlines — and, in Occupy,
+            // the zones: their squares a shade lighter, an edge round each
+            // patch, and "2×" on the middle square, all under the tiles.
             Canvas { context, _ in
                 let cell = metrics.cellSize
                 let step = metrics.step
                 let radius = Self.cornerRadius(for: cell)
+                let bounds = metrics.bounds
+                let zoneCells: Set<Cell> =
+                    scene.zones.isEmpty ? [] : Set(scene.zones.flatMap(\.cells))
                 for row in 0..<metrics.rows {
                     for col in 0..<metrics.cols {
                         let rect = CGRect(
                             x: Double(col) * step, y: Double(row) * step,
                             width: cell, height: cell)
+                        let inZone =
+                            !zoneCells.isEmpty
+                            && zoneCells.contains(
+                                Cell(row: bounds.minRow + row, col: bounds.minCol + col))
                         context.fill(
                             Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
-                            with: .color(Palette.surface))
+                            with: .color(inZone ? Palette.zoneCell : Palette.surface))
                     }
+                }
+                for zone in scene.zones {
+                    let first = metrics.rect(of: zone.origin)
+                    let side = Double(OCCUPY_ZONE_SIZE) * step - CELL_HAIRLINE
+                    let edge = CGRect(x: first.minX, y: first.minY, width: side, height: side)
+                        .insetBy(dx: -CELL_HAIRLINE / 2, dy: -CELL_HAIRLINE / 2)
+                    context.stroke(
+                        Path(
+                            roundedRect: edge, cornerRadius: radius + CELL_HAIRLINE / 2,
+                            style: .continuous),
+                        with: .color(Palette.zoneEdge),
+                        lineWidth: Self.zoneEdgeWidth(for: cell))
+                    let middle = metrics.rect(of: zone.centre)
+                    context.draw(
+                        Text("2×")
+                            .font(.system(size: cell * 0.5, weight: .bold))
+                            .foregroundStyle(Palette.zoneEdge),
+                        at: CGPoint(x: middle.midX, y: middle.midY))
                 }
             }
 
@@ -84,6 +120,22 @@ struct BoardContentView: View {
                 }
             }
 
+            // Tiles dropped on the board and not yet confirmed: drawn like
+            // the opener's ghost, because that is what they are — letters
+            // the ✓ will land — and green or red by the same rule.
+            ForEach(Array(scene.staged.keys.sorted()), id: \.self) { key in
+                let rect = metrics.rect(of: parseKey(key))
+                PreviewTileView(
+                    letter: scene.staged[key], isGood: scene.stagedIsGood,
+                    cellSize: metrics.cellSize)
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                    .accessibilityElement()
+                    .accessibilityLabel(
+                        "\(scene.staged[key]?.uppercased() ?? ""), not yet placed, tap to take back")
+                    .accessibilityAddTraits(.isButton)
+            }
+
             // The aimed word, drawn solid and over the placed tiles: the
             // borrowed letter is part of the word being aimed, so it has to
             // change colour with the rest of it.
@@ -107,6 +159,11 @@ struct BoardContentView: View {
         max(2, cellSize * 0.1)
     }
 
+    /// A zone's edge: thin, but never so thin it vanishes zoomed out.
+    static func zoneEdgeWidth(for cellSize: Double) -> Double {
+        max(1.5, cellSize * 0.06)
+    }
+
     /// What a placed tile says out loud: its letter, where it sits, and the
     /// words it reads in.
     static func tileLabel(for key: CellKey, in scene: BoardScene, letter: String) -> String {
@@ -119,6 +176,9 @@ struct BoardContentView: View {
         }
         if let owner = scene.owners[key] {
             parts.append(owner == scene.viewerSeat ? "yours" : "a rival’s")
+        }
+        if scene.zones.contains(where: { $0.contains(cell) }) {
+            parts.append("worth double")
         }
         parts.append("tap to place your word through it")
         return parts.joined(separator: ", ")

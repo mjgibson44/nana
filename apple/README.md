@@ -40,6 +40,16 @@ dark UI. The rules, in one breath:
   from letter to letter; letting go lands a green word. A red one stays up for a second
   — long enough to read what you spelled — and is then taken back with the reason
   ("XYZZY isn’t a real word"), the word still in the row, ready to fix.
+- **Or build the word on the board.** Drag a tile out of the pile onto a square and it
+  waits there, ghosted like the opener's preview, its slot in the pile empty; drag more
+  beside it, tap one to take it back, drag it to another square, or drop it back on the
+  pile. The ✓ lands them all as one word (`GameModel.confirmStaged`), under the same
+  rules the row plays by — one line, no holes, joined to a letter already down (or the
+  first word, on its start square), every run a real word — checked after the fact by
+  `WordCore.judgeStaged`, since dropping tiles puts the word somewhere before it says
+  what it is. The ghosts turn red when what they spell isn't a word, and a ✓ that can't
+  land says why. While tiles are on the board the row can't land anything: confirm or
+  clear them first.
 - **Words are permanent.** Nothing on the board moves, turns, comes back off, or undoes —
   so only real words are allowed down, in Solo as much as in Battle.
 - **The pile is the only pressure.** Reach `PILE_LIMIT` (24) tiles in hand and the game
@@ -66,13 +76,15 @@ menu, and speed is no longer in it: a Solo game's pace is chosen on the way in
 (`Screens/SoloSetupScreen.swift`), because picking it from the menu silently threw the
 game away and dealt another.
 
-Retired with it: undo/redo, dragging tiles, the selected-word controls, the loose-tile
-deadline, the Daily Deal, the tutorial, the stats and settings pages, and — since the
-redesign owns every corner of the screen — Game Center's floating access point and the
-achievement set behind it. Sound and
+Retired with it: undo/redo, the selected-word controls, the loose-tile deadline, the
+Daily Deal, the tutorial, the stats and settings pages, and — since the redesign owns
+every corner of the screen — Game Center's floating access point and the achievement set
+behind it. (Dragging tiles onto the board came back afterwards, as a way of building a
+word rather than the web's loose tiles: what's dropped is judged and landed by the ✓.) Sound and
 haptics stay on unless a stored preference says otherwise. Battle keeps its lobby,
 codes and invites; its header shows the player's placing ("1st") instead of a score, and
-the results screen carries the standings and the player's words.
+the results screen carries the standings and the player's words — straight under the
+buttons, on the first screenful, rather than a scroll below them.
 
 Every screen is built from the same pieces (`Screens/TileText.swift`): words spelled in
 tiles, one margin round the outside, one gap between sections, one gap between tiles.
@@ -83,8 +95,8 @@ launch environment opens straight onto a game so a simulator can be screenshotte
 | Package / target | What it is |
 |---|---|
 | `Packages/WordCore` | The game core in pure Swift — **bit-exact with the web game** via golden fixtures generated from the TypeScript core (`npm run gen:fixtures`), so the same seed deals the same letters on both platforms. |
-| `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold — to drag, or to aim a gapped word through a placed letter — locked-board semantics, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
-| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, the v7 Occupy board and its placement round trip, and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
+| `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold — to drag, or to aim a gapped word through a placed letter — locked-board semantics, staged tiles that lift on any board, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
+| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, the v7 Occupy board and its placement round trip (v9: unbounded, with zones), and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
 | `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for placed cells, one gesture pipeline for board taps and pans, the word-building loop, the paced Solo session, the battle session and its results, the tile-lettered home and battle screens, synthesized audio + haptics, and save/restore across process death. `Board/BoardInputBridge.swift` is the one place that reaches past SwiftUI into UIKit/AppKit, for the three things SwiftUI won't report: the live pinch midpoint, the pointer's actual device kind, and Mac scroll wheels. |
 
 ```bash
@@ -171,24 +183,31 @@ actually play:
 
 ### Occupy
 
-The third door: two to four players on **one fixed, shared board**, each opening from
-the centre of their own quadrant (two players sit diagonal), fighting over the same
-squares until the clock runs out. The rules are pure Swift in `WordCore/Occupy.swift`,
-and the whole thing is designed around one function, `occupyApply`, which the host runs
-as the referee and every client runs on its own words — so what a player sees the
-instant they let go and what the host decides can only differ about a square someone
-else reached first.
+The third door: two to four players on **one shared board**, each opening from their own
+corner of the middle ground (two players sit diagonal), fighting over the same squares
+until the clock runs out. The rules are pure Swift in `WordCore/Occupy.swift`, and the
+whole thing is designed around one function, `occupyApply`, which the host runs as the
+referee and every client runs on its own words — so what a player sees the instant they
+let go and what the host decides can only differ about a square someone else reached
+first.
 
-- **The board** is fifteen square for two players (Scrabble's, and it fits a phone's
-  width whole) and nineteen for three or four (Go's). It never grows. **Every seat sees
-  it turned so its own start square is top-left** (`occupyRotation`, quarter turns of the
-  host's board), so everyone opens from their top-left and writes left to right, toward
-  the middle. The host, the wire and the client's own copy stay in the host's frame; only
-  what is drawn and typed on is turned (`GameModel.refreshOccupyView`), and a word is
-  turned back before it's judged, kept or sent (`commitOccupy`). Letters are always drawn
-  upright, so a rival's words read backwards on your screen — like a Scrabble board seen
-  from across the table — and a run counts as a word if it reads as one in **either
-  direction** along its line (`occupyIsWord`), on the client and the referee alike.
+- **The board has no edge.** It is laid out in the solo board's own square
+  (`OCCUPY_FRAME`, 33) and grows past it exactly as a solo board does; the frame only
+  fixes where the start squares are and what the board turns about. Two players open
+  eight cells apart on the diagonal either side of the middle, three or four ten
+  (`occupyStartCell`, `occupyStartSpread`) — the same distances the old fixed boards
+  had — and the opening view is centred on the middle with every seat's corner in it
+  (`BoardCamera.Opening.centred`). **Every seat sees the board turned so its own start
+  square is top-left of the middle** (`occupyRotation`, quarter turns of the host's board
+  about the frame's centre — the formulas are linear, so a cell past the frame turns as
+  well as one inside it), so everyone opens from their top-left and writes left to
+  right, toward the middle. The host, the wire and the client's own copy stay in the
+  host's frame; only what is drawn and typed on is turned
+  (`GameModel.refreshOccupyView`), and a word is turned back before it's judged, kept or
+  sent (`commitOccupy`). Letters are always drawn upright, so a rival's words read
+  backwards on your screen — like a Scrabble board seen from across the table — and a
+  run counts as a word if it reads as one in **either direction** along its line
+  (`occupyIsWord`), on the client and the referee alike.
 - **Capture by crossing.** Every later word borrows a letter through a gap tile, exactly
   as everywhere else — and the borrowed letter flips to the borrower's colour. A letter
   already in both an across and a down word has no free direction, so crossing your own
@@ -198,19 +217,34 @@ else reached first.
   spamming short words loses to building long ones, and a capture carries the tile's
   value with it. The header shows your value; under it, the pile gauge is replaced by a
   **balanced bar** of everyone's share (`OccupyBarView`), you first in green, each rival
-  in their own colour (`SeatColors`), the same colour their tiles wear on the board.
+  in their own colour (`SeatColors`), the same colour their tiles wear on the board —
+  with **everyone's name and points under the bar** in the same colours, so the bar says
+  who's ahead and the numbers say by how much.
+- **Zones.** Now and then a **three-by-three zone** appears where every tile is worth
+  **double** (`OccupyZone`, `OCCUPY_ZONE_MULTIPLIER`): the first as the opening grace
+  ends, then one every `OCCUPY_ZONE_INTERVAL_SECONDS` (75 s) — eight or so a game. The
+  host places them (`HostSession.spawnOccupyZones`, off the game's seed so a replay grows
+  the same ones) on empty ground within `OCCUPY_ZONE_REACH` (5) of a letter already
+  down or of a start square nobody has opened from yet, clear of every start square and
+  every other zone (`occupyZoneCandidates`); a slot that finds nowhere is skipped, not
+  saved up. They ride the snapshot (`OccupyState.zones`) and are permanent: the bonus
+  stays with whatever lands there, capture included. On the board a zone's squares are a
+  shade lighter than the lattice, with an edge round the patch and "2×" on its middle
+  square, all drawn under the tiles (`BoardContentView`); a new one is announced with a
+  banner.
 - **The pile** is dealt to `OCCUPY_HAND` (24) and refilled after every word — grown off
   the shared board as it stands, so every letter has a known way on — and never buries
   anyone.
-- **The end.** Three minutes head-to-head, four on the big board; or early, once nobody
-  has placed a word for a full minute — with a thirty-second opening grace during which
-  the stall clock doesn't run. The header turns the last twenty seconds of a stall into a
-  visible countdown. Most value wins; ties go to quadrants held (whoever owns more tiles
-  in a quadrant), then to whoever reached their score first. A player who leaves ranks
-  last whatever they own.
+- **The end.** Ten minutes (`OCCUPY_SECONDS`), whatever the size of the field; or early,
+  once nobody has placed a word for a full minute — with a thirty-second opening grace
+  during which the stall clock doesn't run. The header turns the last twenty seconds of a
+  stall into a visible countdown. Most value wins; ties go to quadrants held (whoever
+  owns more tiles in a quadrant of the frame), then to whoever reached their score first.
+  A player who leaves ranks last whatever they own.
 
-Over the wire it's protocol **v7**: a client sends `place` (the new tiles and the
-borrowed squares — the outcome, not the picks), the host judges it against its board and
+Over the wire it's protocol **v7**, reshaped in **v9** (the frame in place of a size,
+and the zones in the snapshot): a client sends `place` (the new tiles and the borrowed
+squares — the outcome, not the picks), the host judges it against its board and
 dictionary, broadcasts the whole board in the next `state`, and only *then* answers the
 sender with `placed` — so a word a player has already been shown is never taken back for
 the instant between the answer and the board that agrees with it. A `refused` takes the
@@ -240,7 +274,7 @@ the same two on Occupy's:
   is the whole of the pooling: a stable hash of
   `timetiles/<battle|occupy>/<duel|party>/v<PROTOCOL_VERSION>` (`MatchPool`), so a
   Battle never meets an Occupy game, a duel never meets a party and — with no sandbox —
-  a newer build never meets an older one.
+  a newer build never meets an older one (protocol is v9 as of the Occupy reshape).
 - **Nobody opened the room, so nobody is its host.** Everyone enters as a client; if no
   `host` announcement arrives within a two-second claim window, the lowest
   `gamePlayerID` stands up a host session in its client's place

@@ -34,6 +34,8 @@ import WordCore
 ///  - a locked (battle) board keeps taps but loses tile drags, selection and
 ///    double-press — and, with a gapped word staged, a press on one of its
 ///    letters forks: release lands the word, hold aims it;
+///  - a tile dragged onto the board and not yet confirmed (`stagedTile`) is
+///    the player's own, and lifts again on any board;
 ///  - every gesture is keyed to the pointer that started it — a second
 ///    finger can't hijack it — and a pinch cancels pans, not tile drags.
 public struct GestureMachine {
@@ -50,6 +52,9 @@ public struct GestureMachine {
     public enum DownTarget: Equatable {
         case rackTile(index: Int, letter: String)
         case boardTile(cell: Cell, letter: String)
+        /// A tile the player dragged onto the board and hasn't confirmed:
+        /// theirs to pick straight back up, locked board or not.
+        case stagedTile(cell: Cell, letter: String)
         /// Board background: an empty cell, or the gutter around the grid.
         case boardEmpty(cell: Cell?)
     }
@@ -243,6 +248,12 @@ public struct GestureMachine {
                 return [.doubleTapBoardTile(cell)]
             }
             lastBoardTilePress = (cell, time)
+            state = .tileDrag(id: id, start: location, source: .board(cell: cell, letter: letter))
+            return [.beginDrag(source: .board(cell: cell, letter: letter), at: location)]
+
+        case let .stagedTile(cell, letter):
+            // Not yet part of the board, so none of the board's rules apply:
+            // it lifts like a pile tile, and a tap on it is a tap on it.
             state = .tileDrag(id: id, start: location, source: .board(cell: cell, letter: letter))
             return [.beginDrag(source: .board(cell: cell, letter: letter), at: location)]
 

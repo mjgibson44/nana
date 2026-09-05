@@ -34,6 +34,9 @@ struct GameScreen: View {
     /// The column's inner width, which sizes the tiles: eight of them and
     /// the shuffle button across, always.
     @State private var columnWidth: CGFloat = 358
+    /// Where the pile is, in the game's coordinate space: a tile dropped
+    /// back here goes home.
+    @State private var pileFrame: CGRect = .zero
     @FocusState private var gameFocused: Bool
     @Environment(\.snapshotRendering) private var snapshotRendering
     #if os(iOS)
@@ -80,6 +83,12 @@ struct GameScreen: View {
             .frame(maxWidth: Spacing.maxWidth)
             .padding(Spacing.margin)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // The tile in the hand rides above everything.
+            if let drag = model.drag {
+                GhostTileView(letter: drag.letter, size: tileSize)
+                    .position(drag.location)
+            }
 
             if let splash = model.splash {
                 SplashView(splash: splash, pace: model.pace) {
@@ -171,9 +180,14 @@ struct GameScreen: View {
             camera.autoFit(box: box)
         }
         .onChange(of: model.gameSerial, initial: true) {
-            // A fixed board is shown whole; a growing one opens on its start
-            // square with room for a long opener.
-            camera.newGame(bounds: model.bounds, anchor: model.startCell, fitWhole: model.isOccupy)
+            // A shared board opens centred on its middle ground, every seat's
+            // corner in view; a solo one on its start square, with room for
+            // a long opener.
+            if model.isOccupy {
+                camera.newGame(bounds: model.bounds, anchor: model.boardCentre, opening: .centred)
+            } else {
+                camera.newGame(bounds: model.bounds, anchor: model.startCell, opening: .opener)
+            }
         }
         #if os(iOS)
         .onChange(of: sizeClass, initial: true) { _, sizeClass in
@@ -298,11 +312,18 @@ struct GameScreen: View {
 
     private func openMenu() {
         // The board must not be mid-gesture behind a modal.
+        settleGestures()
+        menuOpen = true
+    }
+
+    /// Nothing mid-gesture survives a modal or a new deal: the hold timer,
+    /// the machine, an aimed word and a tile in the hand all let go.
+    private func settleGestures() {
         holdTask?.cancel()
         holdTask = nil
         machine = GestureMachine()
         model.clearAim()
-        menuOpen = true
+        model.endDrag()
     }
 
     private func closeMenu() {
@@ -375,16 +396,20 @@ struct GameScreen: View {
             tiles: model.board.entries.map { (key: $0.key, letter: $0.value) },
             preview: model.preview,
             previewIsGood: model.wordVerdict != .bad,
+            staged: model.stagedLetters,
+            stagedIsGood: model.stagedVerdict != .bad,
             aim: model.aim?.cells,
             aimIsGood: model.aim?.isGood ?? true,
             wordsAt: model.wordsByCell.mapValues { $0.map(\.word) },
             owners: model.owners,
-            viewerSeat: model.occupySeat)
+            viewerSeat: model.occupySeat,
+            zones: model.occupyZones)
     }
 
-    /// Placed words are permanent in every mode, and nothing is ever picked
-    /// up off the board: the machine needs taps, pans, and — with a gapped
-    /// word in hand — the press-and-hold that aims it through a letter.
+    /// Placed words are permanent in every mode, and nothing placed is ever
+    /// picked up off the board: the machine needs taps, pans, and — with a
+    /// gapped word in hand — the press-and-hold that aims it through a
+    /// letter. Staged tiles are their own target, and lift regardless.
     private var machineContext: GestureMachine.Context {
         GestureMachine.Context(
             boardLocked: true,
@@ -396,10 +421,23 @@ struct GameScreen: View {
     /// The press-time hit-test, as coordinate math.
     private func boardTarget(at point: CGPoint) -> GestureMachine.DownTarget? {
         guard let cell = camera.cell(atGame: point) else { return .boardEmpty(cell: nil) }
-        if let letter = model.board[keyOf(cell.row, cell.col)] {
+        let key = keyOf(cell.row, cell.col)
+        if let letter = model.stagedLetters[key] {
+            return .stagedTile(cell: cell, letter: letter)
+        }
+        if let letter = model.board[key] {
             return .boardTile(cell: cell, letter: letter)
         }
         return .boardEmpty(cell: cell)
+    }
+
+    /// Where a dragged tile was let go — the port of the web's
+    /// `elementFromPoint` + `[data-rack]` contract: anywhere on the pile
+    /// returns the tile; a board square stages it there.
+    private func dropRegion(at point: CGPoint) -> GameModel.DropRegion {
+        if pileFrame.contains(point) { return .pile }
+        if let cell = camera.cell(atGame: point) { return .cell(cell) }
+        return .none
     }
 
     /// The board letter under a point, if there is one.
@@ -450,6 +488,20 @@ struct GameScreen: View {
             case let .tapBoardTile(cell):
                 model.selectTile(keyOf(cell.row, cell.col))
                 focusGame()
+            case let .tapRackTile(index):
+                model.togglePick(index)
+                focusGame()
+            case let .beginDrag(source, at):
+                model.beginDrag(source, at: at)
+            case let .dragMoved(point):
+                model.dragMoved(to: point)
+            case let .endDrag(drop):
+                if let drop {
+                    model.applyDrop(dropRegion(at: drop))
+                } else {
+                    model.endDrag()
+                }
+                focusGame()
             case .beginPan:
                 break
             case let .panBy(delta):
@@ -475,11 +527,10 @@ struct GameScreen: View {
                 focusGame()
             case .cancelPreviewDrag:
                 model.clearAim()
-            case .tapBoardCell, .doubleTapBoardTile, .tapRackTile,
-                .beginDrag, .dragMoved, .endDrag:
-                // Nothing lands by tapping empty board, nothing is dragged,
-                // and the pile has no pointer surface: none of these can
-                // happen with the context above, and none mean anything now.
+            case .tapBoardCell, .doubleTapBoardTile:
+                // Nothing lands by tapping empty board, and a placed tile
+                // never comes back off: neither can happen with the context
+                // above, and neither means anything now.
                 break
             }
         }
@@ -492,16 +543,24 @@ struct GameScreen: View {
     private var pile: some View {
         HStack(alignment: .top, spacing: Spacing.gap) {
             PileView(
-                letters: model.rack, picked: Set(model.picks), tileSize: tileSize
-            ) { index in
-                model.togglePick(index)
-                focusGame()
-            }
+                letters: model.rack, picked: Set(model.picks), staged: model.stagedIndices,
+                hidden: model.hiddenRackIndex, tileSize: tileSize,
+                onTap: { index in
+                    model.togglePick(index)
+                    focusGame()
+                },
+                dispatch: dispatch, context: { machineContext }
+            )
             .frame(width: Spacing.pileWidth(tileSize: tileSize))
             PileShuffleButton(height: pileHeight, disabled: !model.canShuffle) {
                 model.shufflePile()
                 focusGame()
             }
+        }
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named(Self.space))
+        } action: { frame in
+            pileFrame = frame
         }
     }
 
@@ -519,14 +578,16 @@ struct GameScreen: View {
                 model.clearWord()
                 focusGame()
             }
-            if model.isFirstWord {
-                // The opener is the one word placed by fiat: confirm takes the
-                // gap button's place until it's down.
+            if model.isFirstWord || model.hasStaged {
+                // The opener is the one word placed by fiat, and tiles dropped
+                // on the board wait for the same ✓: it takes the gap button's
+                // place whenever there is something for it to land.
                 ActionButton(
-                    systemImage: "checkmark", label: "Place your first word",
+                    systemImage: "checkmark",
+                    label: model.hasStaged ? "Place the tiles on the board" : "Place your first word",
                     accent: true, disabled: !model.canConfirm
                 ) {
-                    model.confirmFirstWord()
+                    model.confirm()
                     focusGame()
                 }
             } else {
@@ -657,20 +718,14 @@ struct GameScreen: View {
     }
 
     private func pauseGame() {
-        holdTask?.cancel()
-        holdTask = nil
-        machine = GestureMachine()
-        model.clearAim()
+        settleGestures()
         model.pause(at: .now)
     }
 
     private func startNewGame(pace: SoloPace) {
         let now = Date.now
         clockNow = now
-        holdTask?.cancel()
-        holdTask = nil
-        machine = GestureMachine()
-        model.clearAim()
+        settleGestures()
         if let onNewGame {
             onNewGame(pace)
         } else {
