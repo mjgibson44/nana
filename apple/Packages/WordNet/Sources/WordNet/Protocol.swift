@@ -4,7 +4,7 @@ import WordCore
 /// The wire protocol, ported from `src/net/battleSession.ts` (spec:
 /// `docs/apple-port-notes/protocol.md` §1).
 ///
-/// **Version 8.** Three steps up from the web's 5:
+/// **Version 9.** Four steps up from the web's 5:
 ///
 ///  - v6 added `host`. On the web the join code *is* the host's address, so a
 ///    client always knows whom to `hello`. A GKMatch formed from a party code
@@ -17,11 +17,14 @@ import WordCore
 ///  - v8 added `countdown` to the `state` snapshot: a random match deals
 ///    itself once everyone is here, and the seconds left ride the snapshot
 ///    every screen already shows rather than a message of their own.
+///  - v9 reshaped Occupy: the board is unbounded and laid out in a frame
+///    (`OccupyState.frame`, in place of `size`), the clock is ten minutes,
+///    and the bonus zones ride the snapshot (`OccupyState.zones`).
 ///
 /// The version gate is load-bearing rather than ceremonial: there has been no
 /// Game Center sandbox since 2016 (TN2417), so a prerelease build can and will
 /// meet a released one.
-public let PROTOCOL_VERSION = 8
+public let PROTOCOL_VERSION = 9
 
 /// Who a message is from or to. Maps to `GKPlayer.gamePlayerID` — the stable
 /// per-game identity that replaces the web's sessionStorage `playerKey`.

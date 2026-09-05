@@ -47,9 +47,10 @@ struct WireProtocolTests {
                 BattleState(
                     phase: .playing, players: [], game: 1, winnerId: nil, mode: .occupy,
                     occupy: OccupyState(
-                        size: 15, seats: ["a", "b"], board: TileMap([("3,3", "c")]),
+                        seats: ["a", "b"], board: TileMap([("3,3", "c")]),
                         owners: ["3,3": 0], opened: [true, false], scores: [1, 0],
-                        settledAt: [5, 0], end: .stall))),
+                        settledAt: [5, 0], zones: [OccupyZone(centre: Cell(row: 8, col: 9))],
+                        end: .stall))),
         ]
         for message in messages {
             let data = try #require(Wire.encode(message))
@@ -95,9 +96,10 @@ struct WireProtocolTests {
         #expect(state.players.map(\.id) == ["a"])
     }
 
-    @Test func versionIsEightForTheCountdown() {
+    @Test func versionIsNineForTheOccupyReshape() {
         // v5 was the web's; v6 added the host announcement (plan §7.2); v7
-        // Occupy; v8 put the countdown in the snapshot.
-        #expect(PROTOCOL_VERSION == 8)
+        // Occupy; v8 put the countdown in the snapshot; v9 unbounded the
+        // Occupy board, made it ten minutes, and put the zones in the snapshot.
+        #expect(PROTOCOL_VERSION == 9)
     }
 }

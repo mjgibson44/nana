@@ -27,11 +27,19 @@ final class BoardCamera {
     var cellBase: Double = CELL_BASE_REGULAR
     private(set) var bounds = boardBounds(TileMap())
 
+    /// How a fresh board is first shown.
+    enum Opening: Equatable {
+        /// The anchor parked near the left edge, with room to its right for
+        /// a long opener.
+        case opener
+        /// The anchor in the middle of the viewport: a shared board's middle
+        /// ground, with every seat's corner of it in view.
+        case centred
+    }
+
     /// The start square, for the opening view.
     private var anchor = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2)
-    /// A fixed board opens showing all of it, rather than parked on the
-    /// start square.
-    private var fitWhole = false
+    private var opening: Opening = .opener
     /// A new game asked for the opening view before the viewport had a size.
     private var homePending = true
 
@@ -79,29 +87,18 @@ final class BoardCamera {
         }
     }
 
-    /// A fresh board: zoomed out far enough for a long opener, with the start
-    /// square parked near the left edge and centred vertically — or, for a
-    /// board that never grows, the whole of it centred on screen.
+    /// A fresh board: zoomed out far enough for a long opener, with the
+    /// anchor parked near the left edge and centred vertically — or, on a
+    /// shared board, in the middle of the screen.
     func newGame(
         bounds: Bounds, anchor: Cell = Cell(row: BOARD_SIZE / 2, col: BOARD_SIZE / 2),
-        fitWhole: Bool = false
+        opening: Opening = .opener
     ) {
         self.bounds = bounds
         self.anchor = anchor
-        self.fitWhole = fitWhole
+        self.opening = opening
         homePending = true
         goHome()
-    }
-
-    /// The zoom that fits the whole board in the viewport, within the pinch
-    /// limits: a fifteen-wide board fits a phone; a nineteen needs a pinch.
-    var wholeBoardZoom: Double {
-        guard viewport.width > 0, viewport.height > 0 else { return 1 }
-        let cols = Double(bounds.maxCol - bounds.minCol + 1)
-        let rows = Double(bounds.maxRow - bounds.minRow + 1)
-        let fitAcross = (viewport.width / cols - CELL_HAIRLINE) / cellBase
-        let fitDown = (viewport.height / rows - CELL_HAIRLINE) / cellBase
-        return min(AUTO_ZOOM_MAX, max(MIN_ZOOM, min(fitAcross, fitDown)))
     }
 
     /// The zoom that fits `openingColumns` across the viewport — never past
@@ -115,17 +112,18 @@ final class BoardCamera {
     private func goHome() {
         guard viewport != .zero else { return }
         homePending = false
-        if fitWhole {
-            zoom = wholeBoardZoom
-            offset = centeredOffset(contentSize: metrics.contentSize, viewport: viewport)
-            return
-        }
         zoom = openingZoom
         let rect = metrics.rect(of: anchor)
-        offset = clamped(
-            CGPoint(
-                x: rect.minX - Double(Self.openingInset) * metrics.step,
-                y: rect.midY - viewport.height / 2))
+        switch opening {
+        case .opener:
+            offset = clamped(
+                CGPoint(
+                    x: rect.minX - Double(Self.openingInset) * metrics.step,
+                    y: rect.midY - viewport.height / 2))
+        case .centred:
+            offset = clamped(
+                CGPoint(x: rect.midX - viewport.width / 2, y: rect.midY - viewport.height / 2))
+        }
     }
 
     /// The board grew. Prepended rows/cols get the same-update scroll nudge

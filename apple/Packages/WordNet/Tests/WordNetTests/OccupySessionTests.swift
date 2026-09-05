@@ -108,12 +108,13 @@ final class OccupyLobby {
         host.state.players.first { $0.id == id }
     }
 
-    /// A two-player game with the host's opener down: CAT across from (3,3).
+    /// A two-player game with the host's opener down: CAT across from its
+    /// start square, (12,12).
     static func opened() -> OccupyLobby {
         let lobby = OccupyLobby()
         lobby.addClient("ann")
         lobby.host.start()
-        lobby.host.placeSelf(serial: 1, placement: across("cat", from: Cell(row: 3, col: 3)))
+        lobby.host.placeSelf(serial: 1, placement: across("cat", from: Cell(row: 12, col: 12)))
         return lobby
     }
 }
@@ -135,20 +136,23 @@ struct OccupyDealTests {
         lobby.host.start()
 
         let occupy = try? #require(lobby.occupy)
-        #expect(occupy?.size == OCCUPY_SMALL_BOARD)
+        #expect(occupy?.frame == OCCUPY_FRAME)
         #expect(occupy?.seats == ["host", "ann"])
         #expect(occupy?.board.isEmpty == true)
+        #expect(occupy?.zones.isEmpty == true, "no zones until the grace ends")
         #expect(ann.state?.occupy == occupy, "the client holds the same board")
     }
 
-    @Test func fourPlayersGetTheBiggerBoard() {
+    @Test func fourPlayersShareTheSameFrameFurtherApart() {
         let lobby = OccupyLobby()
         lobby.addClient("ann")
         lobby.addClient("bea")
         lobby.addClient("cal")
         lobby.host.start()
-        #expect(lobby.occupy?.size == OCCUPY_LARGE_BOARD)
+        #expect(lobby.occupy?.frame == OCCUPY_FRAME)
         #expect(lobby.occupy?.seats.count == 4)
+        #expect(lobby.occupy?.startCell(seat: 0) == Cell(row: 11, col: 11))
+        #expect(lobby.occupy?.startCell(seat: 3) == Cell(row: 21, col: 11))
     }
 
     @Test func theFifthPlayerIsTurnedAway() {
@@ -184,10 +188,10 @@ struct OccupyPlacementTests {
         let ann = lobby.addClient("ann")
         lobby.host.start()
 
-        lobby.host.placeSelf(serial: 1, placement: across("cat", from: Cell(row: 3, col: 3)))
+        lobby.host.placeSelf(serial: 1, placement: across("cat", from: Cell(row: 12, col: 12)))
 
         #expect(lobby.occupy?.board.count == 3)
-        #expect(lobby.occupy?.owners[keyOf(3, 3)] == 0)
+        #expect(lobby.occupy?.owners[keyOf(12, 12)] == 0)
         #expect(lobby.occupy?.scores == [9, 0])
         #expect(lobby.seat("host")?.score == 9, "the roster reads the board")
         #expect(ann.state?.occupy?.board.count == 3)
@@ -198,11 +202,11 @@ struct OccupyPlacementTests {
         let lobby = OccupyLobby.opened()
         let ann = lobby.clients["ann"]!
 
-        // TEA down through the T at (3,5), capturing it.
-        ann.sendPlacement(serial: 7, placement: down("tea", from: Cell(row: 3, col: 5), borrowing: [keyOf(3, 5)]))
+        // TEA down through the T at (12,14), capturing it.
+        ann.sendPlacement(serial: 7, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
 
         #expect(lobby.occupy?.board.count == 5)
-        #expect(lobby.occupy?.owners[keyOf(3, 5)] == 1, "captured")
+        #expect(lobby.occupy?.owners[keyOf(12, 14)] == 1, "captured")
         #expect(lobby.occupy?.scores == [6, 9])
         let heard = lobby.heard["ann"] ?? []
         #expect(heard.suffix(2) == ["state", "placed:7"], "the board first, then the answer")
@@ -214,9 +218,9 @@ struct OccupyPlacementTests {
         let ann = lobby.clients["ann"]!
         let before = lobby.occupy
 
-        // Ann's board didn't know (3,4) was taken.
-        var clash = down("tea", from: Cell(row: 3, col: 5), borrowing: [keyOf(3, 5)])
-        clash.tiles[keyOf(3, 4)] = "x"
+        // Ann's board didn't know (12,13) was taken.
+        var clash = down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)])
+        clash.tiles[keyOf(12, 13)] = "x"
         ann.sendPlacement(serial: 2, placement: clash)
 
         #expect(lobby.occupy == before, "nothing changed")
@@ -226,20 +230,20 @@ struct OccupyPlacementTests {
     @Test func aWordThatDoesntReadIsRefusedByName() {
         let lobby = OccupyLobby.opened()
         lobby.clients["ann"]?.sendPlacement(
-            serial: 3, placement: down("tzz", from: Cell(row: 3, col: 5), borrowing: [keyOf(3, 5)]))
+            serial: 3, placement: down("tzz", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
         #expect(lobby.heard["ann"]?.last == "refused:3:TZZ isn’t a word")
     }
 
     @Test func wordsOutsideAGameOrFromASpectatorAreRefused() {
         let lobby = OccupyLobby()
         let ann = lobby.addClient("ann")
-        ann.sendPlacement(serial: 1, placement: across("cat", from: Cell(row: 3, col: 3)))
+        ann.sendPlacement(serial: 1, placement: across("cat", from: Cell(row: 12, col: 12)))
         #expect(lobby.heard["ann"]?.last == "refused:1:You’re not in this game.")
 
         lobby.host.start()
         let bea = lobby.addClient("bea")
         #expect(lobby.seat("bea")?.waiting == true)
-        bea.sendPlacement(serial: 1, placement: across("cat", from: Cell(row: 3, col: 3)))
+        bea.sendPlacement(serial: 1, placement: across("cat", from: Cell(row: 12, col: 12)))
         #expect(lobby.heard["bea"]?.last == "refused:1:You’re not in this game.")
     }
 }
@@ -250,32 +254,36 @@ struct OccupyEndTests {
     @Test func theClockEndsItAndTheMostValueWins() {
         let lobby = OccupyLobby.opened()
         // Words keep landing — one every twenty-five seconds, each borrowing
-        // from the last — so the stall rule never gets a look in and the
-        // clock is what ends it.
-        let chain: [(PlayerID, OccupyPlacement)] = [
-            ("ann", down("tea", from: Cell(row: 3, col: 5), borrowing: [keyOf(3, 5)])),
-            ("host", across("art", from: Cell(row: 5, col: 5), borrowing: [keyOf(5, 5)])),
-            ("ann", down("rat", from: Cell(row: 5, col: 6), borrowing: [keyOf(5, 6)])),
-            ("host", across("tar", from: Cell(row: 7, col: 6), borrowing: [keyOf(7, 6)])),
-            ("ann", down("rest", from: Cell(row: 7, col: 8), borrowing: [keyOf(7, 8)])),
-            ("host", across("set", from: Cell(row: 9, col: 8), borrowing: [keyOf(9, 8)])),
-            ("ann", down("tea", from: Cell(row: 9, col: 10), borrowing: [keyOf(9, 10)])),
-        ]
+        // from the last, a staircase of TEA down and ART across that runs
+        // clean off the frame — so the stall rule never gets a look in and
+        // the clock is what ends it.
+        var cursor = Cell(row: 12, col: 14)  // the T of CAT
         var serial = 10
-        for (who, placement) in chain {
+        var words = 0
+        var elapsed = 0.0
+        while elapsed + 25 < Double(OCCUPY_SECONDS) {
             lobby.advance(25)
+            elapsed += 25
             serial += 1
-            if who == "host" {
-                lobby.host.placeSelf(serial: serial, placement: placement)
+            let borrowed = keyOf(cursor.row, cursor.col)
+            if words % 2 == 0 {
+                lobby.clients["ann"]?.sendPlacement(
+                    serial: serial, placement: down("tea", from: cursor, borrowing: [borrowed]))
+                cursor = Cell(row: cursor.row + 2, col: cursor.col)
             } else {
-                lobby.clients["ann"]?.sendPlacement(serial: serial, placement: placement)
+                lobby.host.placeSelf(
+                    serial: serial, placement: across("art", from: cursor, borrowing: [borrowed]))
+                cursor = Cell(row: cursor.row, col: cursor.col + 2)
             }
-            #expect(lobby.host.state.phase == .playing)
+            words += 1
+            #expect(lobby.host.state.phase == .playing, "\(elapsed)s in")
         }
-        #expect(lobby.occupy?.board.count == 3 + chain.reduce(0) { $0 + $1.1.tiles.count }, "every word landed")
+        #expect(lobby.occupy?.board.count == 3 + words * 2, "every word landed")
+        #expect(cursor.row > OCCUPY_FRAME || cursor.col > OCCUPY_FRAME, "and ran past the frame")
+        #expect(lobby.occupy?.zones.count == occupyZonesDue(elapsed: elapsed), "zones came as scheduled")
 
-        // 175 seconds in: four more and it's still on; one more and it's time.
-        lobby.advance(4)
+        // 575 seconds in: twenty-four more and it's still on; one more and it's time.
+        lobby.advance(Double(OCCUPY_SECONDS) - elapsed - 1)
         #expect(lobby.host.state.phase == .playing)
         lobby.advance(1)
         #expect(lobby.host.state.phase == .finished)
@@ -283,10 +291,41 @@ struct OccupyEndTests {
 
         let scores = lobby.occupy?.scores ?? []
         #expect(scores.count == 2)
-        #expect(scores[0] != scores[1], "this chain isn't level")
-        let leader = scores[0] > scores[1] ? "host" : "ann"
+        let leader: PlayerID? = scores[0] > scores[1] ? "host" : scores[1] > scores[0] ? "ann" : nil
         #expect(lobby.host.state.winnerId == leader)
         #expect(lobby.clients["ann"]?.state?.phase == .finished)
+    }
+
+    @Test func zonesAppearOnTheHostsClockAndRideTheSnapshot() {
+        let lobby = OccupyLobby.opened()
+        let ann = lobby.clients["ann"]!
+        lobby.advance(OCCUPY_ZONE_FIRST_SECONDS - 1)
+        #expect(lobby.occupy?.zones.isEmpty == true)
+        lobby.advance(1)
+        #expect(lobby.occupy?.zones.count == 1)
+        #expect(ann.state?.occupy?.zones == lobby.occupy?.zones, "the client sees the same zone")
+
+        let zone = lobby.occupy!.zones[0]
+        #expect(zone.keys.allSatisfy { lobby.occupy?.board[$0] == nil }, "on empty ground")
+        #expect(!zone.contains(Cell(row: 12, col: 12)) && !zone.contains(Cell(row: 20, col: 20)), "off the starts")
+
+        // A word keeps the stall off; the next zone comes on the interval.
+        lobby.advance(50)
+        #expect(lobby.host.state.phase == .playing)
+        lobby.clients["ann"]?.sendPlacement(
+            serial: 2, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
+        #expect(lobby.occupy?.zones.count == 1)
+        lobby.advance(OCCUPY_ZONE_INTERVAL_SECONDS - 50)
+        #expect(lobby.host.state.phase == .playing)
+        #expect(lobby.occupy?.zones.count == 2)
+        if let zones = lobby.occupy?.zones, zones.count == 2 {
+            #expect(!zones[0].overlaps(zones[1]))
+        }
+
+        // The same seed grows the same zones.
+        let replay = OccupyLobby.opened()
+        replay.advance(OCCUPY_ZONE_FIRST_SECONDS)
+        #expect(replay.occupy?.zones == [zone])
     }
 
     @Test func theStallEndsItEarlyButNotDuringTheGrace() {
@@ -308,7 +347,7 @@ struct OccupyEndTests {
         lobby.addClient("ann")
         lobby.host.start()
         lobby.advance(OCCUPY_GRACE_SECONDS + 20)
-        lobby.host.placeSelf(serial: 1, placement: across("cat", from: Cell(row: 3, col: 3)))
+        lobby.host.placeSelf(serial: 1, placement: across("cat", from: Cell(row: 12, col: 12)))
 
         lobby.advance(OCCUPY_STALL_SECONDS - 1)
         #expect(lobby.host.state.phase == .playing)
@@ -322,7 +361,7 @@ struct OccupyEndTests {
         let lobby = OccupyLobby.opened()
         // Ann is ahead, then walks out: she can't win from the door.
         lobby.clients["ann"]?.sendPlacement(
-            serial: 1, placement: down("tea", from: Cell(row: 3, col: 5), borrowing: [keyOf(3, 5)]))
+            serial: 1, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
         #expect(lobby.occupy?.scores == [6, 9])
 
         lobby.clients["ann"]?.leave()
@@ -337,18 +376,18 @@ struct OccupyEndTests {
         // square, and the referee reads a run either way.
         let lobby = OccupyLobby.opened()
         lobby.clients["ann"]?.sendPlacement(
-            serial: 5, placement: across("tac", from: Cell(row: 11, col: 9)))
-        #expect(lobby.occupy?.owners[keyOf(11, 11)] == 1)
+            serial: 5, placement: across("tac", from: Cell(row: 20, col: 18)))
+        #expect(lobby.occupy?.owners[keyOf(20, 20)] == 1)
         #expect(lobby.occupy?.scores == [9, 9])
         #expect(lobby.heard["ann"]?.last == "placed:5")
     }
 
     @Test func aFinishedBoardTakesNoMoreWords() {
         let lobby = OccupyLobby.opened()
-        lobby.advance(Double(occupySeconds(players: 2)))
+        lobby.advance(Double(OCCUPY_SECONDS))
         #expect(lobby.host.state.phase == .finished)
         lobby.clients["ann"]?.sendPlacement(
-            serial: 9, placement: down("tea", from: Cell(row: 3, col: 5), borrowing: [keyOf(3, 5)]))
+            serial: 9, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
         #expect(lobby.occupy?.board.count == 3)
         #expect(lobby.heard["ann"]?.last == "refused:9:You’re not in this game.")
     }

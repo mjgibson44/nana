@@ -184,7 +184,7 @@ All of the following exists solely for signaling/NAT traversal and would be dele
 - State broadcasts include every player's data to everyone (full BattleState, battleSession.ts:629-633); harmless here, but note names are the only user content and are sanitized host-side only (battleSession.ts:245-251)
 - The visibilitychange/wake healing paths (battleSession.ts:307-310, 777-786) are browser-specific; iOS backgrounding suspends GKMatch sessions entirely — the resume-from-background story must be redesigned, not ported
 - TURN credentials are deliberately committed in .env.production (Metered free tier) and ship in the JS bundle; if any web build remains alongside the GameKit port, rotating/retiring them is a manual dashboard task (.env.production:1-14, infra/README.md:96-100)
-## 10. Apple-only additions (protocol v6, v7 and v8)
+## 10. Apple-only additions (protocol v6, v7, v8 and v9)
 
 Documented in `apple/Packages/WordNet/Sources/WordNet/Protocol.swift`; summarised here so
 this appendix stays the one place the whole wire is described.
@@ -195,8 +195,8 @@ this appendix stays the one place the whole wire is described.
   back to the lowest player id.
 - **v7 — Occupy.** A second game the same lobby can play (`BattleState.mode`, defaulting
   to `battle` when absent), with the shared board riding in every `state` snapshot as
-  `BattleState.occupy` (`OccupyState`: size, seats, board, owners, opened, scores,
-  settledAt, end). Three messages:
+  `BattleState.occupy` (`OccupyState`: frame, seats, board, owners, opened, scores,
+  settledAt, zones, end — `frame` and `zones` since v9, below). Three messages:
   - `{ t: 'place', serial, placement }` client → host. `placement` is the outcome —
     `tiles` (new cell → letter) and `borrowed` (the gap squares) — not the picks. The
     host runs `occupyApply` (WordCore) against its board and dictionary.
@@ -222,3 +222,13 @@ this appendix stays the one place the whole wire is described.
   countdown is running. The election rules that go with it (everyone a client, lowest id
   claims, lowest id wins, the host's once-a-second re-announce) need no wire change and
   are documented in `docs/apple-port-plan.md` §7.2 and §7.3.
+- **v9 — Occupy reshaped.** The board is unbounded: `OccupyState.size` (the edge of a
+  fixed board) became `frame` (the square the starts, rotations and quadrants are taken
+  about, 33, which the board grows past like a solo board), and `occupyApply` no longer
+  refuses a placement for running off an edge — only for a key that isn't a square. The
+  clock is ten minutes for any field. New in the snapshot: `zones`, an array of
+  `{ centre: { row, col } }` in the host's frame — three-by-three patches where every
+  tile is worth double, placed by the host on its clock (first at the end of the grace,
+  then every 75 s) off the game's seed, and decoded as empty when absent. Clients turn
+  zones for display exactly as they turn the board. The version bump is what keeps a
+  v8 board from meeting a v9 one in the random-match pool.

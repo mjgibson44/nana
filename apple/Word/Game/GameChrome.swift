@@ -1,4 +1,5 @@
 import SwiftUI
+import WordBoard
 import WordCore
 
 /// The top of the game screen: the score (or, in a battle, the placing), what
@@ -121,7 +122,9 @@ struct HeaderClock: Equatable {
 
 /// Occupy's balanced bar, in place of the pile gauge: everyone's share of
 /// the value on the board, in one strip — yours first, in green, then each
-/// rival in their colour. The divider is the whole story: push it their way.
+/// rival in their colour — with everyone's points spelled out under it in
+/// the same colours. The divider says who's ahead; the numbers say by how
+/// much.
 struct OccupyBarView: View {
     struct Segment: Identifiable, Equatable {
         var id: Int
@@ -133,8 +136,20 @@ struct OccupyBarView: View {
     var segments: [Segment]
 
     var body: some View {
+        VStack(spacing: 5) {
+            bar
+            points
+        }
+        .animation(.easeOut(duration: 0.25), value: segments)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Board held")
+        .accessibilityValue(
+            segments.map { "\($0.name) \($0.value)" }.joined(separator: ", "))
+    }
+
+    private var bar: some View {
         let total = max(1, segments.reduce(0) { $0 + $1.value })
-        GeometryReader { proxy in
+        return GeometryReader { proxy in
             HStack(spacing: 0) {
                 ForEach(segments) { segment in
                     Rectangle()
@@ -156,11 +171,32 @@ struct OccupyBarView: View {
         }
         .frame(height: 10)
         .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
-        .animation(.easeOut(duration: 0.25), value: segments)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Board held")
-        .accessibilityValue(
-            segments.map { "\($0.name) \($0.value)" }.joined(separator: ", "))
+    }
+
+    /// Each player's name and value, spread across the width in the order
+    /// of the bar above, so the same colour reads as the same person twice.
+    private var points: some View {
+        HStack(spacing: Spacing.gap) {
+            ForEach(segments) { segment in
+                HStack(spacing: 4) {
+                    Text(segment.name.uppercased())
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.8)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .foregroundStyle(segment.colors.ink.opacity(0.8))
+                    Text("\(segment.value)")
+                        .font(.system(size: 13, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(segment.colors.ink)
+                        .layoutPriority(1)
+                }
+                if segment.id != segments.last?.id {
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -347,12 +383,26 @@ struct GapTile: View {
 
 /// The pile: three rows of eight, always drawn in full — twenty-four slots,
 /// which is the limit, so the field you see is the danger you're in. Letters
-/// fill the slots from the top left; a picked letter lifts to the lighter grey.
+/// fill the slots from the top left; a picked letter lifts to the lighter
+/// grey, and a letter dragged onto the board leaves its slot empty until it
+/// comes back or lands.
+///
+/// A tap claims a letter for the word; a drag carries it to the board. Both
+/// come through the one pointer pipeline (`dispatch`) so the slop that tells
+/// them apart is the board's own. Without a pipeline — previews, layout
+/// tests — the tiles are plain buttons.
 struct PileView: View {
     var letters: [String]
     var picked: Set<Int>
+    /// Tiles sitting on the board, not yet confirmed: their slots are empty.
+    var staged: Set<Int> = []
+    /// The tile riding under the finger right now, hidden in its slot.
+    var hidden: Int? = nil
     var tileSize: CGFloat
     var onTap: (Int) -> Void
+    /// The unified pointer pipeline, when there is one to feed.
+    var dispatch: ((GestureMachine.Event) -> Void)? = nil
+    var context: () -> GestureMachine.Context = { .init() }
 
     var body: some View {
         let columns = Spacing.columns
@@ -361,23 +411,8 @@ struct PileView: View {
                 HStack(spacing: Spacing.tileGap) {
                     ForEach(0..<columns, id: \.self) { column in
                         let index = row * columns + column
-                        if index < letters.count {
-                            let isPicked = picked.contains(index)
-                            Button {
-                                onTap(index)
-                            } label: {
-                                LetterTile(
-                                    text: letters[index], style: isPicked ? .raised : .dim,
-                                    size: tileSize)
-                            }
-                            .buttonStyle(PressedTileStyle())
-                            .accessibilityLabel(
-                                "\(letters[index].uppercased()), tile \(index + 1) of \(letters.count)")
-                            .accessibilityHint(
-                                isPicked
-                                    ? "Takes this letter back out of your word"
-                                    : "Adds this letter to your word")
-                            .accessibilityAddTraits(isPicked ? [.isButton, .isSelected] : .isButton)
+                        if index < letters.count, index != hidden, !staged.contains(index) {
+                            tile(at: index)
                         } else {
                             LetterTile(text: nil, style: .slot, size: tileSize)
                                 .accessibilityHidden(true)
@@ -388,6 +423,53 @@ struct PileView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Pile, \(letters.count) of \(PILE_LIMIT) tiles")
+    }
+
+    @ViewBuilder
+    private func tile(at index: Int) -> some View {
+        let letter = letters[index]
+        let isPicked = picked.contains(index)
+        let face = LetterTile(text: letter, style: isPicked ? .raised : .dim, size: tileSize)
+        Group {
+            if let dispatch {
+                face
+                    .contentShape(Rectangle())
+                    .pointerSurface(
+                        target: { _ in .rackTile(index: index, letter: letter) },
+                        context: context, dispatch: dispatch)
+                    .accessibilityElement()
+                    .accessibilityAction { onTap(index) }
+            } else {
+                Button {
+                    onTap(index)
+                } label: {
+                    face
+                }
+                .buttonStyle(PressedTileStyle())
+            }
+        }
+        .accessibilityLabel("\(letter.uppercased()), tile \(index + 1) of \(letters.count)")
+        .accessibilityHint(
+            isPicked
+                ? "Takes this letter back out of your word"
+                : "Adds this letter to your word, or drag it onto the board")
+        .accessibilityAddTraits(isPicked ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A tile riding under the finger, above everything else on the screen: the
+/// pile's own tile a touch bigger, with a shadow, so it reads as lifted.
+struct GhostTileView: View {
+    var letter: String
+    /// The pile's tile size, so the tile doesn't change size in the hand.
+    var size: CGFloat
+
+    var body: some View {
+        LetterTile(text: letter, style: .raised, size: size)
+            .scaleEffect(1.1)
+            .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 4)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

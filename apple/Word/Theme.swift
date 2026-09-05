@@ -59,6 +59,13 @@ enum Palette {
     static let rivalBgs: [Color] = [
         Color(hex: 0x1B3550), Color(hex: 0x4A2E0F), Color(hex: 0x3D1F55),
     ]
+
+    /// An Occupy zone, where tiles are worth double: its squares a shade
+    /// lighter than the lattice, an edge round the patch in the plain ink,
+    /// and "2×" on the middle square. No colour of its own, so it can't be
+    /// mistaken for anybody's tiles.
+    static let zoneCell = Color(hex: 0x343434)
+    static let zoneEdge = Color(hex: 0xD4D4D4)
 }
 
 /// The colours a seat's tiles wear, as seen from another seat.

@@ -47,6 +47,24 @@ struct ScoredWord: Equatable {
     var points: Int
 }
 
+/// A tile dragged onto the board and not yet confirmed: which square it sits
+/// on, and which pile tile it is — the pile keeps the letter, with its slot
+/// drawn empty, until the ✓ lands it or a tap takes it back.
+struct StagedTile: Equatable {
+    var key: CellKey
+    var rackIndex: Int
+}
+
+/// A tile riding under the pointer (the web's `DragState`, App.tsx:200–206).
+/// The pile tile it came from hides in its slot — or the staged square it
+/// came off clears — while the ghost follows the finger.
+struct TileDrag: Equatable {
+    var letter: String
+    var source: GestureMachine.DragSource
+    var rackIndex: Int
+    var location: CGPoint
+}
+
 /// How full the pile is, for the gauge and the alarm.
 enum PileTone: Equatable {
     case ok
@@ -162,17 +180,21 @@ let ENDLESS_TICK_FROM = 3
 
 /// The game's interaction model, after the redesign.
 ///
-/// There is one way to build a word and two ways to land it:
+/// There are two ways to build a word and three ways to land it:
 ///
-///  - **Building.** Pick letters from the pile (tap, or type on a hardware
-///    keyboard); they line up in the word row in the order picked. A gap tile
-///    stands for a letter already on the board.
+///  - **Building in the row.** Pick letters from the pile (tap, or type on a
+///    hardware keyboard); they line up in the word row in the order picked. A
+///    gap tile stands for a letter already on the board.
 ///  - **The first word** lands from the start square heading across, with the
 ///    confirm button. It is the only word that's placed by fiat.
 ///  - **Every word after it** has to borrow a letter that's already down: put
 ///    a gap where the borrowed letter goes and tap that letter on the board.
 ///    The word arranges itself around it, across or down, whichever spells
 ///    real words.
+///  - **Building on the board.** Or drag tiles out of the pile straight onto
+///    squares (`applyDrop`); they wait there as *staged* tiles, and the ✓
+///    lands them all as one word (`confirmStaged`) — judged by the same
+///    rules, which here have to be checked after the fact (`judgeStaged`).
 ///
 /// Placed words are permanent. Nothing can be moved, turned, deleted or undone,
 /// so only real words are allowed down — in every mode, not just Battle.
@@ -214,8 +236,9 @@ final class GameModel {
     /// The words this player put down in an Occupy game, each worth what it
     /// gained — the results screen's list.
     private(set) var occupyWords: [ScoredWord] = []
-    /// A fixed board, for the modes that have one; nil lets the board grow.
-    private var fixedBounds: Bounds?
+    /// Occupy's zones as this seat sees them, turned with the board: the
+    /// patches where a tile is worth double.
+    private(set) var occupyZones: [OccupyZone] = []
 
     /// A word let go of in Occupy, for the session to send the host.
     var onOccupyPlace: ((Int, OccupyPlacement) -> Void)?
@@ -273,6 +296,18 @@ final class GameModel {
     /// Set while a refused aim is showing in red; the view times it out.
     private(set) var aimRejected = false
 
+    /// Tiles dragged onto the board and not yet confirmed, in the order they
+    /// were dropped.
+    private(set) var staged: [StagedTile] = [] {
+        didSet { judgeStagedTiles() }
+    }
+    /// Whether the staged tiles would land as one word — green when they
+    /// would, red when what they spell isn't a word, and unjudged while
+    /// they're still short of a word or not yet in a line.
+    private(set) var stagedVerdict: WordVerdict = .unjudged
+    /// The tile riding under the finger, if one is.
+    private(set) var drag: TileDrag?
+
     private var toastSerial = 0
     private var aimSerial = 0
     private var dealSerial = 0
@@ -288,9 +323,16 @@ final class GameModel {
     /// this seat, is always the top-left one.
     var startCell: Cell {
         if let occupy, let seat = occupy.seat, let view = occupy.view {
-            return rotateCell(view.startCell(seat: seat), size: view.size, by: occupy.rotation)
+            return rotateCell(view.startCell(seat: seat), size: view.frame, by: occupy.rotation)
         }
         return Self.startCell
+    }
+
+    /// The middle of the board: the middle of a solo board, or the centre
+    /// every seat's Occupy view is turned about — which a shared board opens
+    /// centred on, so every corner of the fight is in view.
+    var boardCentre: Cell {
+        occupy?.view?.centre ?? Self.startCell
     }
 
     /// Where the opener would start from, heading across: the start square.
@@ -311,6 +353,26 @@ final class GameModel {
 
     /// Whether the staged word borrows a letter from the board.
     var hasGap: Bool { picks.contains(GAP) }
+
+    /// Tiles sitting on the board waiting for the ✓, by square.
+    var stagedLetters: [CellKey: String] {
+        var letters: [CellKey: String] = [:]
+        for tile in staged where rack.indices.contains(tile.rackIndex) {
+            letters[tile.key] = rack[tile.rackIndex]
+        }
+        return letters
+    }
+
+    /// The pile slots those tiles left empty.
+    var stagedIndices: Set<Int> { Set(staged.map(\.rackIndex)) }
+
+    var hasStaged: Bool { !staged.isEmpty }
+
+    /// The pile tile riding under the finger, hidden in its slot meanwhile.
+    var hiddenRackIndex: Int? {
+        guard let drag, case .rack = drag.source else { return nil }
+        return drag.rackIndex
+    }
 
     /// The board is empty: the word in hand is the opener. In Occupy it's
     /// *this seat's* board that counts — everyone opens from their own corner
@@ -333,8 +395,10 @@ final class GameModel {
     }
 
     /// Ghost letters on the board: the opener, previewing as it's typed.
+    /// Tiles dropped on the board are the opener then, so the row's doesn't
+    /// draw over them.
     var preview: [CellKey: String] {
-        guard let plan else { return [:] }
+        guard !hasStaged, let plan else { return [:] }
         return Dictionary(uniqueKeysWithValues: plan.steps.map { ($0.key, $0.letter) })
     }
 
@@ -349,14 +413,16 @@ final class GameModel {
         return runs.allSatisfy { $0.word.count >= MIN_WORD_LENGTH && reads($0.word, in: dictionary) }
     }
 
-    /// The confirm button only exists for the opener, and only lights up for
-    /// a real word.
+    /// The confirm button lands tiles dropped on the board — always offered
+    /// while there are any, so a tap can say what's wrong with them — and
+    /// otherwise exists only for the opener, lit only for a real word.
     var canConfirm: Bool {
+        if hasStaged { return true }
         guard isFirstWord, let plan else { return false }
         return plan.complete && !plan.steps.isEmpty && verdictOK == true
     }
 
-    var canClearWord: Bool { !picks.isEmpty }
+    var canClearWord: Bool { !picks.isEmpty || hasStaged }
     var canBackspace: Bool { !picks.isEmpty }
     var canShuffle: Bool { rack.count > 1 }
     /// A gap borrows from the board, so it means nothing until there's a
@@ -420,7 +486,7 @@ final class GameModel {
     /// Seconds left on the match clock, or nil when there isn't one running.
     func occupySecondsLeft(at now: Date) -> Int? {
         guard mode == .occupy, !isComplete, let occupy else { return nil }
-        let total = Double(occupySeconds(players: occupy.players))
+        let total = Double(OCCUPY_SECONDS)
         return Int(ceil(max(0, total - now.timeIntervalSince(occupy.startedAt))))
     }
 
@@ -545,6 +611,7 @@ final class GameModel {
     func adoptOccupy(_ state: OccupyState, now: Date = .now) {
         guard mode == .occupy, var run = occupy else { return }
         let changed = run.host?.board != state.board || run.host?.owners != state.owners
+        let zonesBefore = run.host?.zones.count ?? 0
         run.host = state
         if changed { run.lastChangeAt = now }
         if run.seat == nil, let seat = state.seat(of: run.selfID) {
@@ -552,8 +619,8 @@ final class GameModel {
             // Turned so this seat's corner is top-left, from here on.
             run.rotation = occupyRotation(seat: seat)
             spectating = false
-            fixedBounds = state.bounds
-            // The board just took its real shape: the camera has to look again.
+            // The board just took its shape for this seat: the camera has
+            // to look again.
             gameSerial += 1
         } else if run.seat == nil {
             // Not dealt in — joined mid-game, watching this one out.
@@ -563,6 +630,9 @@ final class GameModel {
         refreshOccupyView()
         if let seat = run.seat, rack.isEmpty, !isComplete {
             rack = occupyRefill(count: OCCUPY_HAND, seat: seat)
+        }
+        if state.zones.count > zonesBefore, !isComplete {
+            rejectToast("A 2× zone appeared!")
         }
     }
 
@@ -595,12 +665,16 @@ final class GameModel {
         let refused = run.pending.remove(at: index)
         occupy = run
 
+        // The pile changes under the hand, so what's in the row and on the
+        // board is carried across by letter rather than by slot.
+        let hand = handLetters()
         var pile = rack
         for letter in refused.refill {
             if let at = pile.firstIndex(of: letter) { pile.remove(at: at) }
         }
         pile.append(contentsOf: refused.spent)
         rack = pile
+        rebindHand(hand)
         refreshOccupyView()
         rejectToast(reason)
 
@@ -657,8 +731,9 @@ final class GameModel {
         }
         run.view = view
         occupy = run
-        owners = rotateOwners(view.owners, size: view.size, by: run.rotation)
-        setBoard(view.board.rotated(size: view.size, by: run.rotation))
+        owners = rotateOwners(view.owners, size: view.frame, by: run.rotation)
+        occupyZones = view.zones.map { $0.rotated(size: view.frame, by: run.rotation) }
+        setBoard(view.board.rotated(size: view.frame, by: run.rotation))
     }
 
     /// Deal an Occupy hand back up to `OCCUPY_HAND`: letters grown off the
@@ -726,13 +801,15 @@ final class GameModel {
         attackTilesSent = 0
         occupy = nil
         owners = [:]
+        occupyZones = []
         occupyWords = []
-        fixedBounds = nil
     }
 
     /// Everything a fresh board resets, whatever dealt it.
     private func resetPlayState() {
         picks = []
+        staged = []
+        drag = nil
         aim = nil
         aimRejected = false
         toast = nil
@@ -867,6 +944,8 @@ final class GameModel {
         solo.finish(reason: reason)
         showSummary = true
         picks = []
+        staged = []
+        drag = nil
         switch reason {
         case .buried:
             cues?.play(.lose)
@@ -936,14 +1015,14 @@ final class GameModel {
 
         case .confirm:
             guard canConfirm else { return false }
-            confirmFirstWord()
+            confirm()
             return true
         }
     }
 
     /// Claim a pile tile for the word, or release it.
     func togglePick(_ index: Int) {
-        guard rack.indices.contains(index) else { return }
+        guard rack.indices.contains(index), !stagedIndices.contains(index) else { return }
         if let at = picks.firstIndex(of: index) {
             picks.remove(at: at)
         } else {
@@ -953,7 +1032,7 @@ final class GameModel {
 
     /// Claim the first unclaimed matching pile tile.
     func typeLetter(_ letter: String) {
-        let index = findAvailable(rack: rack, letter: letter, taken: Set(picks))
+        let index = findAvailable(rack: rack, letter: letter, taken: Set(picks).union(stagedIndices))
         guard index != -1 else { return }
         picks.append(index)
     }
@@ -973,38 +1052,75 @@ final class GameModel {
         picks.remove(at: position)
     }
 
-    /// The trash button: put every picked tile back.
+    /// The trash button: put every picked tile back — and every tile dropped
+    /// on the board, back into its slot.
     func clearWord() {
         picks = []
+        staged = []
         clearAim()
     }
 
-    /// Reshuffle the pile. The word in hand survives: it's re-found in the
-    /// shuffled pile, so shuffling to see the letters differently never costs
-    /// a half-typed word.
+    /// Reshuffle the pile. The word in hand survives, and so do the tiles on
+    /// the board: both are re-found in the shuffled pile, so shuffling to see
+    /// the letters differently never costs a half-built word.
     func shufflePile() {
-        let staged = pickList
+        let hand = handLetters()
         rack.shuffle()
+        rebindHand(hand)
+    }
+
+    /// The word row and the staged tiles as letters, which is what survives
+    /// the pile being rearranged under them.
+    private func handLetters() -> (picks: [String?], staged: [(key: CellKey, letter: String)]) {
+        (
+            picks: pickList.map(\.letter),
+            staged: staged.compactMap { tile in
+                rack.indices.contains(tile.rackIndex) ? (tile.key, rack[tile.rackIndex]) : nil
+            }
+        )
+    }
+
+    /// Find the row's letters and the staged tiles again in a pile whose
+    /// order changed, each letter claiming a different slot.
+    private func rebindHand(_ hand: (picks: [String?], staged: [(key: CellKey, letter: String)])) {
         var taken = Set<Int>()
-        var next: [Int] = []
-        for pick in staged {
-            guard let letter = pick.letter else {
-                next.append(GAP)
+        var nextStaged: [StagedTile] = []
+        for (key, letter) in hand.staged {
+            let index = findAvailable(rack: rack, letter: letter, taken: taken)
+            guard index != -1 else { continue }
+            taken.insert(index)
+            nextStaged.append(StagedTile(key: key, rackIndex: index))
+        }
+        var nextPicks: [Int] = []
+        for letter in hand.picks {
+            guard let letter else {
+                nextPicks.append(GAP)
                 continue
             }
             let index = findAvailable(rack: rack, letter: letter, taken: taken)
             guard index != -1 else { continue }
             taken.insert(index)
-            next.append(index)
+            nextPicks.append(index)
         }
-        picks = next
+        staged = nextStaged
+        picks = nextPicks
     }
 
     // MARK: Landing the word
 
+    /// The ✓: lands the tiles dropped on the board if there are any, and the
+    /// typed opener otherwise.
+    func confirm() {
+        if hasStaged {
+            confirmStaged()
+        } else {
+            confirmFirstWord()
+        }
+    }
+
     /// The opener: from the start square, heading across.
     func confirmFirstWord() {
-        guard canConfirm, let anchor = openerAnchor else { return }
+        guard !hasStaged, canConfirm, let anchor = openerAnchor else { return }
         commit(keyOf(anchor.row, anchor.col), .across)
     }
 
@@ -1016,8 +1132,17 @@ final class GameModel {
     /// does — itself, in red, on the board — rather than a bare banner: the
     /// two gestures are the same move, so they say the same thing.
     func selectTile(_ key: CellKey) {
+        // A tap on a staged tile picks it back up.
+        if staged.contains(where: { $0.key == key }) {
+            unstage(key)
+            return
+        }
         guard let letter = board[key] else { return }
         guard !picks.isEmpty else { return }
+        guard !hasStaged else {
+            rejectToast("Confirm or clear the tiles on the board first.")
+            return
+        }
         guard hasGap else {
             rejectToast("Put a gap in your word where the \(letter.uppercased()) goes.")
             return
@@ -1159,7 +1284,10 @@ final class GameModel {
         // `canAcceptInput` is what holds the red second still: it goes false
         // the moment a word is refused, so the finger can't re-aim over the
         // answer.
-        guard canAcceptInput else { return }
+        guard canAcceptInput, !hasStaged else {
+            aim = nil
+            return
+        }
         guard let fit = fitThroughLetter(key) else {
             aim = nil
             return
@@ -1235,12 +1363,69 @@ final class GameModel {
     /// changes has to be in the dictionary.
     @discardableResult
     func commit(_ anchor: CellKey, _ dir: Direction, picksToPlace: [Pick]? = nil) -> Bool {
+        guard !hasStaged else {
+            rejectToast("Confirm or clear the tiles on the board first.")
+            return false
+        }
         let picksToPlace = picksToPlace ?? pickList
         guard !picksToPlace.isEmpty else { return false }
         let result = planPlacement(
             board: board, bounds: bounds, anchor: parseKey(anchor), dir: dir, picks: picksToPlace)
         guard !result.steps.isEmpty, result.complete else { return false }
+        // What the gaps sit on — in Occupy, the letters this word captures.
+        let borrowed =
+            mode == .occupy
+            ? gapCells(board: board, bounds: bounds, anchor: parseKey(anchor), dir: dir, picks: picksToPlace)
+            : []
+        return land(plan: result, picks: picksToPlace, borrowed: borrowed)
+    }
 
+    /// Land tiles dropped on the board as one word. Refusals say why on a
+    /// banner, so the ✓ is always worth pressing.
+    @discardableResult
+    func confirmStaged() -> Bool {
+        guard hasStaged else { return false }
+        guard let dictionary else {
+            rejectToast("Hold on — the dictionary is still loading.")
+            return false
+        }
+        guard let anchor = openerAnchor else {
+            rejectToast("Waiting for the board…")
+            return false
+        }
+        let word: StagedWord
+        do {
+            word = try judgeStaged(
+                tiles: stagedLetters, board: board, opener: isFirstWord, start: anchor,
+                isWord: { reads($0, in: dictionary) })
+        } catch let refusal as StagedRefusal {
+            rejectToast(refusal.message)
+            return false
+        } catch {
+            return false
+        }
+        // In reading order along the line, so the word the results list is
+        // the word as it reads.
+        let steps =
+            staged
+            .filter { rack.indices.contains($0.rackIndex) }
+            .map { PlacementStep(key: $0.key, letter: rack[$0.rackIndex], rackIndex: $0.rackIndex) }
+            .sorted {
+                let a = parseKey($0.key)
+                let b = parseKey($1.key)
+                return a.row == b.row ? a.col < b.col : a.row < b.row
+            }
+        let plan = PlacementPlan(steps: steps, unfilledGaps: [], complete: true)
+        let picks = steps.map { Pick(letter: $0.letter, rackIndex: $0.rackIndex) }
+        return land(plan: plan, picks: picks, borrowed: word.borrowed)
+    }
+
+    /// Every landing, however the word was built: the tiles in `plan` go
+    /// down if every run they make or change is a word. Words are permanent,
+    /// so only real ones are allowed down.
+    private func land(plan result: PlacementPlan, picks picksToPlace: [Pick], borrowed: [CellKey])
+        -> Bool
+    {
         var next = board
         for step in result.steps { next[step.key] = step.letter }
         let newRuns = runsTouching(result.steps.map(\.key), in: next)
@@ -1272,8 +1457,8 @@ final class GameModel {
 
         if mode == .occupy {
             return commitOccupy(
-                anchor: parseKey(anchor), dir: dir, plan: result, picks: picksToPlace,
-                newRuns: newRuns, dictionary: dictionary)
+                plan: result, picks: picksToPlace, borrowed: borrowed, newRuns: newRuns,
+                dictionary: dictionary)
         }
 
         // Captured before the board changes: an attack is priced against the
@@ -1283,6 +1468,7 @@ final class GameModel {
         // Emptied before the board changes, so the word row has nothing left
         // to judge against a board it is no longer waiting on.
         picks = []
+        staged = []
         setBoard(next)
         let spent = Set(result.steps.map(\.rackIndex))
         rack = rack.enumerated().filter { !spent.contains($0.offset) }.map(\.element)
@@ -1321,7 +1507,7 @@ final class GameModel {
     /// off to the host, with the pile refilled behind it. The host's answer
     /// (`confirmPlacement` / `refusePlacement`) settles it.
     private func commitOccupy(
-        anchor: Cell, dir: Direction, plan: PlacementPlan, picks: [Pick], newRuns: [WordRun],
+        plan: PlacementPlan, picks: [Pick], borrowed: [CellKey], newRuns: [WordRun],
         dictionary: Set<String>
     ) -> Bool {
         guard var run = occupy, let seat = run.seat, let view = run.view else {
@@ -1329,10 +1515,9 @@ final class GameModel {
             return false
         }
         let tiles = Dictionary(uniqueKeysWithValues: plan.steps.map { ($0.key, $0.letter) })
-        let borrowed = gapCells(board: board, bounds: bounds, anchor: anchor, dir: dir, picks: picks)
         // Laid in this seat's frame; judged, kept and sent in the host's.
         let placement = OccupyPlacement(tiles: tiles, borrowed: borrowed)
-            .rotated(size: view.size, by: run.rotation.inverse)
+            .rotated(size: view.frame, by: run.rotation.inverse)
 
         // Judged by the host's own rules before it's shown — the one thing
         // this can't know is whether someone else got there first.
@@ -1360,6 +1545,7 @@ final class GameModel {
         // Emptied before the board changes, so the word row has nothing left
         // to judge against a board it is no longer waiting on.
         self.picks = []
+        staged = []
         rack = rack.enumerated().filter { !spentIndices.contains($0.offset) }.map(\.element)
         let refill = occupyRefill(count: OCCUPY_HAND - rack.count, seat: seat)
         rack.append(contentsOf: refill)
@@ -1381,6 +1567,101 @@ final class GameModel {
         }
         onOccupyPlace?(serial, placement)
         return true
+    }
+
+    // MARK: Dragging tiles onto the board
+
+    /// A tile lifts: out of the pile, or a staged one off the board. Its slot
+    /// empties — or its square clears — while the ghost rides under the
+    /// finger, and a letter in the row can't also be the one in the hand.
+    func beginDrag(_ source: GestureMachine.DragSource, at location: CGPoint) {
+        // The view gates input while an overlay is up; here only one tile at
+        // a time can be in the hand.
+        guard drag == nil else { return }
+        switch source {
+        case let .rack(index, letter):
+            guard rack.indices.contains(index), !stagedIndices.contains(index) else { return }
+            picks.removeAll { $0 == index }
+            drag = TileDrag(letter: letter, source: source, rackIndex: index, location: location)
+        case let .board(cell, letter):
+            let key = keyOf(cell.row, cell.col)
+            guard let at = staged.firstIndex(where: { $0.key == key }) else { return }
+            let tile = staged.remove(at: at)
+            drag = TileDrag(
+                letter: letter, source: source, rackIndex: tile.rackIndex, location: location)
+        }
+        clearAim()
+    }
+
+    func dragMoved(to location: CGPoint) {
+        drag?.location = location
+    }
+
+    /// The ghost goes away and the tile goes back where it came from: its
+    /// slot in the pile, or the square it was staged on.
+    func endDrag() {
+        guard let drag else { return }
+        self.drag = nil
+        if case let .board(cell, _) = drag.source {
+            staged.append(StagedTile(key: keyOf(cell.row, cell.col), rackIndex: drag.rackIndex))
+        }
+    }
+
+    /// Where a dragged tile was let go.
+    enum DropRegion: Equatable {
+        case cell(Cell)
+        case pile
+        case none
+    }
+
+    /// Apply a real drop (the machine already ruled out taps). A tile
+    /// dropped on an empty square stages there; on the pile it goes home;
+    /// anywhere else, or on a square that's taken, it goes back where it
+    /// came from.
+    func applyDrop(_ region: DropRegion) {
+        guard let drag else { return }
+        switch region {
+        case let .cell(cell):
+            let key = keyOf(cell.row, cell.col)
+            guard board[key] == nil, !staged.contains(where: { $0.key == key }) else {
+                rejectToast("There’s already a tile on that square.")
+                endDrag()
+                return
+            }
+            self.drag = nil
+            staged.append(StagedTile(key: key, rackIndex: drag.rackIndex))
+        case .pile:
+            self.drag = nil
+        case .none:
+            endDrag()
+        }
+    }
+
+    /// Tap a staged tile: back into its slot in the pile.
+    func unstage(_ key: CellKey) {
+        staged.removeAll { $0.key == key }
+    }
+
+    /// Answer for the staged tiles the way the row's colour answers for the
+    /// row: green when the ✓ would land them, red when what they spell isn't
+    /// a word, and nothing yet while they're short of a word or not in a
+    /// line — the ✓ says which, when pressed.
+    private func judgeStagedTiles() {
+        stagedVerdict = stagedJudgement()
+    }
+
+    private func stagedJudgement() -> WordVerdict {
+        guard !staged.isEmpty, let dictionary, let anchor = openerAnchor else { return .unjudged }
+        do {
+            _ = try judgeStaged(
+                tiles: stagedLetters, board: board, opener: isFirstWord, start: anchor,
+                isWord: { reads($0, in: dictionary) })
+            return .good
+        } catch StagedRefusal.notAWord {
+            return .bad
+        } catch {
+            return .unjudged
+        }
     }
 
     // MARK: Toasts
@@ -1473,11 +1754,17 @@ final class GameModel {
 
     private func setBoard(_ next: TileMap) {
         board = next
+        // On a shared board a rival's word can land under a staged tile;
+        // that tile goes back to the pile rather than sitting on a letter.
+        if staged.contains(where: { next[$0.key] != nil }) {
+            staged.removeAll { next[$0.key] != nil }
+            rejectToast("Someone got there first.")
+        }
         refreshBoardCaches()
     }
 
     private func refreshBoardCaches() {
-        bounds = fixedBounds ?? boardBounds(board)
+        bounds = boardBounds(board)
         tileBounds = tileBox(of: board)
         validation = dictionary.map { validateBoard(board, dictionary: $0) }
 
@@ -1490,5 +1777,6 @@ final class GameModel {
         // A word in hand is only as good as the board it would join, so a
         // board that changed — or a dictionary that just arrived — re-asks.
         judgeWord()
+        judgeStagedTiles()
     }
 }

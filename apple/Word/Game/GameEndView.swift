@@ -2,8 +2,9 @@ import SwiftUI
 import WordCore
 
 /// The end of a game: the score in big tiles (or, in a battle, the placing),
-/// the ways onward, and — below the fold — who placed where and the words
-/// this player put down. It also serves a buried battle player while the
+/// the ways onward, and straight under them who placed where and the words
+/// this player put down — all on the first screenful, scrolling only if the
+/// word list runs long. It also serves a buried battle player while the
 /// battle plays on around them: the standings update live, and the host's
 /// controls appear when it's decided.
 struct GameEndView: View {
@@ -33,27 +34,25 @@ struct GameEndView: View {
     var scrollable = true
 
     var body: some View {
-        GeometryReader { proxy in
-            Group {
-                if scrollable {
-                    ScrollView { content(height: proxy.size.height) }
-                } else {
-                    content(height: proxy.size.height)
-                }
+        Group {
+            if scrollable {
+                ScrollView { content }
+            } else {
+                content
             }
-            .frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.bg.ignoresSafeArea())
         .accessibilityAddTraits(.isModal)
     }
 
-    private func content(height: CGFloat) -> some View {
+    private var content: some View {
         VStack(spacing: Spacing.gap * 2) {
-            // Centred in the first screenful, with the sections below the
-            // fold; a snapshot render lays it all out top to bottom instead.
+            // The block first and the standings right under it: who placed
+            // where has to be on screen without a scroll, on a phone.
             block
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: scrollable ? max(0, height - Spacing.margin * 2) : nil)
+                .padding(.top, Spacing.gap)
 
             if !standings.isEmpty {
                 section("Standings") {
