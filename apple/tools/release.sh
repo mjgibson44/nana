@@ -86,15 +86,6 @@ mkdir -p "$BUILD_DIR"
 # The project is generated, so regenerate before building from a clean checkout.
 (cd "$APPLE_DIR" && xcodegen generate >/dev/null)
 
-xcodebuild archive \
-  -project "${APPLE_DIR}/Word.xcodeproj" \
-  -scheme Word \
-  -destination "$DESTINATION" \
-  -archivePath "$ARCHIVE" \
-  -allowProvisioningUpdates \
-  ${AUTH[@]+"${AUTH[@]}"} \
-  CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
-
 # How the export signs. With an API key and no Apple ID signed into Xcode,
 # automatic signing reaches for Apple's cloud-managed distribution certificate
 # and fails if the key isn't allowed one ("Cloud signing permission error") —
@@ -117,6 +108,27 @@ if [ "$PLATFORM" = "ios" ] && [ ${#AUTH[@]} -gt 0 ]; then
     echo "==> No App Store profile could be ensured; exporting with automatic signing."
   fi
 fi
+
+# The archive's signature is thrown away when the export re-signs, so when the
+# export is going to sign manually the archive needs no identity whatsoever.
+# That matters on a runner: automatic signing insists on a *development*
+# identity to produce that throwaway signature, the fresh keychain hasn't got
+# one, and -allowProvisioningUpdates duly asks Apple for a new certificate on
+# every single run. Ad-hoc signing is not the answer — iOS refuses to archive
+# without a real profile even when the signature is discarded.
+if [ -n "$SIGNING" ]; then
+  ARCHIVE_SIGNING=(CODE_SIGNING_ALLOWED=NO)
+else
+  ARCHIVE_SIGNING=(-allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"})
+fi
+
+xcodebuild archive \
+  -project "${APPLE_DIR}/Word.xcodeproj" \
+  -scheme Word \
+  -destination "$DESTINATION" \
+  -archivePath "$ARCHIVE" \
+  ${ARCHIVE_SIGNING[@]+"${ARCHIVE_SIGNING[@]}"} \
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
 cat > "${BUILD_DIR}/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
