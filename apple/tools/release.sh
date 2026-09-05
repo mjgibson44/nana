@@ -109,18 +109,14 @@ if [ "$PLATFORM" = "ios" ] && [ ${#AUTH[@]} -gt 0 ]; then
   fi
 fi
 
-# The archive's signature is thrown away when the export re-signs, so when the
-# export is going to sign manually the archive needs no identity whatsoever.
-# That matters on a runner: automatic signing insists on a *development*
-# identity to produce that throwaway signature, the fresh keychain hasn't got
-# one, and -allowProvisioningUpdates duly asks Apple for a new certificate on
-# every single run. Ad-hoc signing is not the answer — iOS refuses to archive
-# without a real profile even when the signature is discarded.
-if [ -n "$SIGNING" ]; then
-  ARCHIVE_SIGNING=(CODE_SIGNING_ALLOWED=NO)
-else
-  ARCHIVE_SIGNING=(-allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"})
-fi
+# The archive is signed for real even though the export re-signs it moments
+# later. CODE_SIGNING_ALLOWED=NO looked like a free win — it stops a bare CI
+# keychain minting a development certificate per run — but it strips the
+# entitlements out of the binary, and the export re-signs from what the archive
+# holds. The result is a correctly signed app with none of its capabilities,
+# which for Time Tiles means shipping without Game Center or iCloud, and
+# nothing about the signature looks wrong.
+ARCHIVE_SIGNING=(-allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"})
 
 xcodebuild archive \
   -project "${APPLE_DIR}/Word.xcodeproj" \
