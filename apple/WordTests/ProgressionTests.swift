@@ -199,6 +199,11 @@ final class ProgressionTests: XCTestCase {
             flushes.append(Task { @MainActor in await progression.flush() })
         }
         for flush in flushes { await flush.value }
+        // The two `record`s above each fired a flush of their own that
+        // nobody awaits, and one of those may be the one holding the floor
+        // — with all eight above turned away at once. Wait for it too, or
+        // the count is read mid-drain: one sent, one still pending.
+        while progression.isFlushing { await Task.yield() }
 
         let submitted = await submitter.submitted
         XCTAssertEqual(
