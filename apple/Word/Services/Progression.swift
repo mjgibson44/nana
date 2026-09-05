@@ -31,7 +31,9 @@ final class Progression {
     var submitter: ProgressionSubmitter?
 
     /// Guards `flush` against overlapping itself — see the note there.
-    private var isFlushing = false
+    /// Readable so a test can wait for a flush it didn't start — `record`
+    /// fires one of its own that nothing awaits.
+    private(set) var isFlushing = false
     private var flushAgain = false
 
     init(store: KeyValueStore = UserDefaultsStore(), sync: SyncStore? = nil) {
