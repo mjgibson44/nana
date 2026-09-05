@@ -209,6 +209,14 @@ this appendix stays the one place the whole wire is described.
   stall rule are the host's alone (`occupyEnd`); each screen shows its own reading of
   them from the moment `start` arrived. Seats are capped at four; `hello` past that is
   rejected with "That game is full."
+
+  Cell keys travel in the **host's frame**. Each client turns the board for display only
+  (`occupyRotation(seat:)`, so its own start square is top-left) and turns a placement
+  back before sending it, so nothing about the rotation is on the wire. The referee's word
+  test reads a run in either direction along its line (`occupyIsWord`), since every seat
+  writes left to right in its own frame; a `refused` for a non-word names the host's
+  reading of it, which is only reachable on a dictionary mismatch because clients judge
+  with the same rule before sending.
 - **v8 — `countdown`.** An optional `countdown` (seconds left) on the `state` snapshot,
   for random matches that deal themselves once everyone is here; nil whenever no
   countdown is running. The election rules that go with it (everyone a client, lowest id

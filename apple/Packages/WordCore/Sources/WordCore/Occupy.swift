@@ -12,8 +12,11 @@
 /// The rules in one breath:
 ///
 ///  - The board is `occupyBoardSize` square and never grows. Each seat opens
-///    from its own start square (`occupyStartCell`), heading toward the
-///    middle of the board.
+///    from its own start square (`occupyStartCell`) — and every seat sees the
+///    board turned so that square sits top-left (`occupyRotation`), so
+///    everyone's own words run left to right, toward the middle. A rival's
+///    words therefore read backwards on your screen, and a run counts as a
+///    word if it reads as one in either direction (`occupyIsWord`).
 ///  - Every word after the opener borrows a letter through a gap tile. The
 ///    borrowed letter is **captured**: it flips to the borrower's colour.
 ///  - Every tile is worth the length of the longest word it sits in, and a
@@ -53,9 +56,10 @@ public let OCCUPY_LARGE_BOARD = 19
 public let OCCUPY_SHORT_SECONDS = 180
 public let OCCUPY_LONG_SECONDS = 240
 
-/// Thirty seconds of nobody placing a word is a locked board, and the game
-/// ends early. Composing even a long word rarely takes this long.
-public let OCCUPY_STALL_SECONDS: Double = 30
+/// A full minute of nobody placing a word is a locked board, and the game
+/// ends early. Long enough to compose a long word and hunt for a crossing;
+/// short enough that a stuck board doesn't run out the whole clock.
+public let OCCUPY_STALL_SECONDS: Double = 60
 
 /// The opening grace: the stall clock doesn't run for this long, so a slow
 /// start can't end the game.
@@ -89,12 +93,73 @@ public func occupyStartCell(seat: Int, size: Int) -> Cell {
     }
 }
 
-/// Which way a seat's opener runs: toward the middle of the board, so a
-/// right-hand seat's word never runs off the edge. Left-column seats head
-/// right; right-column seats head left, and their word *ends* on the start
-/// square.
-public func occupyOpenerHeadsRight(seat: Int) -> Bool {
-    seat == 0 || seat == 3
+/// How the board is turned for a seat: quarter turns clockwise of the host's
+/// board, chosen so the seat's own start square lands where seat 0's is —
+/// the top-left quadrant. Every player then opens from their top-left and
+/// writes left to right, toward the middle; what crosses the wire is still
+/// the host's frame, so a right-hand seat's word is stored reversed there.
+public enum OccupyRotation: Int, CaseIterable, Equatable {
+    case upright = 0
+    case quarter = 1
+    case half = 2
+    case threeQuarters = 3
+
+    /// The turn that undoes this one.
+    public var inverse: OccupyRotation {
+        OccupyRotation(rawValue: (4 - rawValue) % 4)!
+    }
+}
+
+/// The turn that puts a seat's start square top-left.
+public func occupyRotation(seat: Int) -> OccupyRotation {
+    switch seat {
+    case 1: return .half
+    case 2: return .threeQuarters
+    case 3: return .quarter
+    default: return .upright
+    }
+}
+
+/// A cell after `rotation` quarter turns clockwise of a `size`-square board.
+public func rotateCell(_ cell: Cell, size: Int, by rotation: OccupyRotation) -> Cell {
+    let n = size - 1
+    switch rotation {
+    case .upright: return cell
+    case .quarter: return Cell(row: cell.col, col: n - cell.row)
+    case .half: return Cell(row: n - cell.row, col: n - cell.col)
+    case .threeQuarters: return Cell(row: n - cell.col, col: cell.row)
+    }
+}
+
+public func rotateKey(_ key: CellKey, size: Int, by rotation: OccupyRotation) -> CellKey {
+    guard rotation != .upright else { return key }
+    let cell = rotateCell(parseKey(key), size: size, by: rotation)
+    return keyOf(cell.row, cell.col)
+}
+
+public func rotateOwners(
+    _ owners: [CellKey: Int], size: Int, by rotation: OccupyRotation
+) -> [CellKey: Int] {
+    guard rotation != .upright else { return owners }
+    var turned: [CellKey: Int] = [:]
+    for (key, seat) in owners { turned[rotateKey(key, size: size, by: rotation)] = seat }
+    return turned
+}
+
+extension TileMap {
+    /// The same letters on a turned board. Insertion order is kept, so a
+    /// turned board deals the same hand as its original would.
+    public func rotated(size: Int, by rotation: OccupyRotation) -> TileMap {
+        guard rotation != .upright else { return self }
+        return TileMap(entries.map { (rotateKey($0.key, size: size, by: rotation), $0.value) })
+    }
+}
+
+/// Whether a run reads as a word in either direction along its line. Every
+/// seat writes left to right in its own frame, so in the host's frame — and
+/// on every rival's screen — some words are stored backwards.
+public func occupyIsWord(_ word: String, isWord: (String) -> Bool) -> Bool {
+    isWord(word) || isWord(String(word.reversed()))
 }
 
 /// The quadrant a cell sits in, numbered like the seats, or nil on the centre
@@ -110,28 +175,6 @@ public func occupyQuadrant(of cell: Cell, size: Int) -> Int? {
     case (true, false): return 2
     case (false, true): return 3
     }
-}
-
-/// Where a seat's opener has to start so that it heads toward the middle.
-/// Heading right it starts on the start square; heading left it ends there,
-/// so the anchor is found by walking the picks back from it — flowing back
-/// over letters already down the same way `planPlacement` flows forward over
-/// them. Nil when the walk falls off the board.
-public func occupyOpenerAnchor(
-    board: TileMap, bounds: Bounds, start: Cell, headsRight: Bool, picks: [Pick]
-) -> Cell? {
-    guard !headsRight else { return start }
-    var col = start.col
-    var i = picks.count - 2
-    while i >= 0 {
-        col -= 1
-        while bounds.contains(row: start.row, col: col) && board[keyOf(start.row, col)] != nil {
-            col -= 1
-        }
-        guard bounds.contains(row: start.row, col: col) else { return nil }
-        i -= 1
-    }
-    return Cell(row: start.row, col: col)
 }
 
 /// The squares the gap picks would sit on, laid out from `anchor` the same
@@ -172,6 +215,16 @@ public struct OccupyPlacement: Codable, Equatable {
     public init(tiles: [CellKey: String], borrowed: [CellKey]) {
         self.tiles = tiles
         self.borrowed = borrowed
+    }
+
+    /// The same word on a turned board — how a client's word, laid in its own
+    /// frame, is put into the host's before it's sent.
+    public func rotated(size: Int, by rotation: OccupyRotation) -> OccupyPlacement {
+        guard rotation != .upright else { return self }
+        var turned: [CellKey: String] = [:]
+        for (key, letter) in tiles { turned[rotateKey(key, size: size, by: rotation)] = letter }
+        return OccupyPlacement(
+            tiles: turned, borrowed: borrowed.map { rotateKey($0, size: size, by: rotation) })
     }
 }
 
@@ -376,11 +429,14 @@ public func occupyApply(
         }
     }
 
-    // Only real words go down, the same test every mode applies.
+    // Only real words go down — read either way along the line, since every
+    // seat writes toward the middle in its own frame (`occupyIsWord`).
     let touched = Array(placement.tiles.keys) + placement.borrowed
     let runs = runsTouching(touched, in: next.board)
     guard !runs.isEmpty else { throw OccupyRefusal.notAWord(placement.tiles.values.sorted()) }
-    let bad = runs.filter { $0.word.count < MIN_WORD_LENGTH || !isWord($0.word) }
+    let bad = runs.filter {
+        $0.word.count < MIN_WORD_LENGTH || !occupyIsWord($0.word, isWord: isWord)
+    }
     guard bad.isEmpty else { throw OccupyRefusal.notAWord(bad.map(\.word)) }
 
     for key in placement.tiles.keys { next.owners[key] = seat }
