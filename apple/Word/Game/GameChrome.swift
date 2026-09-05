@@ -389,8 +389,12 @@ struct GapTile: View {
 ///
 /// A tap claims a letter for the word; a drag carries it to the board. Both
 /// come through the one pointer pipeline (`dispatch`) so the slop that tells
-/// them apart is the board's own. Without a pipeline — previews, layout
-/// tests — the tiles are plain buttons.
+/// them apart is the board's own — and, like the board, through one
+/// transparent input plane over the whole grid rather than a surface per
+/// tile: the tile under the finger empties the moment it lifts, and a
+/// gesture that lived on that tile would die with it and never report its
+/// release. Without a pipeline — previews, layout tests — the tiles are
+/// plain buttons.
 struct PileView: View {
     var letters: [String]
     var picked: Set<Int>
@@ -403,6 +407,11 @@ struct PileView: View {
     /// The unified pointer pipeline, when there is one to feed.
     var dispatch: ((GestureMachine.Event) -> Void)? = nil
     var context: () -> GestureMachine.Context = { .init() }
+
+    /// The grid's frame in the game's coordinate space — the space the
+    /// pipeline reports presses in — so a press can be turned back into a
+    /// slot.
+    @State private var gridFrame: CGRect = .zero
 
     var body: some View {
         let columns = Spacing.columns
@@ -421,8 +430,50 @@ struct PileView: View {
                 }
             }
         }
+        .overlay {
+            // One input plane above every slot, as the board has above every
+            // cell. It never goes away, so the gesture it starts always ends.
+            if let dispatch {
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .pointerSurface(target: target(at:), context: context, dispatch: dispatch)
+                    .accessibilityHidden(true)
+            }
+        }
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named(GameScreen.space))
+        } action: { frame in
+            gridFrame = frame
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Pile, \(letters.count) of \(PILE_LIMIT) tiles")
+    }
+
+    /// The press-time hit-test: the letter under the point, or nothing — an
+    /// empty slot, a slot whose tile is out on the board, or the gap between
+    /// tiles is inert.
+    private func target(at point: CGPoint) -> GestureMachine.DownTarget? {
+        guard let index = Self.slot(at: point, in: gridFrame, tileSize: tileSize),
+            index < letters.count, index != hidden, !staged.contains(index)
+        else { return nil }
+        return .rackTile(index: index, letter: letters[index])
+    }
+
+    /// Which of the twenty-four slots a point falls in, given the grid's
+    /// frame: the tile itself, not the gap after it. Pure, so it tests
+    /// without a view.
+    static func slot(at point: CGPoint, in frame: CGRect, tileSize: CGFloat) -> Int? {
+        let pitch = tileSize + Spacing.tileGap
+        let x = point.x - frame.minX
+        let y = point.y - frame.minY
+        guard x >= 0, y >= 0 else { return nil }
+        let column = Int(x / pitch)
+        let row = Int(y / pitch)
+        guard column < Spacing.columns, row < Spacing.pileRows,
+            x - CGFloat(column) * pitch < tileSize, y - CGFloat(row) * pitch < tileSize
+        else { return nil }
+        return row * Spacing.columns + column
     }
 
     @ViewBuilder
@@ -431,12 +482,10 @@ struct PileView: View {
         let isPicked = picked.contains(index)
         let face = LetterTile(text: letter, style: isPicked ? .raised : .dim, size: tileSize)
         Group {
-            if let dispatch {
+            if dispatch != nil {
+                // The input plane above takes the pointer; the tile is left
+                // to draw, and to speak for itself to assistive tech.
                 face
-                    .contentShape(Rectangle())
-                    .pointerSurface(
-                        target: { _ in .rackTile(index: index, letter: letter) },
-                        context: context, dispatch: dispatch)
                     .accessibilityElement()
                     .accessibilityAction { onTap(index) }
             } else {

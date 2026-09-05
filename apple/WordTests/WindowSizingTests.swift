@@ -78,6 +78,32 @@ final class WindowSizingTests: XCTestCase {
     }
     #endif
 
+    /// The pile's one input plane turns a press back into a slot by
+    /// arithmetic: the tile under the point, and nothing for the gap after
+    /// it, the gutter, or a row past the third. (Why one plane: a tile
+    /// lifted by a press empties its slot at once, and a gesture living on
+    /// that tile died with it — the pile froze after one tap.)
+    func testThePileInputPlaneFindsTheSlotUnderAPoint() {
+        let frame = CGRect(x: 100, y: 200, width: 300, height: 100)
+        let tile: CGFloat = 32
+        let pitch = tile + Spacing.tileGap
+        func slot(_ x: CGFloat, _ y: CGFloat) -> Int? {
+            PileView.slot(at: CGPoint(x: frame.minX + x, y: frame.minY + y), in: frame, tileSize: tile)
+        }
+        XCTAssertEqual(slot(0, 0), 0)
+        XCTAssertEqual(slot(tile - 0.5, tile - 0.5), 0)
+        XCTAssertEqual(slot(pitch, 0), 1)
+        XCTAssertEqual(slot(pitch * 7 + 10, 0), 7)
+        XCTAssertEqual(slot(10, pitch), Spacing.columns)
+        XCTAssertEqual(slot(pitch * 7 + 10, pitch * 2 + 10), PILE_LIMIT - 1)
+        // The gap after a tile, the gutter, and a fourth row are nothing.
+        XCTAssertNil(slot(tile + 1, 0))
+        XCTAssertNil(slot(0, tile + 1))
+        XCTAssertNil(slot(-1, 0))
+        XCTAssertNil(slot(pitch * 8 + 1, 0))
+        XCTAssertNil(slot(0, pitch * 3))
+    }
+
     /// The board's own content is *supposed* to be huge — that's the lattice.
     /// This pins the premise the tests above rest on, so a future change that
     /// shrinks the lattice doesn't quietly make them vacuous.
