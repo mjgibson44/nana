@@ -34,6 +34,15 @@ struct BoardScene {
     /// Occupy's zones, in this seat's frame: the patches where a tile is
     /// worth double.
     var zones: [OccupyZone] = []
+    /// Wildfire: the squares alight. Every one of them burns at the end of
+    /// this round unless a tile lands on it or beside it.
+    ///
+    /// Cells rather than keys, because the lattice below walks every square on
+    /// screen — 1,100+ at full zoom-out — and asking these sets in cell terms
+    /// keeps that pass free of per-square string building.
+    var fires: Set<Cell> = []
+    /// And the ground fire has already taken. Nothing goes here again.
+    var scars: Set<Cell> = []
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -57,18 +66,42 @@ struct BoardContentView: View {
                 let bounds = metrics.bounds
                 let zoneCells: Set<Cell> =
                     scene.zones.isEmpty ? [] : Set(scene.zones.flatMap(\.cells))
+                let burning = scene.fires
+                let scarred = scene.scars
                 for row in 0..<metrics.rows {
                     for col in 0..<metrics.cols {
                         let rect = CGRect(
                             x: Double(col) * step, y: Double(row) * step,
                             width: cell, height: cell)
-                        let inZone =
-                            !zoneCells.isEmpty
-                            && zoneCells.contains(
-                                Cell(row: bounds.minRow + row, col: bounds.minCol + col))
+                        let here = Cell(row: bounds.minRow + row, col: bounds.minCol + col)
+                        // Dead ground reads as a hole in the board rather than
+                        // as a square with something on it — the point is that
+                        // nothing can go there. A burning square is the
+                        // brightest empty cell on screen, because it is the one
+                        // asking to be played on before the round ends.
+                        let isScarred = !scarred.isEmpty && scarred.contains(here)
+                        let isBurning = !isScarred && !burning.isEmpty && burning.contains(here)
+                        let fill: Color
+                        if isScarred {
+                            fill = Palette.scarCell
+                        } else if isBurning {
+                            fill = Palette.fireCell
+                        } else if !zoneCells.isEmpty, zoneCells.contains(here) {
+                            fill = Palette.zoneCell
+                        } else {
+                            fill = Palette.surface
+                        }
                         context.fill(
                             Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
-                            with: .color(inZone ? Palette.zoneCell : Palette.surface))
+                            with: .color(fill))
+                        if isBurning {
+                            context.stroke(
+                                Path(
+                                    roundedRect: rect, cornerRadius: radius,
+                                    style: .continuous),
+                                with: .color(Palette.fireEdge),
+                                lineWidth: Self.zoneEdgeWidth(for: cell))
+                        }
                     }
                 }
                 for zone in scene.zones {

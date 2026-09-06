@@ -14,13 +14,21 @@ import WordCore
 /// held, and starts ticking when the player dismisses the card.
 struct SavedSoloGame: Codable, Equatable {
     /// Bumped if the shape changes; a stale blob is dropped, never migrated.
-    /// v3 dropped the Daily Deal's fields along with the mode.
-    static let version = 3
+    /// v3 dropped the Daily Deal's fields along with the mode; v4 added the
+    /// hazard and the fire it lit.
+    static let version = 4
     static let key = "nana.solo.save.v1"
 
     var version: Int = Self.version
     var seed: String
     var pace: String
+    /// What the board was up to — `SoloHazard`'s raw value. Defaulted so a
+    /// blob can still be built by naming only the fields a plain game has.
+    var hazard: String = SoloHazard.none.rawValue
+    /// The cells alight and the ground already lost. Saved rather than
+    /// replayed: a restored game comes back to exactly the board it left,
+    /// burns and all, without having to rewind fire's randomness.
+    var fire: Wildfire = Wildfire()
     var board: TileMap
     var rack: [String]
     var phase: String
@@ -35,6 +43,7 @@ struct SavedSoloGame: Codable, Equatable {
     var savedAt: Double
 
     var soloPace: SoloPace { SoloPace(rawValue: pace) ?? .regular }
+    var soloHazard: SoloHazard { SoloHazard(rawValue: hazard) ?? .none }
     var soloPhase: SoloPhase { phase == "drip" ? .drip : .initial }
 
     var savedDate: Date { Date(timeIntervalSince1970: savedAt) }

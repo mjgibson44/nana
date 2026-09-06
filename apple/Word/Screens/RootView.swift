@@ -62,7 +62,8 @@ struct RootView: View {
             case .soloSetup:
                 SoloSetupScreen(
                     pace: settings.pace,
-                    onPlay: startSolo(pace:),
+                    hazard: settings.hazard,
+                    onPlay: startSolo(pace:hazard:),
                     onClose: { route = .home })
 
             case .battleEntry:
@@ -101,7 +102,7 @@ struct RootView: View {
                     model: model,
                     battle: battle,
                     onLeave: leaveGame,
-                    onNewGame: startSolo(pace:))
+                    onNewGame: startSolo(pace:hazard:))
             }
 
             // Battle is the one mode that genuinely needs an identity, so it
@@ -128,7 +129,7 @@ struct RootView: View {
             // environment opens straight onto a game, so a simulator can be
             // screenshotted without a finger on it. Ignored otherwise.
             switch ProcessInfo.processInfo.environment["WORD_AUTOSTART"] {
-            case "solo": startSolo(pace: settings.pace)
+            case "solo": startSolo(pace: settings.pace, hazard: settings.hazard)
             case "occupy": startLocalOccupy()
             default: break
             }
@@ -144,13 +145,14 @@ struct RootView: View {
 
     // MARK: Solo
 
-    private func startSolo(pace: SoloPace) {
+    private func startSolo(pace: SoloPace, hazard: SoloHazard) {
         // This is the one moment a player says what they want, so it's the
         // only one worth remembering.
         settings.pace = pace
+        settings.hazard = hazard
         settings.save(nil)
         savedGame = nil
-        model.newGame(pace: pace)
+        model.newGame(pace: pace, hazard: hazard)
         route = .game
     }
 

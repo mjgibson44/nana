@@ -229,6 +229,24 @@ final class GameModel {
     /// Which mode is being played: Solo (`endless`), Battle, or Occupy.
     private(set) var mode: GameMode = .endless
 
+    /// What else the board is up to, in Solo. `.none` is the game as it has
+    /// always played; `.wildfire` lights the board (`WordCore/Wildfire.swift`).
+    private(set) var hazard: SoloHazard = .none
+    /// The cells alight and the ground already lost. Empty in every mode but
+    /// Wildfire, so everything below can ask it without asking the hazard.
+    private(set) var fire = Wildfire()
+    /// Fires put out this game, for the summary.
+    private(set) var firesDoused = 0
+
+    /// Put the board's fire somewhere directly.
+    ///
+    /// The game never calls this — fire is the round clock's to light and the
+    /// player's to put out. It exists so a test can start from a board that
+    /// would otherwise take several rounds of real play to arrive at.
+    func setFire(_ next: Wildfire) {
+        fire = next
+    }
+
     /// Occupy's shared board and seat, while `mode == .occupy`.
     private(set) var occupy: OccupyRun?
     /// Which seat owns each tile on the board, in Occupy. Empty otherwise.
@@ -505,11 +523,24 @@ final class GameModel {
     /// end a game.
     var pileCount: Int { rack.count }
 
+    /// How full the pile may get before it buries you. `PILE_LIMIT` in every
+    /// game but a burning one, which gets `WILDFIRE_PILE_RELIEF` more room:
+    /// fire feeds the same pile the clock feeds, and a limit set for one
+    /// source of tiles would make the mode about the gauge rather than the
+    /// fire.
+    var pileLimit: Int { hazardPileLimit(PILE_LIMIT, hazard) }
+
+    /// The gauge's colours move with the limit, so amber and red keep saying
+    /// what they have always said: "one more batch" and "one more batch could
+    /// end this".
+    var pileWarn: Int { PILE_WARN + pileLimit - PILE_LIMIT }
+    var pileUrgent: Int { PILE_URGENT + pileLimit - PILE_LIMIT }
+
     var pileTone: PileTone {
         // A full pile is the normal state of an Occupy hand, not a warning.
         if mode == .occupy { return .ok }
-        if rack.count >= PILE_URGENT { return .urgent }
-        if rack.count >= PILE_WARN { return .warn }
+        if rack.count >= pileUrgent { return .urgent }
+        if rack.count >= pileWarn { return .warn }
         return .ok
     }
 
@@ -546,10 +577,14 @@ final class GameModel {
     // MARK: Game lifecycle
 
     func newGame(
-        seed: String = randomSeed(), pace: SoloPace = .regular, now: Date = .now
+        seed: String = randomSeed(), pace: SoloPace = .regular,
+        hazard: SoloHazard = .none, now: Date = .now
     ) {
         self.seed = seed
         mode = .endless
+        self.hazard = hazard
+        fire = Wildfire()
+        firesDoused = 0
         clearBattle()
         solo = SoloSession(pace: pace, now: now)
         gameSerial += 1
@@ -569,6 +604,8 @@ final class GameModel {
     ) {
         self.seed = seed
         mode = .battle
+        hazard = .none
+        fire = Wildfire()
         self.spectating = spectating
         battle = BattleRun(startedAt: now)
         battleRound = 1
@@ -853,6 +890,7 @@ final class GameModel {
         if mode == .occupy { return }
         if let tiles = solo.advance(at: now) {
             dealBonusTiles(tiles, message: "+\(tiles) tile\(tiles == 1 ? "" : "s")")
+            advanceFire()
         }
         soundTick(at: now)
     }
@@ -908,8 +946,34 @@ final class GameModel {
 
     /// One rule, every mode: a full pile ends the game on the spot.
     private func checkBurial() {
-        guard !isComplete, !spectating, mode != .occupy, rack.count >= PILE_LIMIT else { return }
+        guard !isComplete, !spectating, mode != .occupy, rack.count >= pileLimit else { return }
         finishGame(reason: .buried)
+    }
+
+    /// One round of fire, on the same expiry that lands the tiles — so the
+    /// mode keeps one pulse rather than two clocks. Everything alight has had
+    /// its round of grace by now, so this is where it costs something: the
+    /// ground scars, a tile beside each fire comes back to the pile, and the
+    /// fire steps on. New fires catch behind it, and get their own round.
+    ///
+    /// The pile is where the damage lands, so `appendDealtTiles` does the
+    /// rest — including checking whether that was the tile that buried you.
+    /// Burnt tiles sound like a rival's attack, because they mean the same
+    /// thing: tiles arriving in your pile that you did not choose.
+    private func advanceFire() {
+        guard hazard == .wildfire, !isComplete, !board.isEmpty else { return }
+        let round = wildfireAdvance(
+            fire, board: board, ignitions: wildfireIgnitions(dripsElapsed),
+            rng: seededRng("\(seed)/fire/\(dripsElapsed)"))
+        fire = round.fire
+        guard !round.burnt.isEmpty else { return }
+
+        var next = board
+        for key in round.burnt { next[key] = nil }
+        setBoard(next)
+        let count = round.burnt.count
+        appendDealtTiles(round.returned, cue: .attack)
+        rejectToast("Fire took \(count) tile\(count == 1 ? "" : "s")")
     }
 
     /// The clear bonus lands before the refill. The view supplies the web's
@@ -1426,6 +1490,14 @@ final class GameModel {
     private func land(plan result: PlacementPlan, picks picksToPlace: [Pick], borrowed: [CellKey])
         -> Bool
     {
+        // Burnt ground takes nothing, ever. Checked here rather than in the
+        // placement planner so every road to a landing — the row, the aim, the
+        // staged tiles — is refused the same way and says the same thing.
+        guard wildfireAllows(fire, cells: result.steps.map(\.key)) else {
+            rejectToast("That ground is burnt out.")
+            return false
+        }
+
         var next = board
         for step in result.steps { next[step.key] = step.letter }
         let newRuns = runsTouching(result.steps.map(\.key), in: next)
@@ -1474,6 +1546,7 @@ final class GameModel {
         rack = rack.enumerated().filter { !spent.contains($0.offset) }.map(\.element)
         clearAim()
         cues?.play(.commit)
+        douseFires(reachedBy: result.steps.map(\.key))
         soundPileAlarm()
 
         // Battle: the word that just landed hits the field. Only the growth
@@ -1501,6 +1574,25 @@ final class GameModel {
             }
         }
         return true
+    }
+
+    /// A word that lands on a burning cell — or beside one — puts it out, and
+    /// scores for it.
+    ///
+    /// Beside it counts on purpose: needing a tile on the exact square would
+    /// mean losing fires to the letters you happened to hold, and a fire
+    /// should cost a decision rather than a coin flip. The bonus is what keeps
+    /// fire an opportunity instead of a tax — answering the board is never a
+    /// pure cost.
+    func douseFires(reachedBy cells: [CellKey]) {
+        guard hazard == .wildfire, !fire.fires.isEmpty else { return }
+        let (next, doused) = wildfireDouse(fire, played: cells)
+        guard !doused.isEmpty else { return }
+        fire = next
+        firesDoused += doused.count
+        let bonus = wildfireDouseBonus(doused.count)
+        bankedBonus += bonus
+        rejectToast(doused.count == 1 ? "Fire out! +\(bonus)" : "\(doused.count) fires out! +\(bonus)")
     }
 
     /// Occupy's landing: the word goes on this screen's board at once and
@@ -1628,6 +1720,11 @@ final class GameModel {
                 endDrag()
                 return
             }
+            guard wildfireAllows(fire, key) else {
+                rejectToast("That ground is burnt out.")
+                endDrag()
+                return
+            }
             self.drag = nil
             staged.append(StagedTile(key: key, rackIndex: drag.rackIndex))
         case .pile:
@@ -1718,6 +1815,8 @@ final class GameModel {
         return SavedSoloGame(
             seed: seed,
             pace: pace.rawValue,
+            hazard: hazard.rawValue,
+            fire: fire,
             board: board,
             rack: rack,
             phase: phase == .drip ? "drip" : "initial",
@@ -1735,6 +1834,9 @@ final class GameModel {
     func restore(_ saved: SavedSoloGame, now: Date = .now) {
         seed = saved.seed
         mode = .endless
+        hazard = saved.soloHazard
+        fire = saved.fire
+        firesDoused = 0
         clearBattle()
         solo = SoloSession(
             restoring: saved.soloPace,

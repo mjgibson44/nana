@@ -66,6 +66,16 @@ enum Palette {
     /// mistaken for anybody's tiles.
     static let zoneCell = Color(hex: 0x343434)
     static let zoneEdge = Color(hex: 0xD4D4D4)
+
+    /// Wildfire. A burning square is the brightest empty cell on the board —
+    /// it is the one asking to be played on before the round ends — and takes
+    /// the same warm amber the pile gauge warns in, so the two kinds of
+    /// trouble read as one family.
+    static let fireCell = Color(hex: 0x6E3B05)
+    static let fireEdge = Color(hex: 0xE39A2B)
+    /// Dead ground: darker than the board itself, so it reads as a hole in it
+    /// rather than as a square with something on it.
+    static let scarCell = Color(hex: 0x0D0B0A)
 }
 
 /// The colours a seat's tiles wear, as seen from another seat.

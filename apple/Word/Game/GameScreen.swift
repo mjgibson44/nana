@@ -20,7 +20,7 @@ struct GameScreen: View {
     /// Out: home from a solo game, out of the battle from a battle.
     var onLeave: () -> Void = {}
     /// Deal a fresh solo game. The router owns it so the pace gets remembered.
-    var onNewGame: ((SoloPace) -> Void)?
+    var onNewGame: ((SoloPace, SoloHazard) -> Void)?
 
     @State private var camera = BoardCamera()
     @State private var machine = GestureMachine()
@@ -55,7 +55,7 @@ struct GameScreen: View {
                         // holds how much of the board instead.
                         OccupyBarView(segments: occupySegments)
                     } else {
-                        PileGaugeView(count: model.pileCount, tone: model.pileTone)
+                        PileGaugeView(count: model.pileCount, limit: model.pileLimit, tone: model.pileTone)
                         if !rivals.isEmpty {
                             RivalGaugesView(rivals: rivals)
                         }
@@ -299,7 +299,7 @@ struct GameScreen: View {
             items.append(
                 GameMenuView.Item(title: "NEW GAME") {
                     closeMenu()
-                    startNewGame(pace: model.pace)
+                    startNewGame(pace: model.pace, hazard: model.hazard)
                 })
             items.append(
                 GameMenuView.Item(title: "HOME") {
@@ -403,7 +403,9 @@ struct GameScreen: View {
             wordsAt: model.wordsByCell.mapValues { $0.map(\.word) },
             owners: model.owners,
             viewerSeat: model.occupySeat,
-            zones: model.occupyZones)
+            zones: model.occupyZones,
+            fires: Set(model.fire.fires.map(parseKey)),
+            scars: Set(model.fire.scars.map(parseKey)))
     }
 
     /// Placed words are permanent in every mode, and nothing placed is ever
@@ -626,7 +628,7 @@ struct GameScreen: View {
         if let battle {
             return battle.canRestart ? { battle.restart() } : nil
         }
-        return { startNewGame(pace: model.pace) }
+        return { startNewGame(pace: model.pace, hazard: model.hazard) }
     }
 
     private var endNote: String? {
@@ -722,14 +724,16 @@ struct GameScreen: View {
         model.pause(at: .now)
     }
 
-    private func startNewGame(pace: SoloPace) {
+    /// Again — the same game, not merely the same speed. A player who chose
+    /// to play under fire and pressed "play again" meant fire too.
+    private func startNewGame(pace: SoloPace, hazard: SoloHazard) {
         let now = Date.now
         clockNow = now
         settleGestures()
         if let onNewGame {
-            onNewGame(pace)
+            onNewGame(pace, hazard)
         } else {
-            model.newGame(pace: pace, now: now)
+            model.newGame(pace: pace, hazard: hazard, now: now)
         }
     }
 }
