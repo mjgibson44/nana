@@ -1,8 +1,10 @@
 # Occupy, reworked: your own ground, and zones worth fighting for
 
-A plan, not a diff. Two rule changes to the Apple-only Occupy mode
+Two rule changes to the Apple-only Occupy mode
 (`apple/Packages/WordCore/Sources/WordCore/Occupy.swift` and everything that
-reads it), written down before anything is built.
+reads it), written down before anything was built — and **built on this
+branch since**, protocol v10. Where the code and this page disagree, the code
+is the truth; the numbers here are the ones it uses.
 
 ## What changes, in one breath
 
@@ -213,9 +215,10 @@ Zones are the headline now, so the tiebreak follows them:
 - **Toasts** (`adoptOccupy` already diffs the zone list): "Zone open — one
   minute", then "You took the zone! +25" / "They took the zone, 6–4" /
   "Nobody held the zone".
-- **Sound**: reuse `.deal` for a zone opening and `.win` / `.lose` for taking
-  or losing one. A dedicated cue can come later; `SoundSpec.swift` is cheap to
-  extend but the four existing shapes read correctly here.
+- **Sound**: borrowed rather than new. The quiet `.tick` when a zone opens,
+  the pile's rising `.deal` chime for one taken, the `.attack` growl for one
+  lost. Not `.win` / `.lose`: those two are the end-of-game fanfares, and a
+  lost zone should never sound like a lost game.
 - **Mode card** (`OCCUPY_INFO` in `Modes.swift`) needs rewriting — it currently
   sells capture-by-crossing:
 
@@ -302,7 +305,8 @@ Changed or new, roughly the shape of the existing suites:
   Seven zones is therefore up to 175 points of swing in a game where a busy
   seat scores a few hundred — enough to matter, not enough to be the whole
   game. It is the one dial that decides whether minute eight is still live, so
-  it wants a playtest before it is settled; the constant exists so it can move.
+  it wants a playtest before it is settled; the constant exists so it can move
+  (`OCCUPY_ZONE_BONUS`).
 - **Do zone tiles still read as special after the whistle?** The plan says no —
   a resolved zone is a scoreboard mark, not terrain. The alternative (a
   resolved zone keeps paying its holder a trickle) adds a snowball to a mode

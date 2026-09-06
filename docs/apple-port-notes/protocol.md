@@ -184,7 +184,7 @@ All of the following exists solely for signaling/NAT traversal and would be dele
 - State broadcasts include every player's data to everyone (full BattleState, battleSession.ts:629-633); harmless here, but note names are the only user content and are sanitized host-side only (battleSession.ts:245-251)
 - The visibilitychange/wake healing paths (battleSession.ts:307-310, 777-786) are browser-specific; iOS backgrounding suspends GKMatch sessions entirely — the resume-from-background story must be redesigned, not ported
 - TURN credentials are deliberately committed in .env.production (Metered free tier) and ship in the JS bundle; if any web build remains alongside the GameKit port, rotating/retiring them is a manual dashboard task (.env.production:1-14, infra/README.md:96-100)
-## 10. Apple-only additions (protocol v6, v7, v8 and v9)
+## 10. Apple-only additions (protocol v6 through v10)
 
 Documented in `apple/Packages/WordNet/Sources/WordNet/Protocol.swift`; summarised here so
 this appendix stays the one place the whole wire is described.
@@ -196,7 +196,8 @@ this appendix stays the one place the whole wire is described.
 - **v7 — Occupy.** A second game the same lobby can play (`BattleState.mode`, defaulting
   to `battle` when absent), with the shared board riding in every `state` snapshot as
   `BattleState.occupy` (`OccupyState`: frame, seats, board, owners, opened, scores,
-  settledAt, zones, end — `frame` and `zones` since v9, below). Three messages:
+  settledAt, bonuses, zones, end — `frame` and `zones` since v9, `bonuses` and the
+  zone lifecycle since v10, both below). Three messages:
   - `{ t: 'place', serial, placement }` client → host. `placement` is the outcome —
     `tiles` (new cell → letter) and `borrowed` (the gap squares) — not the picks. The
     host runs `occupyApply` (WordCore) against its board and dictionary.
@@ -232,3 +233,26 @@ this appendix stays the one place the whole wire is described.
   then every 75 s) off the game's seed, and decoded as empty when absent. Clients turn
   zones for display exactly as they turn the board. The version bump is what keeps a
   v8 board from meeting a v9 one in the random-match pool.
+- **v10 — Occupy's own words, and zones with a whistle.** Two rule changes, both
+  riding the snapshot; no new message types.
+  - **Nothing changes hands.** A tile's owner is stamped when it lands and never
+    rewritten, so `occupyApply` refuses a placement that borrows a rival's letter
+    (`notYours`) or runs its line through one (`throughRival`). Two players' tiles
+    may sit flush: a run is a maximal *same-owner* line (`occupyOwnedRuns`), so
+    the seam between two words is read and valued as a border rather than as a
+    word. Tile value is the longest word **of its owner's** that it sits in.
+  - **A zone is a minute-long contest**, not a permanent multiplier. Each zone in
+    the snapshot now carries `slot`, `opensAt`, `closesAt` (seconds since the
+    deal, so every screen runs the countdown off the start it already has),
+    `winner`, `counts` and `resolved`; `OCCUPY_ZONE_SIZE` is 5. The host opens one
+    a minute into the game and every 75 s after (a minute open, then a 15 s gap),
+    skipping any slot with under 30 s of match clock left — seven in a ten-minute
+    game — and blows the whistle on its own clock: most tiles inside takes
+    `OCCUPY_ZONE_BONUS`, a tie takes nothing, and anything still open when the
+    game ends is decided there. The bonus banked per seat is `OccupyState.bonuses`
+    (zeros when absent), and `scores` stays the total of board value plus bonuses,
+    so every screen that shows a score is unchanged.
+
+  A v9 zone would decode as a permanent 2× patch that no longer exists, which is
+  what the version bump is for: a v9 board must not meet a v10 one in the
+  random-match pool.

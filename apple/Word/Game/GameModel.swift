@@ -408,7 +408,8 @@ final class GameModel {
         guard let dictionary, let plan, plan.complete else { return nil }
         var next = board
         for step in plan.steps { next[step.key] = step.letter }
-        let runs = runsTouching(plan.steps.map(\.key), in: next)
+        let placed = plan.steps.map(\.key)
+        let runs = wordRuns(touching: placed, in: next, landing: placed)
         if runs.isEmpty { return nil }
         return runs.allSatisfy { $0.word.count >= MIN_WORD_LENGTH && reads($0.word, in: dictionary) }
     }
@@ -426,8 +427,9 @@ final class GameModel {
     var canBackspace: Bool { !picks.isEmpty }
     var canShuffle: Bool { rack.count > 1 }
     /// A gap borrows from the board, so it means nothing until there's a
-    /// board to borrow from — anyone's board, in Occupy.
-    var canAddGap: Bool { mode == .occupy ? !board.isEmpty : !isFirstWord }
+    /// letter of this player's own to borrow — a rival's aren't theirs to
+    /// take, on a shared board or any other.
+    var canAddGap: Bool { !isFirstWord }
 
     // MARK: Derived session state
 
@@ -481,6 +483,44 @@ final class GameModel {
     var occupyScore: Int {
         guard let seat = occupy?.seat, occupyScores.indices.contains(seat) else { return 0 }
         return occupyScores[seat]
+    }
+
+    /// Whether the letter at `key` is this player's to build with. Every
+    /// letter is, except a rival's on a shared board.
+    func ownsLetter(at key: CellKey) -> Bool {
+        guard mode == .occupy else { return true }
+        guard let seat = occupySeat else { return false }
+        return owners[key] == seat
+    }
+
+    /// Occupy's zone line, as this seat sees it: the countdown, and how the
+    /// open zone stands right now. Nil once every zone of the game has been
+    /// and gone, and in every other mode.
+    struct OccupyZoneStatus: Equatable {
+        /// Seconds until the whistle; nil in the gap between zones.
+        var secondsLeft: Int?
+        /// Seconds until the next zone opens; nil while one is open.
+        var secondsToNext: Int?
+        /// Tiles held inside the open zone, by seat.
+        var counts: [Int] = []
+        /// Who would take it if the whistle went now.
+        var leader: Int?
+    }
+
+    func occupyZoneStatus(at now: Date) -> OccupyZoneStatus? {
+        guard mode == .occupy, !isComplete, let occupy, let view = occupy.view else { return nil }
+        switch occupyZoneClock(elapsed: now.timeIntervalSince(occupy.startedAt)) {
+        case let .open(secondsLeft):
+            guard let zone = view.openZone else { return nil }
+            let counts = occupyZoneCounts(zone, owners: view.owners, seats: view.seats.count)
+            return OccupyZoneStatus(
+                secondsLeft: Int(ceil(secondsLeft)), secondsToNext: nil, counts: counts,
+                leader: occupyZoneWinner(counts))
+        case let .next(seconds):
+            return OccupyZoneStatus(secondsLeft: nil, secondsToNext: Int(ceil(seconds)))
+        case .done:
+            return nil
+        }
     }
 
     /// Seconds left on the match clock, or nil when there isn't one running.
@@ -611,7 +651,7 @@ final class GameModel {
     func adoptOccupy(_ state: OccupyState, now: Date = .now) {
         guard mode == .occupy, var run = occupy else { return }
         let changed = run.host?.board != state.board || run.host?.owners != state.owners
-        let zonesBefore = run.host?.zones.count ?? 0
+        let zonesBefore = run.host?.zones
         run.host = state
         if changed { run.lastChangeAt = now }
         if run.seat == nil, let seat = state.seat(of: run.selfID) {
@@ -631,8 +671,42 @@ final class GameModel {
         if let seat = run.seat, rack.isEmpty, !isComplete {
             rack = occupyRefill(count: OCCUPY_HAND, seat: seat)
         }
-        if state.zones.count > zonesBefore, !isComplete {
-            rejectToast("A 2× zone appeared!")
+        announceZones(was: zonesBefore, now: state.zones)
+    }
+
+    /// What the zones did between two snapshots, said out loud: one opening
+    /// starts a minute's race, one closing hands out a bonus or doesn't.
+    ///
+    /// The cues are borrowed rather than new: the pile's rising chime for
+    /// points won, the attack growl for ground lost — neither of which can be
+    /// mistaken for the end of the game, which is what the win and lose
+    /// fanfares mean.
+    private func announceZones(was: [OccupyZone]?, now: [OccupyZone]) {
+        // The first snapshot has nothing to compare against: a screen that
+        // arrives mid-game isn't told about the zones it missed.
+        guard let was, !isComplete else { return }
+        let before = Dictionary(was.map { ($0.slot, $0) }, uniquingKeysWith: { first, _ in first })
+        for zone in now {
+            guard let old = before[zone.slot] else {
+                rejectToast("A zone is open — hold it for \(OCCUPY_ZONE_BONUS) points!")
+                cues?.play(.tick)
+                continue
+            }
+            guard !old.resolved, zone.resolved else { continue }
+            guard let winner = zone.winner else {
+                rejectToast("Nobody held the zone.")
+                continue
+            }
+            let seat = occupySeat
+            if winner == seat {
+                rejectToast("You took the zone! +\(OCCUPY_ZONE_BONUS)")
+                cues?.play(.deal)
+            } else {
+                let mine = seat.map { zone.counts.indices.contains($0) ? zone.counts[$0] : 0 } ?? 0
+                let theirs = zone.counts.indices.contains(winner) ? zone.counts[winner] : 0
+                rejectToast("Zone lost, \(theirs)–\(mine).")
+                cues?.play(.attack)
+            }
         }
     }
 
@@ -1147,6 +1221,10 @@ final class GameModel {
             rejectToast("Put a gap in your word where the \(letter.uppercased()) goes.")
             return
         }
+        guard ownsLetter(at: key) else {
+            rejectToast("That letter isn’t yours — cross your own words.")
+            return
+        }
         guard let fit = fitThroughLetter(key) else {
             rejectToast("That word doesn’t fit over this letter.")
             return
@@ -1197,10 +1275,30 @@ final class GameModel {
             let plan = planPlacement(
                 board: board, bounds: bounds, anchor: anchor, dir: dir, picks: pickList)
             guard plan.complete, !plan.steps.isEmpty else { return nil }
+            // A word can't be built through a rival's letter, so a line that
+            // would lie over one isn't a fit at all.
+            guard spansOwnLettersOnly(plan, dir: dir, through: key) else { return nil }
             return Fit(anchor: anchor, dir: dir, plan: plan, badWords: badWords(of: plan, through: key))
         }
         // When the word fits both ways, prefer the way that spells real words.
         return fits.first(where: \.isGood) ?? fits.first
+    }
+
+    /// Occupy: whether every letter already down that a placement would lie
+    /// along is this seat's own. Empty squares are fine — they're about to
+    /// be this seat's — and every other mode owns the whole board.
+    private func spansOwnLettersOnly(_ plan: PlacementPlan, dir: Direction, through key: CellKey?)
+        -> Bool
+    {
+        guard mode == .occupy, let seat = occupySeat else { return true }
+        var cells = plan.steps.map { parseKey($0.key) }
+        if let key { cells.append(parseKey(key)) }
+        guard let first = cells.first else { return true }
+        let line: [CellKey] =
+            dir == .across
+            ? (cells.map(\.col).min()!...cells.map(\.col).max()!).map { keyOf(first.row, $0) }
+            : (cells.map(\.row).min()!...cells.map(\.row).max()!).map { keyOf($0, first.col) }
+        return line.allSatisfy { board[$0] == nil || owners[$0] == seat }
     }
 
     /// The runs a plan would make or change that aren’t in the dictionary.
@@ -1212,7 +1310,7 @@ final class GameModel {
         for step in plan.steps { next[step.key] = step.letter }
         var placed = plan.steps.map(\.key)
         if let key { placed.append(key) }
-        return runsTouching(placed, in: next)
+        return wordRuns(touching: placed, in: next, landing: plan.steps.map(\.key))
             .filter { $0.word.count < MIN_WORD_LENGTH || !reads($0.word, in: dictionary) }
             .map(\.word)
     }
@@ -1223,6 +1321,10 @@ final class GameModel {
     func commitThroughLetter(_ key: CellKey) -> Bool {
         guard board[key] != nil else { return false }
         guard pickList.contains(where: { $0.letter == nil }) else { return false }
+        guard ownsLetter(at: key) else {
+            rejectToast("That letter isn’t yours — cross your own words.")
+            return false
+        }
         guard let fit = fitThroughLetter(key) else {
             rejectToast("That word doesn’t fit over this letter.")
             return false
@@ -1237,6 +1339,23 @@ final class GameModel {
     /// about what the board would do.
     private func judgeWord() {
         wordVerdict = judgedWord()
+    }
+
+    /// The runs touching `cells`, as this mode reads them. On an Occupy
+    /// board a run stops at a rival's letter, so a word laid flush against
+    /// one is read on its own and never as the pair of them — the referee's
+    /// own rule (`occupyOwnedRunsTouching`), applied to what's on screen so
+    /// the two can't disagree. `landing` names squares this seat is about to
+    /// own, which its unplaced tiles are.
+    private func wordRuns(touching cells: [CellKey], in tiles: TileMap, landing: [CellKey] = [])
+        -> [WordRun]
+    {
+        guard mode == .occupy, let seat = occupySeat else {
+            return runsTouching(cells, in: tiles)
+        }
+        let claimed = Set(landing)
+        return occupyRunsTouching(
+            cells, in: tiles, mine: { claimed.contains($0) || owners[$0] == seat })
     }
 
     /// Whether a run reads as a word here. Occupy turns each seat's board so
@@ -1397,7 +1516,7 @@ final class GameModel {
         do {
             word = try judgeStaged(
                 tiles: stagedLetters, board: board, opener: isFirstWord, start: anchor,
-                isWord: { reads($0, in: dictionary) })
+                isWord: { reads($0, in: dictionary) }, mine: { ownsLetter(at: $0) })
         } catch let refusal as StagedRefusal {
             rejectToast(refusal.message)
             return false
@@ -1428,7 +1547,8 @@ final class GameModel {
     {
         var next = board
         for step in result.steps { next[step.key] = step.letter }
-        let newRuns = runsTouching(result.steps.map(\.key), in: next)
+        let placed = result.steps.map(\.key)
+        let newRuns = wordRuns(touching: placed, in: next, landing: placed)
 
         guard let dictionary else {
             rejectToast("Hold on — the dictionary is still loading.")
@@ -1537,7 +1657,6 @@ final class GameModel {
         let typed: [String?] = picks.map(\.letter)
         let spentIndices = Set(plan.steps.map(\.rackIndex))
         let spent = plan.steps.map(\.letter)
-        let captured = placement.borrowed.filter { view.owners[$0] != seat }.count
 
         run.serial += 1
         let serial = run.serial
@@ -1562,9 +1681,6 @@ final class GameModel {
         let gained = landed.scores[seat] - before
         let word = newRuns.max { $0.word.count < $1.word.count }?.word ?? ""
         occupyWords.append(ScoredWord(word: word, points: gained))
-        if captured > 0 {
-            rejectToast("Captured \(captured) tile\(captured == 1 ? "" : "s")!")
-        }
         onOccupyPlace?(serial, placement)
         return true
     }
@@ -1655,7 +1771,7 @@ final class GameModel {
         do {
             _ = try judgeStaged(
                 tiles: stagedLetters, board: board, opener: isFirstWord, start: anchor,
-                isWord: { reads($0, in: dictionary) })
+                isWord: { reads($0, in: dictionary) }, mine: { ownsLetter(at: $0) })
             return .good
         } catch StagedRefusal.notAWord {
             return .bad
@@ -1769,7 +1885,11 @@ final class GameModel {
         validation = dictionary.map { validateBoard(board, dictionary: $0) }
 
         var byCell: [CellKey: [WordRun]] = [:]
-        for run in extractRuns(board) where run.cells.count > 1 {
+        // On a shared board a run belongs to one player: the seam between two
+        // words is a border, not a word (`occupyOwnedRuns`).
+        let placedRuns =
+            mode == .occupy ? occupyOwnedRuns(board: board, owners: owners) : extractRuns(board)
+        for run in placedRuns where run.cells.count > 1 {
             for cell in run.cells { byCell[cell, default: []].append(run) }
         }
         wordsByCell = byCell

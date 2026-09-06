@@ -52,8 +52,15 @@ struct GameScreen: View {
                     header
                     if model.isOccupy {
                         // The pile can't bury anyone here; the bar says who
-                        // holds how much of the board instead.
+                        // holds how much of the board instead, and the line
+                        // under it what the zone on the board is doing.
                         OccupyBarView(segments: occupySegments)
+                        if let zone = zoneStatus {
+                            OccupyZoneLineView(
+                                secondsLeft: zone.secondsLeft,
+                                secondsToNext: zone.secondsToNext,
+                                holdings: zoneHoldings(zone.counts))
+                        }
                     } else {
                         PileGaugeView(count: model.pileCount, tone: model.pileTone)
                         if !rivals.isEmpty {
@@ -214,6 +221,30 @@ struct GameScreen: View {
     private var headerClock: HeaderClock? {
         guard let left = model.occupySecondsLeft(at: clockNow) else { return nil }
         return HeaderClock(secondsLeft: left, stallSeconds: model.occupyStallSecondsLeft(at: clockNow))
+    }
+
+    /// What the zone clock is doing, read once per tick for the line under
+    /// the bar and for the countdown drawn on the board itself.
+    private var zoneStatus: GameModel.OccupyZoneStatus? {
+        model.occupyZoneStatus(at: clockNow)
+    }
+
+    /// The open zone's tally in the bar's order: yours first, then each rival
+    /// in their own colour, so the same player is the same colour twice.
+    private func zoneHoldings(_ counts: [Int]) -> [OccupyZoneLineView.Holding] {
+        guard let battle, let occupy = battle.state?.occupy else { return [] }
+        let viewer = model.occupySeat
+        var holdings = occupy.seats.enumerated().map { seat, id in
+            OccupyZoneLineView.Holding(
+                id: seat,
+                name: battle.contestants.first { $0.id == id }?.name ?? "Player",
+                tiles: counts.indices.contains(seat) ? counts[seat] : 0,
+                colors: SeatColors.of(seat: seat, viewer: viewer))
+        }
+        if let viewer, let mine = holdings.firstIndex(where: { $0.id == viewer }) {
+            holdings.insert(holdings.remove(at: mine), at: 0)
+        }
+        return holdings
     }
 
     /// Everyone's share of the board, yours first, for the balanced bar.
@@ -403,7 +434,8 @@ struct GameScreen: View {
             wordsAt: model.wordsByCell.mapValues { $0.map(\.word) },
             owners: model.owners,
             viewerSeat: model.occupySeat,
-            zones: model.occupyZones)
+            zones: model.occupyZones,
+            zoneSecondsLeft: zoneStatus?.secondsLeft)
     }
 
     /// Placed words are permanent in every mode, and nothing placed is ever

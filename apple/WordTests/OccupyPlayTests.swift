@@ -171,23 +171,33 @@ final class OccupyPlayTests: XCTestCase {
         XCTAssertEqual(table.client.position, 1, "and it counts")
     }
 
-    func testBorrowingARivalsLetterCapturesIt() async throws {
+    func testARivalsLetterCantBeCrossedButYourOwnCan() async throws {
         let table = await dealt()
         try open(on: table.hostModel)
-        let before = table.hostModel.score
+        try open(on: table.clientModel)
+        let hostScore = table.hostModel.score
 
+        // The host's letters read on the client's board, turned for its seat
+        // — and none of them are the client's to cross.
+        let theirs = try XCTUnwrap(
+            table.clientModel.board.keys.first { !table.clientModel.ownsLetter(at: $0) })
+        table.clientModel.togglePick(0)
+        table.clientModel.addGap()
+        XCTAssertFalse(table.clientModel.commitThroughLetter(theirs))
+        XCTAssertEqual(
+            table.clientModel.toast?.text, "That letter isn’t yours — cross your own words.")
+        XCTAssertEqual(table.clientModel.owners[theirs], 0, "still theirs")
+        table.clientModel.clearWord()
+
+        // Its own letters are another matter.
         let (word, through) = try TestPlays.attachWord(on: table.clientModel)
 
-        XCTAssertEqual(table.clientModel.owners[through], 1, "captured")
-        XCTAssertEqual(
-            table.hostModel.owners[rotateKey(through, size: OCCUPY_FRAME, by: .half)], 1,
-            "and the host agrees, on its own frame of the board")
+        XCTAssertEqual(table.clientModel.owners[through], 1, "its own, before and after")
         XCTAssertEqual(table.hostModel.occupy?.view?.board, table.clientModel.occupy?.view?.board)
-        XCTAssertLessThan(table.hostModel.score, before, "the host lost the tile's value")
+        XCTAssertEqual(table.hostModel.score, hostScore, "the host loses nothing to it")
         XCTAssertGreaterThan(table.clientModel.score, 0)
         XCTAssertEqual(table.clientModel.rack.count, OCCUPY_HAND)
         XCTAssertEqual(table.clientModel.occupyWords.last?.word, word)
-        XCTAssertFalse(table.clientModel.isFirstWord, "borrowing counts as opening")
     }
 
     // MARK: Clocks
@@ -216,7 +226,7 @@ final class OccupyPlayTests: XCTestCase {
         let table = await dealt()
         try open(on: table.hostModel)
 
-        advance(table, by: OCCUPY_GRACE_SECONDS + OCCUPY_STALL_SECONDS - 1)
+        advance(table, by: OCCUPY_STALL_GRACE_SECONDS + OCCUPY_STALL_SECONDS - 1)
         XCTAssertFalse(table.hostModel.isComplete)
         advance(table, by: 1)
 
@@ -240,7 +250,7 @@ final class OccupyPlayTests: XCTestCase {
     func testTheHostCanDealAnotherGameFromTheResults() async throws {
         let table = await dealt()
         try open(on: table.hostModel)
-        advance(table, by: OCCUPY_GRACE_SECONDS + OCCUPY_STALL_SECONDS)
+        advance(table, by: OCCUPY_STALL_GRACE_SECONDS + OCCUPY_STALL_SECONDS)
         XCTAssertEqual(table.host.state?.phase, .finished)
 
         table.host.restart()
@@ -259,12 +269,20 @@ final class OccupyPlayTests: XCTestCase {
 
         let zones = try XCTUnwrap(table.host.state?.occupy?.zones)
         XCTAssertEqual(zones.count, 1)
+        XCTAssertEqual(zones[0].cells.count, OCCUPY_ZONE_SIZE * OCCUPY_ZONE_SIZE)
+        XCTAssertTrue(zones[0].isOpen)
         XCTAssertEqual(table.hostModel.occupyZones, zones, "the host's view is the host's frame")
         XCTAssertEqual(
             table.clientModel.occupyZones, zones.map { $0.rotated(size: OCCUPY_FRAME, by: .half) },
             "turned with the board for the other seat")
-        XCTAssertEqual(table.hostModel.toast?.text, "A 2× zone appeared!")
-        XCTAssertEqual(table.clientModel.toast?.text, "A 2× zone appeared!")
+        let opened = "A zone is open — hold it for \(OCCUPY_ZONE_BONUS) points!"
+        XCTAssertEqual(table.hostModel.toast?.text, opened)
+        XCTAssertEqual(table.clientModel.toast?.text, opened)
+
+        // Both screens run the same countdown off their own start stamp.
+        let status = try XCTUnwrap(table.hostModel.occupyZoneStatus(at: table.clock.now))
+        XCTAssertEqual(status.secondsLeft, Int(OCCUPY_ZONE_OPEN_SECONDS))
+        XCTAssertNil(status.secondsToNext)
     }
 
     // MARK: Leaving

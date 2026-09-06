@@ -20,11 +20,16 @@ import WordCore
 ///  - v9 reshaped Occupy: the board is unbounded and laid out in a frame
 ///    (`OccupyState.frame`, in place of `size`), the clock is ten minutes,
 ///    and the bonus zones ride the snapshot (`OccupyState.zones`).
+///  - v10 reworked Occupy again: words are each player's own (nothing on the
+///    board ever changes hands), and a zone is a minute-long contest with a
+///    winner and a bonus rather than a permanent multiplier — so its snapshot
+///    carries a lifecycle (`slot`, `opensAt`, `closesAt`, `winner`, `counts`,
+///    `resolved`) and the state carries `bonuses`.
 ///
 /// The version gate is load-bearing rather than ceremonial: there has been no
 /// Game Center sandbox since 2016 (TN2417), so a prerelease build can and will
 /// meet a released one.
-public let PROTOCOL_VERSION = 9
+public let PROTOCOL_VERSION = 10
 
 /// Who a message is from or to. Maps to `GKPlayer.gamePlayerID` — the stable
 /// per-game identity that replaces the web's sessionStorage `playerKey`.

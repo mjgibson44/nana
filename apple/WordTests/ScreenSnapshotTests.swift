@@ -77,7 +77,8 @@ final class ScreenSnapshotTests: XCTestCase {
     // MARK: Occupy
 
     /// An Occupy game a few words in, through the real rules: two sessions
-    /// on a mesh, the host's opener, and the rival borrowing through it.
+    /// on a mesh, each seat opening from its own corner and then crossing a
+    /// word of its own — nobody can cross anybody else's.
     private func playedOccupy() async throws -> (model: GameModel, session: BattleSession) {
         let mesh = MemoryMesh()
         let hostTransport = mesh.add("host")
@@ -94,6 +95,7 @@ final class ScreenSnapshotTests: XCTestCase {
         await rivalModel.loadDictionary()
         host.start()
         try TestPlays.placeOpener(on: hostModel)
+        try TestPlays.placeOpener(on: rivalModel)
         try TestPlays.attachWord(on: rivalModel)
         try TestPlays.attachWord(on: hostModel)
         // Held so the rival's seat outlives this function.
@@ -123,6 +125,12 @@ final class ScreenSnapshotTests: XCTestCase {
                         .init(id: 0, name: "Ada", value: 84, colors: you),
                         .init(id: 1, name: "Grace", value: 60, colors: rivals[0]),
                     ])
+                    OccupyZoneLineView(
+                        secondsLeft: 41, secondsToNext: nil,
+                        holdings: [
+                            .init(id: 0, name: "Ada", tiles: 4, colors: you),
+                            .init(id: 1, name: "Grace", tiles: 2, colors: rivals[0]),
+                        ])
                 }
                 VStack(spacing: Spacing.gap / 2) {
                     GameHeaderView(
@@ -134,10 +142,11 @@ final class ScreenSnapshotTests: XCTestCase {
                         .init(id: 2, name: "Katherine", value: 20, colors: rivals[1]),
                         .init(id: 3, name: "Dorothy", value: 52, colors: rivals[2]),
                     ])
+                    OccupyZoneLineView(secondsLeft: nil, secondsToNext: 12)
                 }
             }
             .padding(Spacing.margin),
-            name: "occupy-header", size: CGSize(width: Self.phone.width, height: 160))
+            name: "occupy-header", size: CGSize(width: Self.phone.width, height: 200))
     }
 
     func testOccupyLobbyAndEntryRender() throws {

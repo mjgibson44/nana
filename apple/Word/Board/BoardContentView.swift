@@ -31,9 +31,11 @@ struct BoardScene {
     /// with no owner wears the word green.
     var owners: [CellKey: Int] = [:]
     var viewerSeat: Int? = nil
-    /// Occupy's zones, in this seat's frame: the patches where a tile is
-    /// worth double.
+    /// Occupy's zones, in this seat's frame: the patch being fought over,
+    /// and the ones already decided.
     var zones: [OccupyZone] = []
+    /// Seconds left on the open zone, drawn on its middle square.
+    var zoneSecondsLeft: Int? = nil
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -49,26 +51,31 @@ struct BoardContentView: View {
             // The empty lattice: rounded cell fills over the board background,
             // the gaps between them reading as hairlines — and, in Occupy,
             // the zones: their squares a shade lighter, an edge round each
-            // patch, and "2×" on the middle square, all under the tiles.
+            // patch, and the countdown (or, once it's been decided, what it
+            // paid and to whom) on the middle square, all under the tiles.
             Canvas { context, _ in
                 let cell = metrics.cellSize
                 let step = metrics.step
                 let radius = Self.cornerRadius(for: cell)
                 let bounds = metrics.bounds
-                let zoneCells: Set<Cell> =
-                    scene.zones.isEmpty ? [] : Set(scene.zones.flatMap(\.cells))
+                let openCells: Set<Cell> = Set(
+                    scene.zones.filter(\.isOpen).flatMap(\.cells))
+                let settledCells: Set<Cell> = Set(
+                    scene.zones.filter { !$0.isOpen }.flatMap(\.cells))
                 for row in 0..<metrics.rows {
                     for col in 0..<metrics.cols {
                         let rect = CGRect(
                             x: Double(col) * step, y: Double(row) * step,
                             width: cell, height: cell)
-                        let inZone =
-                            !zoneCells.isEmpty
-                            && zoneCells.contains(
-                                Cell(row: bounds.minRow + row, col: bounds.minCol + col))
+                        let cellAt = Cell(row: bounds.minRow + row, col: bounds.minCol + col)
+                        let fill: Color =
+                            openCells.contains(cellAt)
+                            ? Palette.zoneCell
+                            : (settledCells.contains(cellAt)
+                                ? Palette.zoneCellSettled : Palette.surface)
                         context.fill(
                             Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
-                            with: .color(inZone ? Palette.zoneCell : Palette.surface))
+                            with: .color(fill))
                     }
                 }
                 for zone in scene.zones {
@@ -76,17 +83,22 @@ struct BoardContentView: View {
                     let side = Double(OCCUPY_ZONE_SIZE) * step - CELL_HAIRLINE
                     let edge = CGRect(x: first.minX, y: first.minY, width: side, height: side)
                         .insetBy(dx: -CELL_HAIRLINE / 2, dy: -CELL_HAIRLINE / 2)
+                    // Open: the plain ink, and the seconds left. Decided: the
+                    // winner's own colour, dimmed, and what it paid them.
+                    let tint = Self.zoneTint(zone, viewer: scene.viewerSeat)
                     context.stroke(
                         Path(
                             roundedRect: edge, cornerRadius: radius + CELL_HAIRLINE / 2,
                             style: .continuous),
-                        with: .color(Palette.zoneEdge),
+                        with: .color(zone.isOpen ? tint : tint.opacity(0.6)),
                         lineWidth: Self.zoneEdgeWidth(for: cell))
+                    guard let glyph = Self.zoneGlyph(zone, secondsLeft: scene.zoneSecondsLeft)
+                    else { continue }
                     let middle = metrics.rect(of: zone.centre)
                     context.draw(
-                        Text("2×")
-                            .font(.system(size: cell * 0.5, weight: .bold))
-                            .foregroundStyle(Palette.zoneEdge),
+                        Text(glyph)
+                            .font(.system(size: cell * 0.45, weight: .bold))
+                            .foregroundStyle(zone.isOpen ? tint : tint.opacity(0.6)),
                         at: CGPoint(x: middle.midX, y: middle.midY))
                 }
             }
@@ -164,6 +176,20 @@ struct BoardContentView: View {
         max(1.5, cellSize * 0.06)
     }
 
+    /// A zone's colour: nobody's while it's open, the winner's once it isn't.
+    static func zoneTint(_ zone: OccupyZone, viewer: Int?) -> Color {
+        guard !zone.isOpen else { return Palette.zoneEdge }
+        guard let winner = zone.winner else { return Palette.inkSoft }
+        return SeatColors.of(seat: winner, viewer: viewer).ink
+    }
+
+    /// What a zone says on its middle square: the countdown while it's being
+    /// fought over, then what it paid — or a dash for one nobody held.
+    static func zoneGlyph(_ zone: OccupyZone, secondsLeft: Int?) -> String? {
+        guard !zone.isOpen else { return secondsLeft.map { "\($0)s" } }
+        return zone.winner == nil ? "—" : "+\(OCCUPY_ZONE_BONUS)"
+    }
+
     /// What a placed tile says out loud: its letter, where it sits, and the
     /// words it reads in.
     static func tileLabel(for key: CellKey, in scene: BoardScene, letter: String) -> String {
@@ -177,8 +203,8 @@ struct BoardContentView: View {
         if let owner = scene.owners[key] {
             parts.append(owner == scene.viewerSeat ? "yours" : "a rival’s")
         }
-        if scene.zones.contains(where: { $0.contains(cell) }) {
-            parts.append("worth double")
+        if let zone = scene.zones.first(where: { $0.contains(cell) }) {
+            parts.append(zone.isOpen ? "in the open zone" : "in a zone already decided")
         }
         parts.append("tap to place your word through it")
         return parts.joined(separator: ", ")

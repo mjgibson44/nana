@@ -3,9 +3,10 @@ import Testing
 @testable import WordCore
 
 /// The Occupy rules: an unbounded shared board laid out in a frame, corner
-/// starts off its middle, capture by crossing, tiles worth their longest
-/// word (double in a zone), and an end on the clock or a stall. Pure, so the
-/// whole rule set is pinned here without a network.
+/// starts off its middle, words that are each player's own, tiles worth their
+/// owner's longest word, zones fought over for a minute apiece, and an end on
+/// the clock or a stall. Pure, so the whole rule set is pinned here without a
+/// network.
 
 /// A tiny dictionary: only what these boards spell.
 private let words: Set<String> = [
@@ -35,6 +36,12 @@ private func down(_ word: String, from cell: Cell, borrowing: [CellKey] = []) ->
         if !borrowing.contains(key) { tiles[key] = String(letter) }
     }
     return OccupyPlacement(tiles: tiles, borrowed: borrowing)
+}
+
+/// Within a zone's spawn reach of a candidate centre.
+private func near(_ cell: Cell, _ centre: Cell) -> Bool {
+    abs(cell.row - centre.row) <= OCCUPY_ZONE_REACH
+        && abs(cell.col - centre.col) <= OCCUPY_ZONE_REACH
 }
 
 /// Seat 0's opener: CAT across from its start square.
@@ -210,31 +217,90 @@ private func opened() throws -> OccupyState {
         }
     }
 
-    @Test("borrowing a rival's letter captures it, value and all")
-    func captureByCrossing() throws {
-        var state = try opened()  // (12,12): c a t across
-        // Seat 1 plays T-E-A down through the T at (12,14).
+    @Test("a rival's letter can't be borrowed: every word is its own player's")
+    func borrowingARivalsLetterIsRefused() throws {
+        let state = try opened()  // seat 0: c a t across from (12,12)
         let t = keyOf(12, 14)
-        state = try occupyApply(
-            down("tea", from: Cell(row: 12, col: 14), borrowing: [t]), seat: 1, at: 2, to: state, isWord: isWord)
-        #expect(state.owners[t] == 1, "the borrowed letter flipped")
-        #expect(state.opened == [true, true], "borrowing counts as opening")
-        // Seat 0 keeps C and A (worth 3 each); seat 1 holds T, E, A (3 each).
-        #expect(state.scores == [6, 9])
-        #expect(state.settledAt == [2, 2], "both scores moved on the capture")
+        #expect(throws: OccupyRefusal.notYours(t)) {
+            try occupyApply(
+                down("tea", from: Cell(row: 12, col: 14), borrowing: [t]), seat: 1, at: 2,
+                to: state, isWord: isWord)
+        }
+        #expect(state.owners[t] == 0, "and nothing changed hands")
+
+        // The same word off the same letter is fine for the seat that owns it.
+        let own = try occupyApply(
+            down("tea", from: Cell(row: 12, col: 14), borrowing: [t]), seat: 0, at: 2, to: state,
+            isWord: isWord)
+        #expect(own.owners[keyOf(13, 14)] == 0)
+        #expect(own.opened == [true, false], "seat 1 still hasn't opened")
     }
 
-    @Test("a tile is worth the longest word it sits in")
+    @Test("a word can't run through a rival's letter, and a hole is still a hole")
+    func cantRunThroughARival() throws {
+        var state = try opened()  // seat 0: (12,12) c, (12,13) a, (12,14) t
+        state.board[keyOf(12, 11)] = "a"  // seat 1's own letter, the far side of it
+        state.owners[keyOf(12, 11)] = 1
+        state.opened = [true, true]
+
+        // Seat 1 reaching from (12,11) to (12,15) would cross all three of them.
+        let through = OccupyPlacement(
+            tiles: [keyOf(12, 15): "r", keyOf(12, 16): "t"], borrowed: [keyOf(12, 11)])
+        #expect(throws: OccupyRefusal.throughRival(keyOf(12, 12))) {
+            try occupyApply(through, seat: 1, at: 3, to: state, isWord: isWord)
+        }
+
+        // Empty ground in the way is what it always was.
+        let holed = OccupyPlacement(tiles: [keyOf(12, 9): "t"], borrowed: [keyOf(12, 11)])
+        #expect(throws: OccupyRefusal.notInALine) {
+            try occupyApply(holed, seat: 1, at: 3, to: state, isWord: isWord)
+        }
+    }
+
+    @Test("two players' words can sit flush, and each is read and valued on its own")
+    func flushWordsAreReadApart() throws {
+        var state = try opened()  // seat 0: c a t across (12,12)
+        for (offset, letter) in "rat".enumerated() {  // seat 1, directly below it
+            state.board[keyOf(13, 12 + offset)] = String(letter)
+            state.owners[keyOf(13, 12 + offset)] = 1
+        }
+        // The down pairs across the seam — CR, AA, TT — belong to nobody, so
+        // nothing on either side is worth more than its own three-letter word.
+        #expect(
+            occupyOwnedRuns(board: state.board, owners: state.owners).map(\.word).sorted()
+                == ["cat", "rat"])
+        let values = occupyTileValues(state.board, owners: state.owners)
+        #expect(values.values.allSatisfy { $0 == 3 })
+        #expect(occupyScores(board: state.board, owners: state.owners, seats: 2) == [9, 9])
+    }
+
+    @Test("a word may land flush against a rival's, borrowing only from itself")
+    func flushLanding() throws {
+        var state = try opened()
+        state.board[keyOf(13, 12)] = "r"
+        state.owners[keyOf(13, 12)] = 1
+        state.opened = [true, true]
+        state.scores = occupyScores(board: state.board, owners: state.owners, seats: 2)
+        let next = try occupyApply(
+            across("rat", from: Cell(row: 13, col: 12), borrowing: [keyOf(13, 12)]),
+            seat: 1, at: 3, to: state, isWord: isWord)
+        #expect(next.scores == [9, 9])
+        #expect(next.owners[keyOf(12, 13)] == 0, "nothing changes hands")
+        #expect(next.settledAt == [1, 3], "only the player who moved")
+    }
+
+    @Test("a tile is worth the longest word of its owner's that it sits in")
     func longestWordValue() throws {
         var state = try opened()
-        // STARE down through the A at (12,13): s above, r e below → the A is now in a 5-letter word.
+        // Seat 0 crosses its own A at (12,13): s t above, r e below.
         let a = keyOf(12, 13)
         state = try occupyApply(
-            down("stare", from: Cell(row: 10, col: 13), borrowing: [a]), seat: 1, at: 2, to: state, isWord: isWord)
-        let values = occupyTileValues(state.board)
+            down("stare", from: Cell(row: 10, col: 13), borrowing: [a]), seat: 0, at: 2, to: state,
+            isWord: isWord)
+        let values = occupyTileValues(state.board, owners: state.owners)
         #expect(values[a] == 5)
         #expect(values[keyOf(12, 12)] == 3)
-        #expect(state.scores == [6, 25])
+        #expect(state.scores == [31, 0])
     }
 
     @Test("a square someone got to first is refused, not overwritten")
@@ -253,7 +319,7 @@ private func opened() throws -> OccupyState {
         let state = try opened()
         let bad = down("tzz", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)])
         #expect(throws: OccupyRefusal.notAWord(["tzz"])) {
-            try occupyApply(bad, seat: 1, at: 2, to: state, isWord: isWord)
+            try occupyApply(bad, seat: 0, at: 2, to: state, isWord: isWord)
         }
     }
 
@@ -282,13 +348,13 @@ private func opened() throws -> OccupyState {
     func noEdgeButOneLine() throws {
         var state = fresh()
         state.board[keyOf(-3, -3)] = "t"
-        state.owners[keyOf(-3, -3)] = 1
+        state.owners[keyOf(-3, -3)] = 0
         state.opened = [true, true]
         let past = try occupyApply(
             across("tea", from: Cell(row: -3, col: -3), borrowing: [keyOf(-3, -3)]),
             seat: 0, at: 1, to: state, isWord: isWord)
         #expect(past.board[keyOf(-3, -1)] == "a")
-        #expect(past.owners[keyOf(-3, -3)] == 0, "captured, wherever it is")
+        #expect(past.owners[keyOf(-3, -1)] == 0, "owned wherever it is")
 
         let start = fresh().startCell(seat: 0)
         var scattered = across("cat", from: start)
@@ -303,8 +369,8 @@ private func opened() throws -> OccupyState {
         }
     }
 
-    @Test("borrowing needs a letter to borrow, and a seat to borrow with")
-    func borrowingChecks() {
+    @Test("borrowing needs a letter to borrow, a seat to borrow with, and your own letter")
+    func borrowingChecks() throws {
         let state = fresh()
         #expect(throws: OccupyRefusal.nothingToBorrow(keyOf(5, 5))) {
             try occupyApply(
@@ -314,13 +380,27 @@ private func opened() throws -> OccupyState {
         #expect(throws: OccupyRefusal.notSeated) {
             try occupyApply(across("cat", from: state.startCell(seat: 0)), seat: 7, at: 1, to: state, isWord: isWord)
         }
+        // A seat that owns nothing has nothing to borrow, so its first word
+        // has to be its opener.
+        let theirs = try opened()
+        #expect(throws: OccupyRefusal.notYours(keyOf(12, 14))) {
+            try occupyApply(
+                down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]), seat: 1,
+                at: 2, to: theirs, isWord: isWord)
+        }
     }
 
     @Test("the state round-trips through JSON, owners and zones and all")
     func codable() throws {
         var state = fresh(players: 4)
         state = try occupyApply(across("cat", from: state.startCell(seat: 0)), seat: 0, at: 1, to: state, isWord: isWord)
-        state.zones = [OccupyZone(centre: Cell(row: 5, col: 5)), OccupyZone(centre: Cell(row: -2, col: 30))]
+        state.zones = [
+            OccupyZone(
+                slot: 0, centre: Cell(row: 5, col: 5), opensAt: 60, closesAt: 120, winner: 2,
+                counts: [1, 0, 4, 0], resolved: true),
+            OccupyZone(slot: 1, centre: Cell(row: -2, col: 30), opensAt: 135, closesAt: 195),
+        ]
+        state.bonuses = [0, 0, OCCUPY_ZONE_BONUS, 0]
         let data = try JSONEncoder().encode(state)
         let back = try JSONDecoder().decode(OccupyState.self, from: data)
         #expect(back == state)
@@ -332,67 +412,158 @@ private func opened() throws -> OccupyState {
             """
         let decoded = try JSONDecoder().decode(OccupyState.self, from: Data(bare.utf8))
         #expect(decoded.zones.isEmpty)
+        #expect(decoded.bonuses == [0, 0])
         #expect(decoded.end == nil)
     }
 }
 
 @Suite("Occupy: zones") struct OccupyZones {
-    @Test("a zone is three by three around its centre")
+    @Test("a zone is five by five around its centre")
     func shape() {
         let zone = OccupyZone(centre: Cell(row: 5, col: 8))
-        #expect(zone.origin == Cell(row: 4, col: 7))
-        #expect(zone.cells.count == 9)
-        #expect(zone.contains(Cell(row: 6, col: 9)))
-        #expect(!zone.contains(Cell(row: 7, col: 9)))
-        #expect(zone.overlaps(OccupyZone(centre: Cell(row: 7, col: 10))))
-        #expect(!zone.overlaps(OccupyZone(centre: Cell(row: 8, col: 10))))
+        #expect(zone.origin == Cell(row: 3, col: 6))
+        #expect(zone.cells.count == 25)
+        #expect(zone.contains(Cell(row: 7, col: 10)))
+        #expect(!zone.contains(Cell(row: 8, col: 10)))
+        #expect(zone.overlaps(OccupyZone(centre: Cell(row: 9, col: 12))))
+        #expect(!zone.overlaps(OccupyZone(centre: Cell(row: 10, col: 13))))
     }
 
-    @Test("zones are due from the end of the grace, then on an interval")
+    @Test("a minute open, fifteen seconds' gap, and a minute of grace before the first")
     func schedule() {
+        #expect(occupyZoneWindow(slot: 0).opensAt == 60)
+        #expect(occupyZoneWindow(slot: 0).closesAt == 120)
+        #expect(occupyZoneWindow(slot: 1).opensAt == 135)
+        #expect(occupyZoneWindow(slot: 6).closesAt == 570)
+
         #expect(occupyZonesDue(elapsed: 0) == 0)
         #expect(occupyZonesDue(elapsed: OCCUPY_ZONE_FIRST_SECONDS - 1) == 0)
         #expect(occupyZonesDue(elapsed: OCCUPY_ZONE_FIRST_SECONDS) == 1)
-        #expect(occupyZonesDue(elapsed: OCCUPY_ZONE_FIRST_SECONDS + OCCUPY_ZONE_INTERVAL_SECONDS - 1) == 1)
-        #expect(occupyZonesDue(elapsed: OCCUPY_ZONE_FIRST_SECONDS + OCCUPY_ZONE_INTERVAL_SECONDS) == 2)
-        #expect(occupyZonesDue(elapsed: Double(OCCUPY_SECONDS)) == 8)
+        #expect(occupyZonesDue(elapsed: 134) == 1)
+        #expect(occupyZonesDue(elapsed: 135) == 2)
+
+        // Seven in a ten-minute game: an eighth would open at 9:45 with too
+        // little of the clock left to be worth racing for.
+        #expect(occupyZoneSlots() == 7)
+        #expect(occupyZoneFits(slot: 6))
+        #expect(!occupyZoneFits(slot: 7))
+        #expect(occupyZonesDue(elapsed: Double(OCCUPY_SECONDS)) == 7)
     }
 
-    @Test("a zone goes on empty ground within reach of the play, clear of starts and other zones")
+    @Test("the zone clock runs open, gap, open — and stops for the endgame")
+    func clock() {
+        #expect(occupyZoneClock(elapsed: 0) == .next(seconds: 60))
+        #expect(occupyZoneClock(elapsed: 60) == .open(secondsLeft: 60))
+        #expect(occupyZoneClock(elapsed: 90) == .open(secondsLeft: 30))
+        #expect(occupyZoneClock(elapsed: 120) == .next(seconds: 15))
+        #expect(occupyZoneClock(elapsed: 135) == .open(secondsLeft: 60))
+        #expect(occupyZoneClock(elapsed: 570) == .done)
+        #expect(occupyZoneClock(elapsed: Double(OCCUPY_SECONDS)) == .done)
+    }
+
+    /// A zone at (5,5) — rows 3…7, cols 3…7 — with three of seat 0's tiles
+    /// inside it and two of seat 1's.
+    private func contested() -> OccupyState {
+        var state = fresh()
+        state.zones = [
+            OccupyZone(slot: 0, centre: Cell(row: 5, col: 5), opensAt: 60, closesAt: 120)
+        ]
+        for col in 3...5 {
+            state.board[keyOf(4, col)] = "a"
+            state.owners[keyOf(4, col)] = 0
+        }
+        for col in 5...6 {
+            state.board[keyOf(6, col)] = "b"
+            state.owners[keyOf(6, col)] = 1
+        }
+        state.scores = occupyScores(board: state.board, owners: state.owners, seats: 2)
+        return state
+    }
+
+    @Test("at the whistle the zone goes to whoever holds the most tiles in it")
+    func resolution() {
+        let state = contested()
+        #expect(state.scores == [9, 4], "three in a row and two in a row")
+        let counts = occupyZoneCounts(state.zones[0], owners: state.owners, seats: 2)
+        #expect(counts == [3, 2])
+        #expect(occupyZoneWinner(counts) == 0)
+        #expect(occupyZoneWinner([0, 0]) == nil, "an empty zone goes to nobody")
+
+        #expect(occupyCloseZones(state, elapsed: 119, at: 10) == state, "the minute isn't up")
+
+        let closed = occupyCloseZones(state, elapsed: 120, at: 10)
+        #expect(closed.zones[0].resolved)
+        #expect(!closed.zones[0].isOpen)
+        #expect(closed.zones[0].winner == 0)
+        #expect(closed.zones[0].counts == [3, 2])
+        #expect(closed.bonuses == [OCCUPY_ZONE_BONUS, 0])
+        #expect(closed.scores == [9 + OCCUPY_ZONE_BONUS, 4], "the board's value, plus the zone")
+        #expect(closed.settledAt == [10, 0], "only the seat whose score moved")
+        #expect(closed.zonesWon == [1, 0])
+        #expect(closed.openZone == nil)
+
+        #expect(occupyCloseZones(closed, elapsed: 200, at: 20) == closed, "a whistle goes once")
+    }
+
+    @Test("a zone held level goes to nobody")
+    func tiedZone() {
+        var state = contested()
+        state.board[keyOf(6, 7)] = "b"
+        state.owners[keyOf(6, 7)] = 1
+        state.scores = occupyScores(board: state.board, owners: state.owners, seats: 2)
+        let closed = occupyCloseZones(state, elapsed: 120, at: 10)
+        #expect(closed.zones[0].counts == [3, 3])
+        #expect(closed.zones[0].resolved)
+        #expect(closed.zones[0].winner == nil)
+        #expect(closed.bonuses == [0, 0])
+        #expect(closed.scores == state.scores)
+    }
+
+    @Test("a zone still open when the game ends is closed at the whistle")
+    func closedAtTheEnd() {
+        let state = contested()
+        #expect(state.openZone != nil)
+        let closed = occupyCloseZones(state, elapsed: 61, all: true, at: 61)
+        #expect(closed.zones[0].resolved)
+        #expect(closed.zones[0].winner == 0)
+        #expect(closed.bonuses == [OCCUPY_ZONE_BONUS, 0])
+    }
+
+    @Test("a zone goes on empty ground both players can reach, clear of starts and other zones")
     func candidates() throws {
-        let state = try opened()
+        let state = try opened()  // seat 0's CAT is down; seat 1 hasn't opened
+        let starts = state.seats.indices.map { state.startCell(seat: $0) }
         let candidates = occupyZoneCandidates(state)
         #expect(!candidates.isEmpty)
-        let starts = state.seats.indices.map { state.startCell(seat: $0) }
         for centre in candidates {
             let zone = OccupyZone(centre: centre)
             #expect(zone.keys.allSatisfy { state.board[$0] == nil }, "nothing under it")
             #expect(!starts.contains { zone.contains($0) }, "not over a start square")
-            let anchors = state.board.keys.map(parseKey) + [starts[1]]
-            #expect(
-                anchors.contains {
-                    abs($0.row - centre.row) <= OCCUPY_ZONE_REACH
-                        && abs($0.col - centre.col) <= OCCUPY_ZONE_REACH
-                }, "within reach of a letter, or of the unopened seat's start")
+            // Within reach of seat 0's letters *and* of seat 1's start: with
+            // nothing to capture, a zone one player alone can reach is a gift
+            // rather than a contest.
+            #expect(state.board.keys.map(parseKey).contains { near($0, centre) })
+            #expect(near(starts[1], centre))
         }
-        // Seat 1 has opened: its start square no longer counts as reachable ground.
-        var both = state
-        both.opened = [true, true]
-        let near = occupyZoneCandidates(both)
-        #expect(near.count < candidates.count)
-        #expect(near.allSatisfy { centre in
-            state.board.keys.map(parseKey).contains {
-                abs($0.row - centre.row) <= OCCUPY_ZONE_REACH
-                    && abs($0.col - centre.col) <= OCCUPY_ZONE_REACH
-            }
-        })
 
-        // A placed zone keeps the next one off its ground.
+        // A zone already down keeps the next one off its ground.
         var withZone = state
         withZone.zones = [OccupyZone(centre: candidates[0])]
         for centre in occupyZoneCandidates(withZone) {
             #expect(!OccupyZone(centre: centre).overlaps(withZone.zones[0]))
         }
+    }
+
+    @Test("ground only one player can reach will do when there's no fairer patch")
+    func lonelyGround() throws {
+        var state = try opened()
+        state.opened = [true, true]  // seat 1 has opened, and owns nothing near
+        let candidates = occupyZoneCandidates(state)
+        #expect(!candidates.isEmpty)
+        #expect(
+            candidates.allSatisfy { centre in
+                state.board.keys.map(parseKey).contains { near($0, centre) }
+            })
     }
 
     @Test("before anyone opens, zones sit near the start squares")
@@ -402,39 +573,22 @@ private func opened() throws -> OccupyState {
         let candidates = occupyZoneCandidates(state)
         #expect(!candidates.isEmpty)
         for centre in candidates {
-            #expect(starts.contains {
-                abs($0.row - centre.row) <= OCCUPY_ZONE_REACH
-                    && abs($0.col - centre.col) <= OCCUPY_ZONE_REACH
-            })
+            #expect(starts.contains { near($0, centre) })
         }
     }
 
-    @Test("the same roll puts the zone in the same place")
+    @Test("the same roll puts the zone in the same place, on its slot's clock")
     func deterministicSpawn() throws {
         let state = try opened()
-        let a = occupySpawnZone(state, rng: seededRng("seed/zones/0"))
-        let b = occupySpawnZone(state, rng: seededRng("seed/zones/0"))
+        let a = occupySpawnZone(state, slot: 1, rng: seededRng("seed/zones/1"))
+        let b = occupySpawnZone(state, slot: 1, rng: seededRng("seed/zones/1"))
         #expect(a != nil)
         #expect(a == b)
+        #expect(a?.slot == 1)
+        #expect(a?.opensAt == 135)
+        #expect(a?.closesAt == 195)
+        #expect(a?.resolved == false)
         #expect(occupyZoneCandidates(state).contains(a!.centre))
-    }
-
-    @Test("a tile in a zone is worth double, and a capture carries the doubled value")
-    func doubledValue() throws {
-        var state = try opened()  // CAT at (12,12)…(12,14)
-        state.zones = [OccupyZone(centre: Cell(row: 13, col: 14))]  // covers (12,13)…(14,15)
-        let values = occupyTileValues(state.board, zones: state.zones)
-        #expect(values[keyOf(12, 12)] == 3)
-        #expect(values[keyOf(12, 13)] == 6)
-        #expect(values[keyOf(12, 14)] == 6)
-        #expect(occupyScores(board: state.board, owners: state.owners, seats: 2, zones: state.zones) == [15, 0])
-
-        // TEA down through the T at (12,14): every tile of it is in the zone.
-        state.scores = occupyScores(board: state.board, owners: state.owners, seats: 2, zones: state.zones)
-        let next = try occupyApply(
-            down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]),
-            seat: 1, at: 2, to: state, isWord: isWord)
-        #expect(next.scores == [9, 18])
     }
 }
 
@@ -449,10 +603,17 @@ private func opened() throws -> OccupyState {
         #expect(occupyWinner(state, left: [1]) == 2)
     }
 
-    @Test("a tie goes to quadrants held, then to whoever got there first")
+    @Test("a tie goes to zones taken, then quadrants held, then to whoever got there first")
     func tiebreaks() throws {
         var state = fresh()
         state.scores = [12, 12]
+        // Zones first: the seat that took one is ahead of the seat that didn't.
+        state.zones = [
+            OccupyZone(slot: 0, centre: Cell(row: 5, col: 5), winner: 1, resolved: true)
+        ]
+        #expect(state.zonesWon == [0, 1])
+        #expect(occupyWinner(state) == 1)
+        state.zones = []
         // Seat 0 holds its own quadrant and the top-right; seat 1 holds nothing.
         state.owners = [keyOf(1, 1): 0, keyOf(2, 2): 0, keyOf(20, 20): 1, keyOf(1, 30): 0]
         #expect(occupyQuadrantsHeld(owners: state.owners, size: state.frame, seats: 2) == [2, 1])

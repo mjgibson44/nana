@@ -93,14 +93,14 @@ public let BATTLE_ROYALE_INFO = ModeInfo(
     ]
 )
 
-/// Occupy's card: one board, capture by crossing, and a clock.
+/// Occupy's card: one board, your own words on it, and a zone to race for.
 public let OCCUPY_INFO = ModeInfo(
     name: "Occupy",
     tagline: "One board. Hold the most of it when the clock runs out (2–4 players).",
     details: [
         "Everyone plays on the same board, from opposite corners",
-        "Borrow a rival’s letter and it’s yours — every tile is worth its longest word",
-        "Most value when the clock runs out wins; a stuck board ends early",
+        "Your words are your own — cross your letters, never a rival’s",
+        "Hold a zone when its minute is up for \(OCCUPY_ZONE_BONUS) points",
     ]
 )
 
