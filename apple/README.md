@@ -96,7 +96,8 @@ launch environment opens straight onto a game so a simulator can be screenshotte
 |---|---|
 | `Packages/WordCore` | The game core in pure Swift — **bit-exact with the web game** via golden fixtures generated from the TypeScript core (`npm run gen:fixtures`), so the same seed deals the same letters on both platforms. |
 | `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold — to drag, or to aim a gapped word through a placed letter — locked-board semantics, staged tiles that lift on any board, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
-| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, the v7 Occupy board and its placement round trip (v9: unbounded, with zones), and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
+| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, the v7 Occupy board and its placement round trip (v9: unbounded, with zones; v10: each
+player's own words, and zones that open, close and pay out), and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
 | `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for placed cells, one gesture pipeline for board taps and pans, the word-building loop, the paced Solo session, the battle session and its results, the tile-lettered home and battle screens, synthesized audio + haptics, and save/restore across process death. `Board/BoardInputBridge.swift` is the one place that reaches past SwiftUI into UIKit/AppKit, for the three things SwiftUI won't report: the live pinch midpoint, the pointer's actual device kind, and Mac scroll wheels. |
 
 ```bash
@@ -208,42 +209,61 @@ first.
   backwards on your screen — like a Scrabble board seen from across the table — and a
   run counts as a word if it reads as one in **either direction** along its line
   (`occupyIsWord`), on the client and the referee alike.
-- **Capture by crossing.** Every later word borrows a letter through a gap tile, exactly
-  as everywhere else — and the borrowed letter flips to the borrower's colour. A letter
-  already in both an across and a down word has no free direction, so crossing your own
-  long word's letters is how you defend it.
-- **Value.** Every tile is worth the length of the longest word it sits in, and you score
-  the tiles you own. Two 3-letter words are worth 12; one 5-letter word is worth 20; so
-  spamming short words loses to building long ones, and a capture carries the tile's
-  value with it. The header shows your value; under it, the pile gauge is replaced by a
-  **balanced bar** of everyone's share (`OccupyBarView`), you first in green, each rival
-  in their own colour (`SeatColors`), the same colour their tiles wear on the board —
-  with **everyone's name and points under the bar** in the same colours, so the bar says
-  who's ahead and the numbers say by how much.
-- **Zones.** Now and then a **three-by-three zone** appears where every tile is worth
-  **double** (`OccupyZone`, `OCCUPY_ZONE_MULTIPLIER`): the first as the opening grace
-  ends, then one every `OCCUPY_ZONE_INTERVAL_SECONDS` (75 s) — eight or so a game. The
-  host places them (`HostSession.spawnOccupyZones`, off the game's seed so a replay grows
-  the same ones) on empty ground within `OCCUPY_ZONE_REACH` (5) of a letter already
-  down or of a start square nobody has opened from yet, clear of every start square and
-  every other zone (`occupyZoneCandidates`); a slot that finds nowhere is skipped, not
-  saved up. They ride the snapshot (`OccupyState.zones`) and are permanent: the bonus
-  stays with whatever lands there, capture included. On the board a zone's squares are a
-  shade lighter than the lattice, with an edge round the patch and "2×" on its middle
-  square, all drawn under the tiles (`BoardContentView`); a new one is announced with a
-  banner.
+- **Your words are your own.** Every later word borrows a letter through a gap tile,
+  exactly as everywhere else — and it has to be a letter you already own. A rival's tile
+  can't be borrowed (`OccupyRefusal.notYours`) and can't be built through
+  (`throughRival`); a tile's owner is stamped when it lands and never changes again. Two
+  players' tiles *may* sit flush against each other, and the line they make is not read
+  as one word: a run is a maximal **same-owner** line (`occupyOwnedRuns`), so each side
+  of a seam is judged and valued on its own — the seam is a border, not a word. One walk
+  answers both what a word has to be to land and what it is worth, so the two can't
+  drift apart. A letter already in both an across and a down word has no free direction,
+  so crossing your own long word's letters is still how you defend it; a rival's is
+  defended by being theirs.
+- **Value.** Every tile is worth the length of the longest word **of its owner's** that
+  it sits in, and you score the tiles you own. Two 3-letter words are worth 12; one
+  5-letter word is worth 20; so spamming short words loses to building long ones, and a
+  rival's letter next door adds nothing to either of you. The header shows your value;
+  under it, the pile gauge is replaced by a **balanced bar** of everyone's share
+  (`OccupyBarView`), you first in green, each rival in their own colour (`SeatColors`),
+  the same colour their tiles wear on the board — with **everyone's name and points
+  under the bar** in the same colours, so the bar says who's ahead and the numbers say
+  by how much.
+- **Zones.** A **five-by-five zone** opens a minute into the game and stays open for a
+  minute; at the whistle whoever owns the most tiles inside it banks `OCCUPY_ZONE_BONUS`
+  (25 points), a tie banks nothing, and fifteen seconds later the next one opens. Seven
+  run in a ten-minute game — no zone is opened with less than half a minute of match
+  clock left, so the end of a game belongs to the words already on the board — and one
+  still open when the game ends is decided there. The host opens and closes them
+  (`HostSession.spawnOccupyZones` / `closeOccupyZones`, the places rolled off the game's
+  seed so a replay grows the same ones) on empty ground within `OCCUPY_ZONE_REACH` (6)
+  of a letter already down or of a start square nobody has opened from yet, clear of
+  every start square and every other zone, and **preferring ground two or more seats can
+  reach** — with nothing to capture, a zone one player alone can play into is a gift
+  rather than a contest (`occupyZoneCandidates`). A slot with nowhere to go is retried
+  for ten seconds and then given up, not saved up. Zones ride the snapshot
+  (`OccupyState.zones`) with their own lifecycle — `slot`, `opensAt`, `closesAt`,
+  `winner`, `counts`, `resolved`, the times in seconds since the deal so every screen
+  runs the countdown off the start it already has — and what they pay is banked in
+  `OccupyState.bonuses`, which `scores` includes. On the board an open zone's squares
+  are a shade lighter than the lattice, with an edge round the patch and the seconds
+  left on its middle square; a decided one settles into its winner's colour with what it
+  paid (`BoardContentView`). A line under the bar says how the open zone stands and how
+  long is left, and every opening and whistle gets a banner.
 - **The pile** is dealt to `OCCUPY_HAND` (24) and refilled after every word — grown off
   the shared board as it stands, so every letter has a known way on — and never buries
   anyone.
 - **The end.** Ten minutes (`OCCUPY_SECONDS`), whatever the size of the field; or early,
   once nobody has placed a word for a full minute — with a thirty-second opening grace
   during which the stall clock doesn't run. The header turns the last twenty seconds of a
-  stall into a visible countdown. Most value wins; ties go to quadrants held (whoever
-  owns more tiles in a quadrant of the frame), then to whoever reached their score first.
+  stall into a visible countdown. Most value wins; ties go to zones taken, then to
+  quadrants held (whoever owns more tiles in a quadrant of the frame), then to whoever
+  reached their score first.
   A player who leaves ranks last whatever they own.
 
 Over the wire it's protocol **v7**, reshaped in **v9** (the frame in place of a size,
-and the zones in the snapshot): a client sends `place` (the new tiles and the borrowed
+and the zones in the snapshot) and again in **v10** (nothing changes hands, and a zone
+is a minute-long contest with a winner and a bonus): a client sends `place` (the new tiles and the borrowed
 squares — the outcome, not the picks), the host judges it against its board and
 dictionary, broadcasts the whole board in the next `state`, and only *then* answers the
 sender with `placed` — so a word a player has already been shown is never taken back for
