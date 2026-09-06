@@ -116,9 +116,12 @@ struct GameOutcome: Equatable {
     var words: Int
     var tilesLeft: Int
     var bonusEarned: Bool
-    /// No mode deals one any more; kept so the progression funnel and its
-    /// leaderboard queue stay whole (`Progression` reads it).
+    /// Which day's puzzle this was, when it was one — the streak key and the
+    /// leaderboard occurrence it belongs to.
     var daily: DailyDeal? = nil
+    /// And what it came to: strokes against par, which is what the day's
+    /// leaderboard is actually ranked on (`dailyLeaderboardScore`).
+    var dailyResult: DailyResult? = nil
 
     var mode: GameMode { report.mode }
     var score: Int { report.score }
@@ -237,6 +240,20 @@ final class GameModel {
     private(set) var fire = Wildfire()
     /// Fires put out this game, for the summary.
     private(set) var firesDoused = 0
+
+    /// The day's puzzle, when one is being played: the word already down, the
+    /// cells to reach, and the par to beat.
+    private(set) var day: DailyBoard?
+    /// Which day it is — the streak key, and the leaderboard occurrence the
+    /// result belongs to.
+    private(set) var dailyDeal: DailyDeal?
+    /// Words played. The Daily's score, low being good.
+    ///
+    /// Every word counts, and none is ever refunded: words are permanent here
+    /// as everywhere else, so a stroke is a word played and that is the end of
+    /// it. The thinking happens before it is spent — tiles staged on the board
+    /// can be moved or cleared freely until the ✓.
+    private(set) var strokes = 0
 
     /// Put the board's fire somewhere directly.
     ///
@@ -536,6 +553,17 @@ final class GameModel {
     var pileWarn: Int { PILE_WARN + pileLimit - PILE_LIMIT }
     var pileUrgent: Int { PILE_URGENT + pileLimit - PILE_LIMIT }
 
+    /// How the day's puzzle stands: which targets are covered, whether it is
+    /// finished, and whether every tile went down as well.
+    var dailyProgress: DailyProgress? {
+        guard let day else { return nil }
+        return WordCore.dailyProgress(
+            board: board, targets: day.targets, validation: validation,
+            tilesLeft: rack.count)
+    }
+
+    var isDaily: Bool { mode == .daily }
+
     var pileTone: PileTone {
         // A full pile is the normal state of an Occupy hand, not a warning.
         if mode == .occupy { return .ok }
@@ -585,6 +613,9 @@ final class GameModel {
         self.hazard = hazard
         fire = Wildfire()
         firesDoused = 0
+        day = nil
+        dailyDeal = nil
+        strokes = 0
         clearBattle()
         solo = SoloSession(pace: pace, now: now)
         gameSerial += 1
@@ -592,6 +623,33 @@ final class GameModel {
         let puzzle = try? generatePuzzle(
             wordPool: commonWords, tileCount: SOLO_START_TILES, rng: seededRng(seed))
         rack = puzzle?.letters ?? []
+        resetPlayState()
+    }
+
+    /// The day's puzzle. Everything about it comes out of the day's seed, so
+    /// every player in the world opens the same position — not merely the same
+    /// letters, which is what the mode used to promise. The word already on
+    /// the board is what makes the targets mean anything: until something is
+    /// down the board has no origin, and a cell to reach is only a cell to
+    /// reach once there is something to reach it from.
+    ///
+    /// Throws only if the day cannot be built at all, which
+    /// `DailyBoardRules.buildAttempts` makes vanishingly unlikely — the caller
+    /// treats it as "no puzzle today" rather than as a game to retry.
+    func newDaily(_ deal: DailyDeal, now: Date = .now) throws {
+        let built = try dailyBoard(seed: deal.seed)
+        seed = deal.seed
+        mode = .daily
+        hazard = .none
+        fire = Wildfire()
+        day = built
+        dailyDeal = deal
+        strokes = 0
+        clearBattle()
+        solo = SoloSession(dailyAt: now)
+        gameSerial += 1
+        setBoard(built.board)
+        rack = built.letters
         resetPlayState()
     }
 
@@ -606,6 +664,9 @@ final class GameModel {
         mode = .battle
         hazard = .none
         fire = Wildfire()
+        day = nil
+        dailyDeal = nil
+        strokes = 0
         self.spectating = spectating
         battle = BattleRun(startedAt: now)
         battleRound = 1
@@ -944,9 +1005,18 @@ final class GameModel {
         if red { cues?.play(.overflow) }
     }
 
-    /// One rule, every mode: a full pile ends the game on the spot.
+    /// One rule, every mode that can be lost: a full pile ends the game on the
+    /// spot.
+    ///
+    /// The Daily is the exception, and has to be: its whole deal arrives at
+    /// once and fills most of the pile, so the rule that ends a Solo game
+    /// would end a Daily before the first word. Nothing is arriving to make it
+    /// worse, either — the pile only ever shrinks from here — so there is
+    /// nothing for the rule to protect against.
     private func checkBurial() {
-        guard !isComplete, !spectating, mode != .occupy, rack.count >= pileLimit else { return }
+        guard !isComplete, !spectating, mode != .occupy, mode != .daily,
+            rack.count >= pileLimit
+        else { return }
         finishGame(reason: .buried)
     }
 
@@ -1015,9 +1085,28 @@ final class GameModel {
             cues?.play(.lose)
         case .battleOver:
             cues?.play(battleWon ? .win : .lose)
+        case .solved:
+            cues?.play(.win)
         }
         // One funnel for every ending, so stats are recorded exactly once.
         onFinish?(outcome)
+    }
+
+    /// What the day was worth: strokes against par, the points the board came
+    /// to, and how much of it was finished. Nil in every other mode.
+    ///
+    /// Read live as well as at the end — the header shows the same numbers
+    /// while the puzzle is being played — so it is computed rather than
+    /// frozen, off `finalScore` once the game is over and the live score
+    /// before that.
+    var dailyResult: DailyResult? {
+        guard let day, let progress = dailyProgress else { return nil }
+        return DailyResult(
+            strokes: strokes,
+            par: day.par,
+            points: isComplete ? finalScore : runningScore,
+            reached: progress.reached,
+            allTilesPlaced: progress.allTilesPlaced)
     }
 
     /// Everything a finished game is worth knowing about, frozen.
@@ -1037,7 +1126,9 @@ final class GameModel {
                 attackTilesSent: attackTilesSent),
             words: finalWords.count,
             tilesLeft: finalTilesLeft,
-            bonusEarned: finalBonusEarned)
+            bonusEarned: finalBonusEarned,
+            daily: dailyDeal,
+            dailyResult: dailyResult)
     }
 
     /// Called once per finished game — the single stats/leaderboard funnel
@@ -1548,6 +1639,7 @@ final class GameModel {
         cues?.play(.commit)
         douseFires(reachedBy: result.steps.map(\.key))
         soundPileAlarm()
+        spendStroke()
 
         // Battle: the word that just landed hits the field. Only the growth
         // counts — a word extended or bridged from words already down is
@@ -1574,6 +1666,20 @@ final class GameModel {
             }
         }
         return true
+    }
+
+    /// A word landed, so a stroke is spent — and if that word covered the last
+    /// target, the day is done.
+    ///
+    /// Checked after the board and the pile have both settled, so the result
+    /// knows whether every tile went down as well as whether every target was
+    /// reached. The Daily has no other ending: no clock to run out and no pile
+    /// to drown in, so the only way it finishes is by being finished.
+    private func spendStroke() {
+        guard mode == .daily else { return }
+        strokes += 1
+        guard dailyProgress?.done == true else { return }
+        finishGame(reason: .solved)
     }
 
     /// A word that lands on a burning cell — or beside one — puts it out, and
@@ -1810,10 +1916,15 @@ final class GameModel {
     /// nothing worth restoring (a finished game, an untouched opening board,
     /// or a battle — which is host-driven).
     func savedGame(at now: Date = .now) -> SavedSoloGame? {
-        guard mode == .endless, !isComplete else { return nil }
-        guard !board.isEmpty || bankedBonus > 0 || phase == .drip else { return nil }
+        guard mode == .endless || mode == .daily, !isComplete else { return nil }
+        // A Daily is worth coming back to the moment it starts: its deal
+        // arrives all at once, there is one attempt at it, and the board it
+        // opens on is not one the player can get back by starting again.
+        guard mode == .daily || !board.isEmpty || bankedBonus > 0 || phase == .drip
+        else { return nil }
         return SavedSoloGame(
             seed: seed,
+            mode: mode.rawValue,
             pace: pace.rawValue,
             hazard: hazard.rawValue,
             fire: fire,
@@ -1824,6 +1935,8 @@ final class GameModel {
             bankedBonus: bankedBonus,
             remainingSeconds: solo.remaining(at: now),
             dealSerial: dealSerial,
+            dailyDay: dailyDeal?.day,
+            strokes: strokes,
             savedAt: now.timeIntervalSince1970)
     }
 
@@ -1832,11 +1945,18 @@ final class GameModel {
     /// dismisses the resume card — a game must never lose seconds to being
     /// away, nor resume already expired.
     func restore(_ saved: SavedSoloGame, now: Date = .now) {
+        if saved.gameMode == .daily {
+            restoreDaily(saved)
+            return
+        }
         seed = saved.seed
         mode = .endless
         hazard = saved.soloHazard
         fire = saved.fire
         firesDoused = 0
+        day = nil
+        dailyDeal = nil
+        strokes = 0
         clearBattle()
         solo = SoloSession(
             restoring: saved.soloPace,
@@ -1850,6 +1970,35 @@ final class GameModel {
         bankedBonus = saved.bankedBonus
         dealSerial = saved.dealSerial
         inTheRed = pileTone == .urgent
+    }
+
+    /// A Daily picked back up. The puzzle isn't in the blob — it is a pure
+    /// function of the day's seed — so it is rebuilt and then the saved board,
+    /// pile and strokes are laid back over it. A day that can no longer be
+    /// built (nothing should make that true) falls back to no game rather than
+    /// to a broken one.
+    private func restoreDaily(_ saved: SavedSoloGame) {
+        guard let deal = saved.deal, let built = try? dailyBoard(seed: deal.seed) else { return }
+        seed = deal.seed
+        mode = .daily
+        hazard = .none
+        fire = Wildfire()
+        firesDoused = 0
+        day = built
+        dailyDeal = deal
+        clearBattle()
+        solo = SoloSession(dailyAt: .now)
+        // Straight back to the board. The opening card exists to hold a clock
+        // while the player reads it, and a Daily has no clock to hold — being
+        // shown the day again on the way back would be an interruption, not an
+        // introduction.
+        solo.dismissSplash(at: .now)
+        gameSerial += 1
+        setBoard(saved.board)
+        rack = saved.rack
+        resetPlayState()
+        bankedBonus = saved.bankedBonus
+        strokes = saved.strokes
     }
 
     // MARK: Board mutation

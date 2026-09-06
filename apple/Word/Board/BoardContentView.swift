@@ -43,6 +43,10 @@ struct BoardScene {
     var fires: Set<Cell> = []
     /// And the ground fire has already taken. Nothing goes here again.
     var scars: Set<Cell> = []
+    /// The Daily: the squares the crossword has to reach. Drawn under the
+    /// tiles rather than instead of them, so a target that has been covered
+    /// still shows its ring and the board reads as a scorecard.
+    var targets: Set<Cell> = []
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -68,6 +72,7 @@ struct BoardContentView: View {
                     scene.zones.isEmpty ? [] : Set(scene.zones.flatMap(\.cells))
                 let burning = scene.fires
                 let scarred = scene.scars
+                let targets = scene.targets
                 for row in 0..<metrics.rows {
                     for col in 0..<metrics.cols {
                         let rect = CGRect(
@@ -100,6 +105,16 @@ struct BoardContentView: View {
                                     roundedRect: rect, cornerRadius: radius,
                                     style: .continuous),
                                 with: .color(Palette.fireEdge),
+                                lineWidth: Self.zoneEdgeWidth(for: cell))
+                        }
+                        if !targets.isEmpty, targets.contains(here) {
+                            // A ring rather than a fill: it has to still be
+                            // legible once a tile is sitting on top of it,
+                            // which is the moment it matters most.
+                            let ring = rect.insetBy(dx: cell * 0.18, dy: cell * 0.18)
+                            context.stroke(
+                                Path(ellipseIn: ring),
+                                with: .color(Palette.targetEdge),
                                 lineWidth: Self.zoneEdgeWidth(for: cell))
                         }
                     }

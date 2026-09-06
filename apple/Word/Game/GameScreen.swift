@@ -91,7 +91,10 @@ struct GameScreen: View {
             }
 
             if let splash = model.splash {
-                SplashView(splash: splash, pace: model.pace) {
+                SplashView(
+                    splash: splash, pace: model.pace, day: model.day,
+                    dayLabel: model.dailyDeal?.shortLabel
+                ) {
                     model.dismissSplash(at: .now)
                     focusGame()
                 }
@@ -206,8 +209,36 @@ struct GameScreen: View {
             secondsToTiles: model.secondsToNextTiles(at: clockNow),
             tilesComing: model.nextTileCount,
             clock: headerClock,
+            note: headerNote,
             onPause: pause,
             onMenu: openMenu)
+    }
+
+    /// How the day went, in the sentence a player would say themselves.
+    /// Strokes against par leads, because that is the number worth comparing;
+    /// the clean sweep is the flourish under it.
+    static func dailyNote(_ result: DailyResult) -> String {
+        let words = "\(result.strokes) word\(result.strokes == 1 ? "" : "s")"
+        let against: String =
+            switch result.underPar {
+            case 0: "\(words) — level par."
+            case 1...: "\(words) — \(result.underPar) under par."
+            default: "\(words) — \(-result.underPar) over par (\(result.par))."
+            }
+        return result.allTilesPlaced ? "\(against) Every tile placed." : against
+    }
+
+    /// The Daily's line: targets reached, and words spent against par. Both
+    /// numbers at once because neither means anything alone — five words is
+    /// good or bad entirely depending on how much of the board it reached.
+    private var headerNote: HeaderNote? {
+        guard let day = model.day, let progress = model.dailyProgress else { return nil }
+        let reached = "\(progress.reached)/\(day.targets.count)"
+        return HeaderNote(
+            text: "\(reached) · \(model.strokes)/\(day.par) words",
+            spoken: "\(progress.reached) of \(day.targets.count) targets reached, "
+                + "\(model.strokes) word\(model.strokes == 1 ? "" : "s") played, par \(day.par)",
+            done: progress.done)
     }
 
     /// Occupy's clock: the match clock, or the stall countdown once it's close.
@@ -275,7 +306,15 @@ struct GameScreen: View {
                     model.setSummaryPresented(true)
                 })
         }
-        if model.isBattle || model.isOccupy {
+        if model.isDaily {
+            // One go a day: there is no new game to start, and no speed to
+            // start it at.
+            items.append(
+                GameMenuView.Item(title: "HOME") {
+                    closeMenu()
+                    onLeave()
+                })
+        } else if model.isBattle || model.isOccupy {
             if let battle, battle.isHost {
                 if battle.canRestart {
                     items.append(
@@ -405,7 +444,8 @@ struct GameScreen: View {
             viewerSeat: model.occupySeat,
             zones: model.occupyZones,
             fires: Set(model.fire.fires.map(parseKey)),
-            scars: Set(model.fire.scars.map(parseKey)))
+            scars: Set(model.fire.scars.map(parseKey)),
+            targets: Set(model.day?.targets.map(parseKey) ?? []))
     }
 
     /// Placed words are permanent in every mode, and nothing placed is ever
@@ -628,10 +668,14 @@ struct GameScreen: View {
         if let battle {
             return battle.canRestart ? { battle.restart() } : nil
         }
+        // One go a day, so there is nothing to play again — offering it would
+        // be offering something the door would then refuse.
+        if model.isDaily { return nil }
         return { startNewGame(pace: model.pace, hazard: model.hazard) }
     }
 
     private var endNote: String? {
+        if let result = model.dailyResult { return Self.dailyNote(result) }
         guard let battle else { return nil }
         if battle.isFinished {
             let how: String? = {

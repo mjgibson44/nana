@@ -6,6 +6,11 @@ import WordCore
 struct SplashView: View {
     var splash: SoloSplash
     var pace: SoloPace
+    /// The day being opened, when the card is fronting a Daily. It has no
+    /// clock and no batches to promise, so it says what it *is* instead: the
+    /// date, the word already down, and the par to beat.
+    var day: DailyBoard?
+    var dayLabel: String?
     var onDismiss: () -> Void
 
     var body: some View {
@@ -35,7 +40,7 @@ struct SplashView: View {
 
     private var title: String {
         switch splash {
-        case .start: "GAME ON"
+        case .start: day == nil ? "GAME ON" : (dayLabel ?? "TODAY").uppercased()
         case .speedUp: "FASTER"
         case .resumed: "WELCOME BACK"
         }
@@ -44,8 +49,13 @@ struct SplashView: View {
     private var note: String {
         switch splash {
         case .start:
-            "\(SOLO_START_TILES) tiles · "
-                + "\(formatSeconds(Double(endlessInitialSeconds(pace)))) until more arrive"
+            if let day {
+                "\(day.seedWord.uppercased()) is already down. "
+                    + "Reach all \(day.targets.count) rings — par \(day.par) words."
+            } else {
+                "\(SOLO_START_TILES) tiles · "
+                    + "\(formatSeconds(Double(endlessInitialSeconds(pace)))) until more arrive"
+            }
         case let .speedUp(seconds, tiles):
             "+\(tiles) tiles every \(formatSeconds(Double(seconds))) from here"
         case .resumed:

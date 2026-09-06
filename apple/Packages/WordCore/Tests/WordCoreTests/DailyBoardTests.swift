@@ -69,6 +69,8 @@ struct DailyBoardConstruction {
             let day = try dailyBoard(seed: seed)
             #expect(day.letters.count + day.seedCells.count == DailyBoardRules.tileCount)
             #expect(day.letters.allSatisfy { $0.count == 1 })
+            // Dealt into a fixed pile, so the hand has to fit it.
+            #expect(day.letters.count <= DailyBoardRules.maxDeal)
         }
     }
 

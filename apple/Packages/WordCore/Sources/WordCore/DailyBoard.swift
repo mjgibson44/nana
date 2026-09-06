@@ -58,11 +58,22 @@
 public enum DailyBoardRules {
     /// Tiles in the day's crossword, the seed word included — so the player is
     /// dealt this many less the length of the word already down, which lands
-    /// around two dozen. Enough to need real building, few enough to finish in
-    /// a sitting. (`DailyRules` next door owns the calendar — which day is
+    /// between twenty and twenty-three. Enough to need real building, few
+    /// enough to finish in a sitting, and few enough to fit the pile (see
+    /// `maxDeal`). (`DailyRules` next door owns the calendar — which day is
     /// live, when it rolls over, and the seed. The rules of the puzzle itself
     /// are here.)
-    public static let tileCount = 30
+    public static let tileCount = 28
+
+    /// The most tiles a day may deal into the hand.
+    ///
+    /// The app draws the pile as three rows of eight and buries a player who
+    /// fills it, so a deal larger than that would arrive already overflowing.
+    /// `tileCount` is chosen so this never binds — the largest deal it can
+    /// produce is a seed word of three, which the preference order never
+    /// reaches — but the puzzle is dealt to a fixed pile and it should say so
+    /// rather than leave it to arithmetic elsewhere.
+    public static let maxDeal = 24
 
     /// How many cells the player must reach.
     public static let targets = 3
@@ -191,6 +202,7 @@ private func buildDailyBoard(
 
     // Everything the player is dealt, in the solution's own insertion order.
     let rest = solution.keys.filter { !seedCells.contains($0) }
+    guard rest.count <= DailyBoardRules.maxDeal else { return nil }
     guard let targets = pickTargets(rest, seedCells: seedRun.cells) else { return nil }
 
     // Slide the whole frame so the crossword sits in the middle of the board

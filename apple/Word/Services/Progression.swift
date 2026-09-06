@@ -83,6 +83,7 @@ final class Progression {
             pace: outcome.report.pace,
             score: outcome.score,
             daily: outcome.daily,
+            dailyResult: outcome.dailyResult,
             dailyWithinDay: outcome.daily.map { dailyDayNumber(at: now) == $0.day } ?? true,
             battleWins: merged.battleWins,
             at: stamp)

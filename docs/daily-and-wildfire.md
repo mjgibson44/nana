@@ -377,6 +377,32 @@ it is the proof that the targets can be reached and that par can be made, it is
 what a hint would read, and it is what lets the tests check both rather than
 take them on trust.
 
+### As built — the app layer
+
+Both modes are wired into the app.
+
+**Wildfire** is a second row on the Solo setup screen (`SoloHazard` on `SoloSetup`, so
+the screen opens on the whole of the last game). Fire advances on the drip's expiry in
+`GameModel.advanceFire`; burnt tiles go back through `appendDealtTiles` like any other
+arrival, including the burial check, and sound like a rival's attack because they mean
+the same thing. Dousing and the dead-ground refusal both hang off `land()`, so every
+road to a landing answers the same way. Burning and burnt squares are painted in the
+existing Canvas lattice pass, in cell terms rather than keys so the 1,100-square pass
+allocates nothing.
+
+**The Daily** is its own mode (`GameMode.daily`) behind a home-screen door that shows
+the streak and dims once the day is played. It has no clock and cannot be buried — its
+deal arrives at once and fills most of the pile, so the rule that ends a Solo game would
+end a Daily before the first word, and nothing is arriving to make it worse. A landing
+spends a stroke and, if it covered the last ring, ends the day as a win. The header
+carries targets and strokes against par where the clock would be; the leaderboard gets
+the packed pair through the funnel every other mode already uses.
+
+**Two numbers moved.** The day's crossword is 28 tiles, not 30: the app draws the pile as
+three rows of eight and buries a player who fills it, so a deal has to fit inside 24, and
+28 puts every deal between 20 and 23 with par unchanged at a median of 6. A `maxDeal`
+guard now enforces that rather than leaving it to arithmetic.
+
 ### Not yet done
 
 - **None of it is compiled.** There is no Swift toolchain in the environment

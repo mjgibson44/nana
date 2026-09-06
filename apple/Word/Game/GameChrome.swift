@@ -17,6 +17,10 @@ struct GameHeaderView: View {
     /// Occupy: the match clock, and the stall countdown when one is running,
     /// in place of the deal. Nothing lands from a clock there.
     var clock: HeaderClock?
+    /// A line in the same slot for a mode with no clock at all — the Daily's
+    /// targets and strokes. Where the pressure would be, because in that mode
+    /// it *is* the pressure.
+    var note: HeaderNote?
     /// Nil hides the pause button — a battle can't be paused, and neither can
     /// a game that's already over.
     var onPause: (() -> Void)?
@@ -44,6 +48,14 @@ struct GameHeaderView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .accessibilityLabel(clock.spoken)
+            } else if let note {
+                Text(note.text)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(note.done ? Palette.accent : Palette.inkSoft)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel(note.spoken)
             } else if let secondsToTiles {
                 Text(Self.dealText(tiles: tilesComing, seconds: secondsToTiles))
                     .font(.system(size: 17, weight: .semibold))
@@ -198,6 +210,15 @@ struct OccupyBarView: View {
         }
         .frame(maxWidth: .infinity)
     }
+}
+
+/// A clockless mode's line in the header slot: what it says, how it reads
+/// aloud, and whether it is finished — which turns it the board's accent, the
+/// same colour the targets are ringed in.
+struct HeaderNote: Equatable {
+    var text: String
+    var spoken: String
+    var done = false
 }
 
 /// The pile gauge: how full the pile is against the limit, in a colour that

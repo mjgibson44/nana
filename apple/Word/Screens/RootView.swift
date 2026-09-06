@@ -35,6 +35,8 @@ struct RootView: View {
     @State private var battleError: String?
     @State private var partyCode: String?
     @State private var battleDoorNotice = false
+    /// Why the Daily door didn't open, when it didn't.
+    @State private var dailyNotice: String?
     @State private var savedGame: SavedSoloGame?
     /// The stand-in rival of a `WORD_AUTOSTART=occupy` game.
     @State private var localRival: BattleSession?
@@ -54,8 +56,11 @@ struct RootView: View {
             case .home:
                 HomeScreen(
                     hasSavedGame: savedGame != nil,
+                    dailyPlayed: dailyPlayed,
+                    dailyStreak: progression.dailyStreak,
                     onResume: resumeSavedGame,
                     onSolo: { route = .soloSetup },
+                    onDaily: startDaily,
                     onBattle: { chooseBattle(mode: .battle) },
                     onOccupy: { chooseBattle(mode: .occupy) })
 
@@ -112,6 +117,10 @@ struct RootView: View {
                     battleDoorNotice = false
                 }
             }
+
+            if let dailyNotice {
+                NoticeCard(text: dailyNotice) { self.dailyNotice = nil }
+            }
         }
         .task {
             savedGame = settings.loadSavedGame()
@@ -144,6 +153,49 @@ struct RootView: View {
     }
 
     // MARK: Solo
+
+    // MARK: The Daily
+
+    /// Whether today's puzzle has been played. The merged progress is the
+    /// authority rather than anything local, so a day played on the iPad
+    /// counts here too.
+    private var dailyPlayed: Bool {
+        progression.merged.dailyDays.contains(dailyDayNumber(at: .now))
+    }
+
+    /// Today's board. One go a day, so a day already played says so rather
+    /// than dealing a second attempt at the same puzzle — and a day put down
+    /// half-finished is picked back up rather than restarted, which is the
+    /// same rule read the other way.
+    private func startDaily() {
+        let today = dailyDeal(at: .now)
+
+        if let saved = savedGame, saved.gameMode == .daily, saved.dailyDay == today.day {
+            resumeSavedGame()
+            return
+        }
+        guard !dailyPlayed else {
+            dailyNotice =
+                "You've already played today's board. The next one lands "
+                + "\(hoursUntil(today.closesAt)) from now."
+            return
+        }
+        do {
+            try model.newDaily(today)
+        } catch {
+            dailyNotice = "Today's board couldn't be dealt. Try again in a moment."
+            return
+        }
+        savedGame = nil
+        route = .game
+    }
+
+    /// Rounded up, and never "0 hours": a board that lands in forty minutes
+    /// lands in an hour as far as this sentence is concerned.
+    private func hoursUntil(_ date: Date) -> String {
+        let hours = max(1, Int(ceil(date.timeIntervalSinceNow / 3600)))
+        return "\(hours) hour\(hours == 1 ? "" : "s")"
+    }
 
     private func startSolo(pace: SoloPace, hazard: SoloHazard) {
         // This is the one moment a player says what they want, so it's the

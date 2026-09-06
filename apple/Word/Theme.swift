@@ -76,6 +76,10 @@ enum Palette {
     /// Dead ground: darker than the board itself, so it reads as a hole in it
     /// rather than as a square with something on it.
     static let scarCell = Color(hex: 0x0D0B0A)
+
+    /// The Daily's targets. The board's own accent, because reaching one is
+    /// the good thing that can happen here — the opposite of a fire.
+    static let targetEdge = Color(hex: 0xB6DA97)
 }
 
 /// The colours a seat's tiles wear, as seen from another seat.

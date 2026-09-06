@@ -15,12 +15,16 @@ import WordCore
 struct SavedSoloGame: Codable, Equatable {
     /// Bumped if the shape changes; a stale blob is dropped, never migrated.
     /// v3 dropped the Daily Deal's fields along with the mode; v4 added the
-    /// hazard and the fire it lit.
-    static let version = 4
+    /// hazard and the fire it lit; v5 brought the Daily back, as the day it
+    /// was and the strokes spent on it.
+    static let version = 5
     static let key = "nana.solo.save.v1"
 
     var version: Int = Self.version
     var seed: String
+    /// Which game this was — `GameMode`'s raw value. Solo unless it says
+    /// otherwise, since Solo is the only thing older blobs held.
+    var mode: String = GameMode.endless.rawValue
     var pace: String
     /// What the board was up to — `SoloHazard`'s raw value. Defaulted so a
     /// blob can still be built by naming only the fields a plain game has.
@@ -39,11 +43,20 @@ struct SavedSoloGame: Codable, Equatable {
     /// How many clock deals have happened — the deal stream's position, so a
     /// resumed game keeps dealing the same letters it would have.
     var dealSerial: Int
+    /// The Daily: which day's puzzle, and how many words it has cost so far.
+    /// The puzzle itself isn't stored — it is a pure function of the day's
+    /// seed, so it is rebuilt rather than carried.
+    var dailyDay: Int? = nil
+    var strokes: Int = 0
     /// When it was put away.
     var savedAt: Double
 
     var soloPace: SoloPace { SoloPace(rawValue: pace) ?? .regular }
     var soloHazard: SoloHazard { SoloHazard(rawValue: hazard) ?? .none }
+    var gameMode: GameMode { GameMode(rawValue: mode) ?? .endless }
+    /// The day this was, rebuilt from its number — everything about a day
+    /// follows from that, the seed included.
+    var deal: DailyDeal? { dailyDay.map { dailyDeal(day: $0) } }
     var soloPhase: SoloPhase { phase == "drip" ? .drip : .initial }
 
     var savedDate: Date { Date(timeIntervalSince1970: savedAt) }
