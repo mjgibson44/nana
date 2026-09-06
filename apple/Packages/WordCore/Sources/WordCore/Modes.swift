@@ -35,6 +35,16 @@ public enum SoloPace: String, CaseIterable, Sendable {
     case regular, fast
 }
 
+/// What else Solo has to contend with, beyond the pile.
+///
+/// New on Apple platforms. `none` is Endless exactly as the web plays it;
+/// `wildfire` is the same game with a board that burns (`Wildfire.swift`).
+/// It rides on the setup sheet beside the pace rather than taking a door of
+/// its own: it is the same mode, leaning on you differently.
+public enum SoloHazard: String, CaseIterable, Sendable {
+    case none, wildfire
+}
+
 public struct ModeInfo {
     public let name: String
     public let tagline: String
@@ -79,6 +89,35 @@ public let PACE_OPTIONS: [(pace: SoloPace, name: String)] = [
     (pace: .fast, name: "Fast"),
 ]
 
+/// The Hazard setting's tabs. Like the pace, this row is a switch and nothing
+/// more — what fire actually costs you belongs on `WILDFIRE_INFO`, not on a
+/// sheet being skimmed on the way past.
+public let HAZARD_OPTIONS: [(hazard: SoloHazard, name: String)] = [
+    (hazard: .none, name: "Clear"),
+    (hazard: .wildfire, name: "Wildfire"),
+]
+
+/// What the splash cards call each hazard. `none` adds nothing to the pace's
+/// own name — a card reading "Solo · Regular · Clear" would be announcing the
+/// absence of a thing the player has never heard of.
+public let HAZARD_NAMES: [SoloHazard: String] = [
+    .none: "",
+    .wildfire: "Wildfire",
+]
+
+/// Wildfire's explainer, raised the first time it's picked on the setup sheet.
+/// It leads with the answer rather than the threat: the first thing to know
+/// about a burning cell is that playing beside it puts it out.
+public let WILDFIRE_INFO = ModeInfo(
+    name: "Wildfire",
+    tagline: "Solo, with a board that burns.",
+    details: [
+        "Cells catch fire — play on or beside one to put it out, and score for it",
+        "Leave one and it takes a tile back to your pile, scars the ground and spreads",
+        "Burnt tiles land back in your pile — and the pile is what buries you",
+    ]
+)
+
 /// Battle's home-screen card. The rules in one breath: permanent words,
 /// attack tiles split across the field, a hard pile limit, and the game runs
 /// until one player is left. See `splitAttackTiles` for the split, and
@@ -122,11 +161,11 @@ public let TUTORIAL_INFO = ModeInfo(
 /// tomorrow, and the reason a score is worth comparing.
 public let DAILY_DEAL_INFO = ModeInfo(
     name: "Daily Deal",
-    tagline: "One deal a day. Same letters for everyone.",
+    tagline: "One board a day. Same start for everyone.",
     details: [
-        "\(DailyRules.tileCount) tiles, no clock — take as long as you like",
-        "Everybody in the world plays the same letters today",
-        "One go per day; place every tile for a \(ALL_TILES_BONUS)-point bonus",
+        "A word is already down — reach all \(DailyBoardRules.targets) targets from it",
+        "Fewest words wins; every board comes with a par to beat",
+        "One go per day, no clock; place every tile for a \(ALL_TILES_BONUS)-point bonus",
     ]
 )
 

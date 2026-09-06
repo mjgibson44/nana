@@ -299,3 +299,98 @@ The two are independent, so this is a preference rather than a dependency chain.
   puzzles from the same date.
 - **Three targets?** Two may be enough to force a spanning board; four may make
   every day feel the same. Cheap to try once targets exist.
+
+---
+
+## As built — the WordCore layer
+
+*Added 2026-09-06. This section is what actually shipped, and where it differs
+from the design above.*
+
+The pure layer for both modes is written and tested:
+`WordCore/DailyBoard.swift`, `WordCore/Wildfire.swift`, their two test suites,
+`SoloHazard` and the mode cards in `Modes.swift`, and `hazard` on `SoloSetup`.
+The app layer — the setup-sheet row, the Daily's screen, cell rendering, the
+round wiring — is not.
+
+**The design targets the app, not the web.** The old auto-generated Daily Deal
+mode is disregarded; only its calendar survives (`DailyDeal.swift` — which day
+is live, when it rolls over, the salted seed, the streak), which is the part
+worth keeping. Web parity is not a constraint on any of this.
+
+### The numbers were measured, not guessed
+
+The construction was prototyped against the canonical TypeScript generator and
+swept over 500 seeds before a line of Swift was written, then the Swift
+algorithm was transliterated back and swept again to check it as written. What
+came out, at 30 tiles:
+
+| | |
+|---|---|
+| Built successfully | 500 / 500, one rejected deal in total |
+| Par (the hidden crossword's words) | 5–8, median 6 |
+| Seed word | 5–8 letters, median 6 |
+| Tiles dealt to the player | 22–25, median 24 |
+| Gap between targets | 4–9, median 6 |
+| Solution span | ≤ 17, so it always fits the 33×33 opening board |
+| Null solutions (the generator's fallback) | 0 |
+| Solutions with a 2-letter or non-dictionary run | 0 |
+
+That last row is what lets par be honest: every hidden crossword is a strictly
+legal board, so counting its runs counts its words.
+
+### What changed from the design
+
+**Wildfire's fires carry no age.** The first cut gave each fire an age field
+and resolved it once it had lived a round — which quietly gave every fire *two*
+player-rounds of grace, since a fire lit at the end of round N isn't seen by
+round N's own resolve pass. Dropping the field fixes the bug and states the
+rule better: everything alight when the round ends was lit by the previous
+round, so **every fire you can see burns at the end of this round unless you
+put it out**. No bookkeeping, and one sentence to teach.
+
+**Fire scars its own cell and eats a neighbour, rather than sitting on a tile.**
+Fires only ever occupy empty cells, which keeps one invariant doing a lot of
+work: "play on it" is always a legal move, so a fire always has an answer. An
+unanswered one scars where it sat, takes one tile from beside it back to the
+pile, and steps to a neighbouring cell — preferring one next to a tile, so it
+walks toward the board rather than off into nothing. Ringed by dead ground or
+tiles, it goes out.
+
+**Fire kills through the pile, not a loose-tile gauge.** The app's Solo has no
+loose-tile rule — the pile is the only pressure, and reaching `PILE_LIMIT`
+ends the game on the spot. That suits fire better than the web's rule did:
+burnt tiles land straight in the pile, so an ignored fire can end a game
+outright. `hazardPileLimit(base:hazard:)` hands Wildfire `WILDFIRE_PILE_RELIEF`
+more room, taking the base limit as an argument because the limit is the app's
+to set and the relief is the rule's.
+
+**The take-back question answered itself.** The design called it the one choice
+that changes what the Daily is. The app settles it: words are permanent in
+every mode, so a stroke is a word played and there is no undo to refund. What
+softens it is staging — tiles sit ghosted and can be rearranged or cleared
+freely until the ✓ — so the thinking happens before the stroke is spent.
+`DailyResult` therefore has no "clean" flag; there is nothing for it to record.
+
+**`DailyBoard` keeps the hidden solution.** For the same reason `Puzzle` does:
+it is the proof that the targets can be reached and that par can be made, it is
+what a hint would read, and it is what lets the tests check both rather than
+take them on trust.
+
+### Not yet done
+
+- **None of it is compiled.** There is no Swift toolchain in the environment
+  this was written in and `download.swift.org` is blocked by its network
+  policy, so `swift test` has never run against any of it. The algorithm is
+  validated (twice, in TypeScript); the Swift is reviewed but unbuilt, and the
+  first `swift test` should be treated as the real first run.
+- **App wiring**: the Solo setup sheet's hazard row, the Daily's own screen and
+  entry, target and scar rendering on the board, the round-boundary call into
+  `wildfireAdvance`, the douse call on commit, `SavedSoloGame` carrying the
+  fire, and the result card.
+- **One decision worth making before the Daily's screen is built:** whether
+  permanence is right for a one-attempt-a-day puzzle. It means a wrong early
+  word can put a target out of reach with no way back — which contradicts the
+  design's "the daily cannot be failed". Allowing a word to be taken back in
+  the Daily alone would fix it, at the cost of the app's one consistent rule
+  and some `GameModel` work.
