@@ -36,6 +36,19 @@ struct BoardScene {
     var zones: [OccupyZone] = []
     /// Seconds left on the open zone, drawn on its middle square.
     var zoneSecondsLeft: Int? = nil
+    /// Wildfire: the squares alight. Every one of them burns at the end of
+    /// this round unless a tile lands on it or beside it.
+    ///
+    /// Cells rather than keys, because the lattice below walks every square on
+    /// screen — 1,100+ at full zoom-out — and asking these sets in cell terms
+    /// keeps that pass free of per-square string building.
+    var fires: Set<Cell> = []
+    /// And the ground fire has already taken. Nothing goes here again.
+    var scars: Set<Cell> = []
+    /// The Daily: the squares the crossword has to reach. Drawn under the
+    /// tiles rather than instead of them, so a target that has been covered
+    /// still shows its ring and the board reads as a scorecard.
+    var targets: Set<Cell> = []
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -62,20 +75,55 @@ struct BoardContentView: View {
                     scene.zones.filter(\.isOpen).flatMap(\.cells))
                 let settledCells: Set<Cell> = Set(
                     scene.zones.filter { !$0.isOpen }.flatMap(\.cells))
+                let burning = scene.fires
+                let scarred = scene.scars
+                let targets = scene.targets
                 for row in 0..<metrics.rows {
                     for col in 0..<metrics.cols {
                         let rect = CGRect(
                             x: Double(col) * step, y: Double(row) * step,
                             width: cell, height: cell)
-                        let cellAt = Cell(row: bounds.minRow + row, col: bounds.minCol + col)
-                        let fill: Color =
-                            openCells.contains(cellAt)
-                            ? Palette.zoneCell
-                            : (settledCells.contains(cellAt)
-                                ? Palette.zoneCellSettled : Palette.surface)
+                        let here = Cell(row: bounds.minRow + row, col: bounds.minCol + col)
+                        // Dead ground reads as a hole in the board rather than
+                        // as a square with something on it — the point is that
+                        // nothing can go there. A burning square is the
+                        // brightest empty cell on screen, because it is the one
+                        // asking to be played on before the round ends.
+                        let isScarred = !scarred.isEmpty && scarred.contains(here)
+                        let isBurning = !isScarred && !burning.isEmpty && burning.contains(here)
+                        let fill: Color
+                        if isScarred {
+                            fill = Palette.scarCell
+                        } else if isBurning {
+                            fill = Palette.fireCell
+                        } else if !openCells.isEmpty, openCells.contains(here) {
+                            fill = Palette.zoneCell
+                        } else if !settledCells.isEmpty, settledCells.contains(here) {
+                            fill = Palette.zoneCellSettled
+                        } else {
+                            fill = Palette.surface
+                        }
                         context.fill(
                             Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
                             with: .color(fill))
+                        if isBurning {
+                            context.stroke(
+                                Path(
+                                    roundedRect: rect, cornerRadius: radius,
+                                    style: .continuous),
+                                with: .color(Palette.fireEdge),
+                                lineWidth: Self.zoneEdgeWidth(for: cell))
+                        }
+                        if !targets.isEmpty, targets.contains(here) {
+                            // A ring rather than a fill: it has to still be
+                            // legible once a tile is sitting on top of it,
+                            // which is the moment it matters most.
+                            let ring = rect.insetBy(dx: cell * 0.18, dy: cell * 0.18)
+                            context.stroke(
+                                Path(ellipseIn: ring),
+                                with: .color(Palette.targetEdge),
+                                lineWidth: Self.zoneEdgeWidth(for: cell))
+                        }
                     }
                 }
                 for zone in scene.zones {

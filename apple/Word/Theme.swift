@@ -70,6 +70,20 @@ enum Palette {
     /// A zone that has been decided: settled back toward the lattice, so the
     /// live one is the one that draws the eye.
     static let zoneCellSettled = Color(hex: 0x282828)
+
+    /// Wildfire. A burning square is the brightest empty cell on the board —
+    /// it is the one asking to be played on before the round ends — and takes
+    /// the same warm amber the pile gauge warns in, so the two kinds of
+    /// trouble read as one family.
+    static let fireCell = Color(hex: 0x6E3B05)
+    static let fireEdge = Color(hex: 0xE39A2B)
+    /// Dead ground: darker than the board itself, so it reads as a hole in it
+    /// rather than as a square with something on it.
+    static let scarCell = Color(hex: 0x0D0B0A)
+
+    /// The Daily's targets. The board's own accent, because reaching one is
+    /// the good thing that can happen here — the opposite of a fire.
+    static let targetEdge = Color(hex: 0xB6DA97)
 }
 
 /// The colours a seat's tiles wear, as seen from another seat.

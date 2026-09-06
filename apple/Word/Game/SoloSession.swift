@@ -33,11 +33,16 @@ enum SoloPhase: Equatable {
 }
 
 enum SoloEndReason: Equatable {
-    /// The pile filled up. The one way to lose, in every mode.
+    /// The pile filled up. The one way to lose, in every mode that can be
+    /// lost.
     case buried
     /// The battle was decided while this board was still standing — as the
     /// winner, or as half of a draw.
     case battleOver
+    /// The Daily's every target reached. The one ending that isn't a loss:
+    /// the day's puzzle has no clock and no pile pressure, so finishing it is
+    /// the only way it ends at all.
+    case solved
 }
 
 /// Cards that briefly cover the board and freeze a Solo countdown.
@@ -77,6 +82,14 @@ struct SoloSession: Equatable {
         pace = .regular
         countdown = nil
         splash = nil
+    }
+
+    /// The Daily: no countdown either, and nothing to deal. The day's tiles
+    /// arrive once and that is the whole game, so this session carries only
+    /// the opening card and the ending.
+    init(dailyAt _: Date) {
+        pace = .regular
+        countdown = nil
     }
 
     /// A game coming back from a saved blob. The clock returns frozen at the

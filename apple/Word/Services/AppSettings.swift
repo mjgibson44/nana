@@ -30,11 +30,21 @@ final class AppSettings {
         }
     }
 
-    /// The pace Solo deals at — the last one chosen from the game menu.
+    /// The pace Solo deals at — the last one chosen on the way into a game.
     var pace: SoloPace {
         didSet {
             guard pace != oldValue else { return }
-            saveSoloSetup(SoloSetup(pace: pace), to: store)
+            saveSoloSetup(SoloSetup(pace: pace, hazard: hazard), to: store)
+        }
+    }
+
+    /// And what the board is up to. Kept beside the pace and written with it,
+    /// so the setup screen opens on the whole of the last game rather than
+    /// half of it.
+    var hazard: SoloHazard {
+        didSet {
+            guard hazard != oldValue else { return }
+            saveSoloSetup(SoloSetup(pace: pace, hazard: hazard), to: store)
         }
     }
 
@@ -43,7 +53,9 @@ final class AppSettings {
         soundEnabled = WordCore.isSoundEnabled(in: store)
         // Anything but an explicit "off" is on, matching the sound pref.
         hapticsEnabled = store.get(Self.hapticsKey) != "off"
-        pace = loadSoloSetup(from: store).pace
+        let setup = loadSoloSetup(from: store)
+        pace = setup.pace
+        hazard = setup.hazard
     }
 
     // MARK: Stats (stats.ts)

@@ -151,6 +151,7 @@ public func submissions(
     pace: SoloPace,
     score: Int,
     daily: DailyDeal?,
+    dailyResult: DailyResult? = nil,
     dailyWithinDay: Bool,
     battleWins: Int,
     at: Double
@@ -164,7 +165,13 @@ public func submissions(
         // submitted: a recurring leaderboard would happily file it against
         // the *new* day's board (plan §8.2).
         guard let daily, dailyWithinDay else { return [] }
-        return [PendingScore(board: .daily, score: score, day: daily.day, at: at)]
+        // The board is ranked on the thing the mode is about — words played,
+        // fewest first — with points settling a tie, so what goes up is the
+        // packed pair rather than the points the player was shown
+        // (`dailyLeaderboardScore`). A day that somehow reports no result
+        // falls back to its points, which sorts sanely against nothing else.
+        let posted = dailyResult.map(dailyLeaderboardScore) ?? score
+        return [PendingScore(board: .daily, score: posted, day: daily.day, at: at)]
 
     case .battle:
         return [PendingScore(board: .battleWins, score: battleWins, at: at)]

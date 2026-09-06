@@ -53,7 +53,8 @@ dark UI. The rules, in one breath:
 - **Words are permanent.** Nothing on the board moves, turns, comes back off, or undoes —
   so only real words are allowed down, in Solo as much as in Battle.
 - **The pile is the only pressure.** Reach `PILE_LIMIT` (24) tiles in hand and the game
-  ends on the spot, in either mode. The gauge under the header fills toward it in green
+  ends on the spot, in either mode — `hazardPileLimit` gives Wildfire a little more room,
+  and the Daily is exempt (see below). The gauge under the header fills toward it in green
   and turns amber at 17 and red at 20; the pile is drawn as three rows of eight whatever it holds,
   so a full pile looks like the end. Solo opens on `SOLO_START_TILES` (16) and Battle on
   `BATTLE_OPENING_TILES` (12) — the app's own numbers, kept apart from
@@ -120,14 +121,46 @@ its file order is determinism-critical).
 
 Conventions and the porting API contract live in [`PORTING.md`](PORTING.md).
 
-### The Daily Deal (retired from the app)
+### The Daily
 
-The mode is gone from the app, but `DailyDeal.swift` and `DailyRules` stay in `WordCore`
-with their tests: the recurring leaderboard is already configured against them in App
-Store Connect, and `Progression` still knows how to file a daily result should the mode
-come back. The seed is salted so the day's letters aren't derivable from the date alone
-(§8.4), and `TileStream` grows its deal off a *hidden* board so one seed yields the same
-letters however differently two people play them.
+One board a day, the same one for everybody — and the same *position*, not merely the
+same letters. `WordCore/DailyBoard.swift` builds the day out of a single hidden
+crossword grown from the day's seed: one of that crossword's own words is left on the
+board as the **seed word**, the rest of its letters are dealt, three of its remaining
+cells are ringed as **targets**, and **par** is how many words it used.
+
+The seed word is what makes the targets mean anything. The board has no origin —
+`boardBounds` grows around whatever is played and `normalize` slides every generated
+solution back to (0, 0) — so before something is down, "the target is at row 3, column
+7" says nothing, and any target is covered by starting on top of it. With a word down,
+the coordinate system is pinned and reaching a ring means building in a direction you
+did not choose with letters you were given.
+
+Everything the mode promises falls out of that construction rather than being asserted:
+the targets are reachable because they are cells of a crossword the deal is known to
+build, and par is achievable because that crossword achieves it — and beatable, because
+the letters come from several ordinary overlapping words and there are normally tighter
+arrangements. Par is derived, not tuned, so it is honest on every deal.
+
+- **Scored on words, low being good.** Which fights the points scoring productively:
+  `wordScore` is triangular and every run pays, so points want a densely crossed board
+  with many runs while par wants few words. The move that serves both is one word laid
+  across three others — four new runs for one stroke. The leaderboard is ranked on the
+  packed pair (`dailyLeaderboardScore`), strokes first and points as the tiebreak.
+- **No undo, and none needed to explain.** Words are permanent here as everywhere else,
+  so a stroke is a word played. Staging is what softens it: tiles sit ghosted on the
+  board and can be moved or cleared freely until the ✓.
+- **It cannot be lost.** No clock, and the pile explicitly cannot bury it — the whole
+  deal arrives at once and fills most of the pile, and nothing more is coming. The
+  tension is your number against par, not a loss you get no second go at.
+- **One go a day, and a day is picked back up rather than dealt again.** The puzzle
+  isn't stored in the save blob — it is a pure function of the day's seed, so it is
+  rebuilt and the saved board, pile and strokes are laid back over it.
+
+`DailyDeal.swift` next door owns the calendar rather than the puzzle: which day is live,
+when it rolls over, the salted seed (§8.4), and the streak. The recurring leaderboard is
+configured against it in App Store Connect and `Progression` files a day's result
+through the same funnel every other mode uses.
 
 ### Progression and leaderboards
 
@@ -181,6 +214,39 @@ actually play:
 - **`BattleLobbyScreen`**: the roster from the host's snapshot, including seats being
   *held* for a dropped player. A battle plays on around a disconnect rather than pausing,
   so a held seat has to read as held, not gone.
+
+### Wildfire
+
+Solo with a board that fights back — a second row on the setup screen rather than a door
+of its own, because it is the same game leaning on you differently. The rules are pure
+Swift in `WordCore/Wildfire.swift`.
+
+Fire rides the drip's own expiry, so a round stays one pulse: the tiles land, the board
+burns, the pile is measured. Everything alight when that happens was lit by the previous
+round, which is the round of grace and needs no bookkeeping to enforce — **every fire you
+can see burns at the end of this round unless you put it out**.
+
+- **It catches on empty squares next to tiles already down.** Never in open space: the
+  board has to stay connected, so a fire you cannot build next to is a fire with no
+  legal answer.
+- **Playing on it or beside it puts it out**, and pays `WILDFIRE_DOUSE_BONUS`. Adjacency
+  rather than exact coverage, so a fire costs a decision instead of a coin flip — and
+  the bonus is what keeps it an opportunity rather than a tax.
+- **Left alone, it scars its own square** — dead ground, forever — **takes one of the
+  tiles beside it back to the pile, and spreads.** Fire will not cross a scar, so one
+  that walks into old burnt ground goes out: the places you lost tiles are the places it
+  cannot go later.
+- **There is no health bar.** Burnt tiles land in the pile, and the pile is already the
+  only thing that ends a game, so fire kills through a rule the player knows and its cost
+  is priced in the number they are already watching. Wildfire plays to a limit
+  `WILDFIRE_PILE_RELIEF` higher, amber and red moved up with it, because the pile is
+  under attack from two sides now.
+
+Scarring is proportional to how badly it is going — answer your fires and the board stays
+whole, drown and it closes in — which is both the death spiral and the reason a late
+board looks nothing like an early one. The fire itself rides the save blob, so a game
+picked back up after process death comes back to the squares that were alight and the
+ground already lost.
 
 ### Occupy
 
