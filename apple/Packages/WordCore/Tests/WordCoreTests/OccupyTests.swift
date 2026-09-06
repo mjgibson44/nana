@@ -590,6 +590,73 @@ private func opened() throws -> OccupyState {
         #expect(a?.resolved == false)
         #expect(occupyZoneCandidates(state).contains(a!.centre))
     }
+
+    /// Two seats scrapping over one patch, with four zones already played
+    /// around them: every centre the reach allows is either under a tile or
+    /// on ground a zone has had. This is the board that makes
+    /// `occupySpawnZone` come back empty-handed — the case the host's retry
+    /// (`OCCUPY_ZONE_RETRY_SECONDS`) exists for.
+    private func crowded() -> OccupyState {
+        var state = fresh()
+        state.opened = [true, true]
+        for col in 12...14 {
+            state.board[keyOf(12, col)] = "a"
+            state.owners[keyOf(12, col)] = 0
+            state.board[keyOf(14, col)] = "b"
+            state.owners[keyOf(14, col)] = 1
+        }
+        // Decided rather than open, because a zone that has been paid out
+        // still keeps the next one off its ground — the fight is meant to
+        // move around the board rather than settle on one patch.
+        state.zones = [Cell(row: 9, col: 10), Cell(row: 9, col: 17),
+                       Cell(row: 17, col: 10), Cell(row: 17, col: 17)]
+            .enumerated()
+            .map { OccupyZone(slot: $0.offset, centre: $0.element, winner: 0, resolved: true) }
+        state.scores = occupyScores(board: state.board, owners: state.owners, seats: 2)
+        return state
+    }
+
+    @Test("a board with nowhere clear left to put one spawns no zone at all")
+    func nowhereToGo() {
+        let state = crowded()
+
+        // The zones are legal where they are: none of them sits on a tile,
+        // on a start square, or on another zone. It's a board the host could
+        // have dealt itself, not one contrived to fail.
+        let starts = state.seats.indices.map { state.startCell(seat: $0) }
+        for (index, zone) in state.zones.enumerated() {
+            #expect(zone.keys.allSatisfy { state.board[$0] == nil }, "zone \(index) is on tiles")
+            #expect(!starts.contains { zone.contains($0) }, "zone \(index) is on a start")
+            for other in state.zones[(index + 1)...] {
+                #expect(!zone.overlaps(other), "zone \(index) overlaps a later one")
+            }
+        }
+
+        #expect(occupyZoneCandidates(state).isEmpty, "nowhere within reach is clear")
+        #expect(occupySpawnZone(state, slot: 4, rng: seededRng("seed/zones/4")) == nil)
+        // Whatever the roll, since there is nothing to roll between.
+        #expect(occupySpawnZone(state, slot: 4, rng: { 0.99 }) == nil)
+    }
+
+    @Test("and it's the ground being taken that does it, not the reach")
+    func groundOpensAgain() {
+        // The same board with one zone's patch given back: a slot that found
+        // nowhere a moment ago finds somewhere now, which is the whole reason
+        // the host retries a crowded slot instead of dropping it.
+        var state = crowded()
+        let freed = state.zones.removeLast()
+
+        let candidates = occupyZoneCandidates(state)
+        #expect(!candidates.isEmpty)
+        #expect(
+            candidates.allSatisfy { freed.overlaps(OccupyZone(centre: $0)) },
+            "the only ground that opened up is the ground that was freed")
+
+        let zone = occupySpawnZone(state, slot: 4, rng: seededRng("seed/zones/4"))
+        #expect(zone != nil)
+        #expect(zone?.opensAt == occupyZoneWindow(slot: 4).opensAt, "on its slot's clock, not now")
+        #expect(zone?.closesAt == occupyZoneWindow(slot: 4).closesAt)
+    }
 }
 
 @Suite("Occupy: standings and the end") struct OccupyStandings {
