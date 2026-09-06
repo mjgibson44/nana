@@ -1491,7 +1491,8 @@ final class GameModel {
         let result = planPlacement(
             board: board, bounds: bounds, anchor: parseKey(anchor), dir: dir, picks: picksToPlace)
         guard !result.steps.isEmpty, result.complete else { return false }
-        // What the gaps sit on — in Occupy, the letters this word captures.
+        // What the gaps sit on — in Occupy, the player's own letters this
+        // word borrows.
         let borrowed =
             mode == .occupy
             ? gapCells(board: board, bounds: bounds, anchor: parseKey(anchor), dir: dir, picks: picksToPlace)

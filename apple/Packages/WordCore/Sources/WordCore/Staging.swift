@@ -47,7 +47,8 @@ public struct StagedWord: Equatable {
     /// direction makes the longer word.
     public var direction: Direction
     /// The letters already down that the word runs through along its line,
-    /// in reading order — what an Occupy placement borrows, and captures.
+    /// in reading order — what an Occupy placement borrows, all of them its
+    /// own player's.
     public var borrowed: [CellKey]
     /// Every run the placement makes or changes, all of them real words.
     public var runs: [WordRun]

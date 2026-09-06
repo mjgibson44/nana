@@ -248,9 +248,9 @@ public func occupyQuadrant(of cell: Cell, size: Int) -> Int? {
 }
 
 /// The squares the gap picks would sit on, laid out from `anchor` the same
-/// way `planPlacement` lays the word — the letters a placement borrows, and
-/// so the letters it captures. Every one of them holds a letter when the
-/// plan is complete.
+/// way `planPlacement` lays the word — the letters a placement borrows, which
+/// in Occupy must already be the placer's own. Every one of them holds a
+/// letter when the plan is complete.
 public func gapCells(
     board: TileMap, bounds: Bounds, anchor: Cell, dir: Direction, picks: [Pick]
 ) -> [CellKey] {

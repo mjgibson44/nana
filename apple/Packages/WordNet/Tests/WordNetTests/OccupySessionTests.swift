@@ -214,7 +214,7 @@ struct OccupyPlacementTests {
         #expect(lobby.occupy?.scores == [9, 9])
         let heard = lobby.heard["ann"] ?? []
         #expect(heard.suffix(2) == ["state", "placed:7"], "the board first, then the answer")
-        #expect(ann.state?.occupy?.board.count == 5)
+        #expect(ann.state?.occupy?.board.count == 6, "the snapshot she got already had it on")
     }
 
     @Test func aSquareSomeoneGotToFirstIsRefused() {
@@ -335,17 +335,20 @@ struct OccupyEndTests {
             !zone.contains(Cell(row: 12, col: 12)) && !zone.contains(Cell(row: 20, col: 20)),
             "off the starts")
 
-        // A word of the host's own keeps the stall off. The zone stays open
-        // for its whole minute, and no second one opens while it is.
-        lobby.advance(50)
+        // A word of the host's own keeps the stall off — the opener is
+        // ninety seconds behind by now, and the stall would end the game
+        // before the whistle ever went. The zone stays open for its whole
+        // minute, and no second one opens while it is.
+        lobby.advance(25)
         lobby.host.placeSelf(
             serial: 2, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
+        #expect(lobby.host.state.phase == .playing, "the word reset the stall clock")
         #expect(lobby.occupy?.zones.count == 1)
         #expect(lobby.occupy?.zones[0].isOpen == true)
 
         // The whistle, on the host's clock: the zone is decided by what's
         // inside it, and the bonus lands in the scores the roster carries.
-        lobby.advance(10)
+        lobby.advance(35)
         let closed = lobby.occupy!.zones[0]
         #expect(closed.resolved)
         #expect(closed.counts == occupyZoneCounts(closed, owners: lobby.occupy!.owners, seats: 2))
@@ -404,10 +407,12 @@ struct OccupyEndTests {
 
     @Test func theFieldEmptyingEndsItForTheOneLeft() {
         let lobby = OccupyLobby.opened()
-        // Ann is ahead, then walks out: she can't win from the door.
+        // Ann is ahead on her own ground — STARE typed rightward from her
+        // own start square reaches the host's frame reversed — then she
+        // walks out: she can't win from the door.
         lobby.clients["ann"]?.sendPlacement(
-            serial: 1, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
-        #expect(lobby.occupy?.scores == [6, 9])
+            serial: 1, placement: across("erats", from: Cell(row: 20, col: 16)))
+        #expect(lobby.occupy?.scores == [9, 25], "three letters against five")
 
         lobby.clients["ann"]?.leave()
         #expect(lobby.host.state.phase == .finished)
