@@ -5,8 +5,10 @@ import WordCore
 @testable import WordNet
 
 /// Occupy over the wire: the host seats everyone on one board, judges every
-/// word against it, answers each sender after the snapshot, and ends the game
-/// on its own two clocks. Played over a `MemoryMesh`, like the battle tests.
+/// word against it — each player's own words, on their own letters — opens
+/// and closes the zones on its clock, answers each sender after the snapshot,
+/// and ends the game on its own two clocks. Played over a `MemoryMesh`, like
+/// the battle tests.
 
 private let words: Set<String> = [
     "cat", "cats", "tea", "eat", "ate", "star", "stare", "rest", "art", "rat", "tar", "set",
@@ -202,15 +204,17 @@ struct OccupyPlacementTests {
         let lobby = OccupyLobby.opened()
         let ann = lobby.clients["ann"]!
 
-        // TEA down through the T at (12,14), capturing it.
-        ann.sendPlacement(serial: 7, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
+        // Ann's own opener, over its own start square: typed rightward in
+        // its own frame, it reaches the host's as T-A-C.
+        ann.sendPlacement(serial: 7, placement: across("tac", from: Cell(row: 20, col: 18)))
 
-        #expect(lobby.occupy?.board.count == 5)
-        #expect(lobby.occupy?.owners[keyOf(12, 14)] == 1, "captured")
-        #expect(lobby.occupy?.scores == [6, 9])
+        #expect(lobby.occupy?.board.count == 6)
+        #expect(lobby.occupy?.owners[keyOf(12, 14)] == 0, "nothing changes hands")
+        #expect(lobby.occupy?.owners[keyOf(20, 20)] == 1)
+        #expect(lobby.occupy?.scores == [9, 9])
         let heard = lobby.heard["ann"] ?? []
         #expect(heard.suffix(2) == ["state", "placed:7"], "the board first, then the answer")
-        #expect(ann.state?.occupy?.board.count == 5)
+        #expect(ann.state?.occupy?.board.count == 6, "the snapshot she got already had it on")
     }
 
     @Test func aSquareSomeoneGotToFirstIsRefused() {
@@ -230,8 +234,21 @@ struct OccupyPlacementTests {
     @Test func aWordThatDoesntReadIsRefusedByName() {
         let lobby = OccupyLobby.opened()
         lobby.clients["ann"]?.sendPlacement(
-            serial: 3, placement: down("tzz", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
+            serial: 3, placement: across("tzz", from: Cell(row: 20, col: 18)))
         #expect(lobby.heard["ann"]?.last == "refused:3:TZZ isn’t a word")
+    }
+
+    @Test func aRivalsLetterIsNotThereToBorrow() {
+        let lobby = OccupyLobby.opened()
+        let before = lobby.occupy
+
+        // The host's T at (12,14). Ann can reach it, and may not have it.
+        lobby.clients["ann"]?.sendPlacement(
+            serial: 4,
+            placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
+
+        #expect(lobby.occupy == before, "nothing changed")
+        #expect(lobby.heard["ann"]?.last == "refused:4:That letter isn’t yours to borrow.")
     }
 
     @Test func wordsOutsideAGameOrFromASpectatorAreRefused() {
@@ -253,10 +270,11 @@ struct OccupyPlacementTests {
 struct OccupyEndTests {
     @Test func theClockEndsItAndTheMostValueWins() {
         let lobby = OccupyLobby.opened()
-        // Words keep landing — one every twenty-five seconds, each borrowing
-        // from the last, a staircase of TEA down and ART across that runs
-        // clean off the frame — so the stall rule never gets a look in and
-        // the clock is what ends it.
+        // The host's words keep landing — one every twenty-five seconds, each
+        // borrowing from the last of its own, a staircase of TEA down and ART
+        // across that runs clean off the frame — so the stall rule never gets
+        // a look in and the clock is what ends it. Ann never opens, which is
+        // its own answer to who wins.
         var cursor = Cell(row: 12, col: 14)  // the T of CAT
         var serial = 10
         var words = 0
@@ -267,7 +285,7 @@ struct OccupyEndTests {
             serial += 1
             let borrowed = keyOf(cursor.row, cursor.col)
             if words % 2 == 0 {
-                lobby.clients["ann"]?.sendPlacement(
+                lobby.host.placeSelf(
                     serial: serial, placement: down("tea", from: cursor, borrowing: [borrowed]))
                 cursor = Cell(row: cursor.row + 2, col: cursor.col)
             } else {
@@ -291,34 +309,64 @@ struct OccupyEndTests {
 
         let scores = lobby.occupy?.scores ?? []
         #expect(scores.count == 2)
-        let leader: PlayerID? = scores[0] > scores[1] ? "host" : scores[1] > scores[0] ? "ann" : nil
-        #expect(lobby.host.state.winnerId == leader)
+        #expect(scores[0] > 0 && scores[1] == 0, "one player played the whole game")
+        #expect(lobby.host.state.winnerId == "host")
+        // Nothing is left hanging: every zone of the game has been decided.
+        #expect(lobby.occupy?.zones.allSatisfy(\.resolved) == true)
         #expect(lobby.clients["ann"]?.state?.phase == .finished)
     }
 
-    @Test func zonesAppearOnTheHostsClockAndRideTheSnapshot() {
+    @Test func zonesOpenAndCloseOnTheHostsClockAndRideTheSnapshot() {
         let lobby = OccupyLobby.opened()
         let ann = lobby.clients["ann"]!
         lobby.advance(OCCUPY_ZONE_FIRST_SECONDS - 1)
-        #expect(lobby.occupy?.zones.isEmpty == true)
+        #expect(lobby.occupy?.zones.isEmpty == true, "a minute of grace first")
         lobby.advance(1)
         #expect(lobby.occupy?.zones.count == 1)
         #expect(ann.state?.occupy?.zones == lobby.occupy?.zones, "the client sees the same zone")
 
         let zone = lobby.occupy!.zones[0]
+        #expect(zone.slot == 0)
+        #expect(zone.opensAt == OCCUPY_ZONE_FIRST_SECONDS)
+        #expect(zone.closesAt == OCCUPY_ZONE_FIRST_SECONDS + OCCUPY_ZONE_OPEN_SECONDS)
+        #expect(zone.isOpen)
         #expect(zone.keys.allSatisfy { lobby.occupy?.board[$0] == nil }, "on empty ground")
-        #expect(!zone.contains(Cell(row: 12, col: 12)) && !zone.contains(Cell(row: 20, col: 20)), "off the starts")
+        #expect(
+            !zone.contains(Cell(row: 12, col: 12)) && !zone.contains(Cell(row: 20, col: 20)),
+            "off the starts")
 
-        // A word keeps the stall off; the next zone comes on the interval.
-        lobby.advance(50)
-        #expect(lobby.host.state.phase == .playing)
-        lobby.clients["ann"]?.sendPlacement(
+        // A word of the host's own keeps the stall off — the opener is
+        // ninety seconds behind by now, and the stall would end the game
+        // before the whistle ever went. The zone stays open for its whole
+        // minute, and no second one opens while it is.
+        lobby.advance(25)
+        lobby.host.placeSelf(
             serial: 2, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
+        #expect(lobby.host.state.phase == .playing, "the word reset the stall clock")
         #expect(lobby.occupy?.zones.count == 1)
-        lobby.advance(OCCUPY_ZONE_INTERVAL_SECONDS - 50)
-        #expect(lobby.host.state.phase == .playing)
+        #expect(lobby.occupy?.zones[0].isOpen == true)
+
+        // The whistle, on the host's clock: the zone is decided by what's
+        // inside it, and the bonus lands in the scores the roster carries.
+        lobby.advance(35)
+        let closed = lobby.occupy!.zones[0]
+        #expect(closed.resolved)
+        #expect(closed.counts == occupyZoneCounts(closed, owners: lobby.occupy!.owners, seats: 2))
+        #expect(closed.winner == occupyZoneWinner(closed.counts))
+        let banked = closed.winner.map { winner in
+            (0..<2).map { $0 == winner ? OCCUPY_ZONE_BONUS : 0 }
+        }
+        #expect(lobby.occupy?.bonuses == (banked ?? [0, 0]))
+        #expect(lobby.seat("host")?.score == lobby.occupy?.scores[0], "the roster reads the board")
+        #expect(ann.state?.occupy?.zones == lobby.occupy?.zones, "and the whistle rides the wire")
+
+        // Fifteen seconds' breather, then the next one — somewhere else.
+        #expect(lobby.occupy?.zones.count == 1)
+        lobby.advance(OCCUPY_ZONE_GAP_SECONDS)
         #expect(lobby.occupy?.zones.count == 2)
         if let zones = lobby.occupy?.zones, zones.count == 2 {
+            #expect(zones[1].slot == 1)
+            #expect(zones[1].isOpen)
             #expect(!zones[0].overlaps(zones[1]))
         }
 
@@ -334,7 +382,7 @@ struct OccupyEndTests {
         lobby.host.start()
 
         // Silence from the deal: the stall clock starts when the grace ends.
-        lobby.advance(OCCUPY_GRACE_SECONDS + OCCUPY_STALL_SECONDS - 1)
+        lobby.advance(OCCUPY_STALL_GRACE_SECONDS + OCCUPY_STALL_SECONDS - 1)
         #expect(lobby.host.state.phase == .playing)
         lobby.advance(1)
         #expect(lobby.host.state.phase == .finished)
@@ -346,7 +394,7 @@ struct OccupyEndTests {
         let lobby = OccupyLobby()
         lobby.addClient("ann")
         lobby.host.start()
-        lobby.advance(OCCUPY_GRACE_SECONDS + 20)
+        lobby.advance(OCCUPY_STALL_GRACE_SECONDS + 20)
         lobby.host.placeSelf(serial: 1, placement: across("cat", from: Cell(row: 12, col: 12)))
 
         lobby.advance(OCCUPY_STALL_SECONDS - 1)
@@ -359,10 +407,12 @@ struct OccupyEndTests {
 
     @Test func theFieldEmptyingEndsItForTheOneLeft() {
         let lobby = OccupyLobby.opened()
-        // Ann is ahead, then walks out: she can't win from the door.
+        // Ann is ahead on her own ground — STARE typed rightward from her
+        // own start square reaches the host's frame reversed — then she
+        // walks out: she can't win from the door.
         lobby.clients["ann"]?.sendPlacement(
-            serial: 1, placement: down("tea", from: Cell(row: 12, col: 14), borrowing: [keyOf(12, 14)]))
-        #expect(lobby.occupy?.scores == [6, 9])
+            serial: 1, placement: across("erats", from: Cell(row: 20, col: 16)))
+        #expect(lobby.occupy?.scores == [9, 25], "three letters against five")
 
         lobby.clients["ann"]?.leave()
         #expect(lobby.host.state.phase == .finished)

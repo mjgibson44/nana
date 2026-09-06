@@ -17,6 +17,10 @@ struct GameHeaderView: View {
     /// Occupy: the match clock, and the stall countdown when one is running,
     /// in place of the deal. Nothing lands from a clock there.
     var clock: HeaderClock?
+    /// A line in the same slot for a mode with no clock at all — the Daily's
+    /// targets and strokes. Where the pressure would be, because in that mode
+    /// it *is* the pressure.
+    var note: HeaderNote?
     /// Nil hides the pause button — a battle can't be paused, and neither can
     /// a game that's already over.
     var onPause: (() -> Void)?
@@ -44,6 +48,14 @@ struct GameHeaderView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .accessibilityLabel(clock.spoken)
+            } else if let note {
+                Text(note.text)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(note.done ? Palette.accent : Palette.inkSoft)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel(note.spoken)
             } else if let secondsToTiles {
                 Text(Self.dealText(tiles: tilesComing, seconds: secondsToTiles))
                     .font(.system(size: 17, weight: .semibold))
@@ -117,6 +129,69 @@ struct HeaderClock: Equatable {
     var spoken: String {
         if let stallSeconds { return "Nobody has placed a word; the game ends in \(stallSeconds) seconds" }
         return "\(secondsLeft) seconds left"
+    }
+}
+
+/// Occupy's zone line, under the balanced bar: how the open zone stands and
+/// how much of its minute is left, or how long until the next one opens.
+/// Gone entirely once the game's last zone has been decided — the end of a
+/// game belongs to the words already on the board.
+struct OccupyZoneLineView: View {
+    /// One seat's tiles inside the open zone.
+    struct Holding: Identifiable, Equatable {
+        var id: Int
+        var name: String
+        var tiles: Int
+        var colors: SeatColors
+    }
+
+    /// Seconds until the whistle, or nil in the gap between zones.
+    var secondsLeft: Int?
+    /// Seconds until the next zone opens, while none is.
+    var secondsToNext: Int?
+    var holdings: [Holding] = []
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(secondsLeft == nil ? "NEXT ZONE" : "ZONE")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.8)
+                .foregroundStyle(Palette.inkSoft)
+                .lineLimit(1)
+
+            if secondsLeft != nil {
+                ForEach(holdings) { holding in
+                    if holding.id != holdings.first?.id {
+                        Text("–")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Palette.inkFaint)
+                    }
+                    Text("\(holding.tiles)")
+                        .font(.system(size: 13, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(holding.colors.ink)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            Text(GameHeaderView.clockText(secondsLeft ?? secondsToNext ?? 0))
+                .font(.system(size: 13, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(secondsLeft == nil ? Palette.inkSoft : Palette.ink)
+        }
+        .frame(height: 16)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Zone")
+        .accessibilityValue(spoken)
+    }
+
+    private var spoken: String {
+        guard let secondsLeft else {
+            return "next zone in \(secondsToNext ?? 0) seconds"
+        }
+        let tally = holdings.map { "\($0.name) \($0.tiles)" }.joined(separator: ", ")
+        return "\(secondsLeft) seconds left, \(tally)"
     }
 }
 
@@ -198,6 +273,15 @@ struct OccupyBarView: View {
         }
         .frame(maxWidth: .infinity)
     }
+}
+
+/// A clockless mode's line in the header slot: what it says, how it reads
+/// aloud, and whether it is finished — which turns it the board's accent, the
+/// same colour the targets are ringed in.
+struct HeaderNote: Equatable {
+    var text: String
+    var spoken: String
+    var done = false
 }
 
 /// The pile gauge: how full the pile is against the limit, in a colour that

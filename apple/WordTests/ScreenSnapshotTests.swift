@@ -49,9 +49,39 @@ final class ScreenSnapshotTests: XCTestCase {
 
     func testSoloSetupRenders() throws {
         try render(
-            SoloSetupScreen(pace: .regular, onPlay: { _ in }, onClose: {}), name: "solo-setup")
+            SoloSetupScreen(pace: .regular, onPlay: { _, _ in }, onClose: {}), name: "solo-setup")
         try render(
-            SoloSetupScreen(pace: .fast, onPlay: { _ in }, onClose: {}), name: "solo-setup-fast")
+            SoloSetupScreen(pace: .fast, onPlay: { _, _ in }, onClose: {}), name: "solo-setup-fast")
+        try render(
+            SoloSetupScreen(pace: .regular, hazard: .wildfire, onPlay: { _, _ in }, onClose: {}),
+            name: "solo-setup-wildfire")
+    }
+
+    /// The Daily: the word already down, the rings to reach, and the header
+    /// counting targets and strokes where a clock would be.
+    func testTheDailyRenders() async throws {
+        let model = GameModel()
+        try model.newDaily(dailyDeal(day: 20_500))
+        await model.loadDictionary()
+        model.dismissSplash()
+        try render(GameScreen(model: model), name: "daily")
+    }
+
+    /// And a board that has been burning for a few rounds: squares alight,
+    /// ground already lost.
+    func testAWildfireBoardRenders() async throws {
+        let model = GameModel()
+        model.newGame(seed: "snapshot", pace: .regular, hazard: .wildfire)
+        await model.loadDictionary()
+        try TestPlays.placeOpener(on: model)
+        // A square alight above the opener and burnt ground below it, so the
+        // picture carries both of fire's states at once.
+        let opener = parseKey(model.board.keys[0])
+        model.setFire(
+            Wildfire(
+                fires: [keyOf(opener.row - 1, opener.col)],
+                scars: [keyOf(opener.row + 1, opener.col)]))
+        try render(GameScreen(model: model), name: "wildfire")
     }
 
     func testTheGameMenuRenders() throws {
@@ -77,7 +107,8 @@ final class ScreenSnapshotTests: XCTestCase {
     // MARK: Occupy
 
     /// An Occupy game a few words in, through the real rules: two sessions
-    /// on a mesh, the host's opener, and the rival borrowing through it.
+    /// on a mesh, each seat opening from its own corner and then crossing a
+    /// word of its own — nobody can cross anybody else's.
     private func playedOccupy() async throws -> (model: GameModel, session: BattleSession) {
         let mesh = MemoryMesh()
         let hostTransport = mesh.add("host")
@@ -94,6 +125,7 @@ final class ScreenSnapshotTests: XCTestCase {
         await rivalModel.loadDictionary()
         host.start()
         try TestPlays.placeOpener(on: hostModel)
+        try TestPlays.placeOpener(on: rivalModel)
         try TestPlays.attachWord(on: rivalModel)
         try TestPlays.attachWord(on: hostModel)
         // Held so the rival's seat outlives this function.
@@ -123,6 +155,12 @@ final class ScreenSnapshotTests: XCTestCase {
                         .init(id: 0, name: "Ada", value: 84, colors: you),
                         .init(id: 1, name: "Grace", value: 60, colors: rivals[0]),
                     ])
+                    OccupyZoneLineView(
+                        secondsLeft: 41, secondsToNext: nil,
+                        holdings: [
+                            .init(id: 0, name: "Ada", tiles: 4, colors: you),
+                            .init(id: 1, name: "Grace", tiles: 2, colors: rivals[0]),
+                        ])
                 }
                 VStack(spacing: Spacing.gap / 2) {
                     GameHeaderView(
@@ -134,10 +172,11 @@ final class ScreenSnapshotTests: XCTestCase {
                         .init(id: 2, name: "Katherine", value: 20, colors: rivals[1]),
                         .init(id: 3, name: "Dorothy", value: 52, colors: rivals[2]),
                     ])
+                    OccupyZoneLineView(secondsLeft: nil, secondsToNext: 12)
                 }
             }
             .padding(Spacing.margin),
-            name: "occupy-header", size: CGSize(width: Self.phone.width, height: 160))
+            name: "occupy-header", size: CGSize(width: Self.phone.width, height: 200))
     }
 
     func testOccupyLobbyAndEntryRender() throws {

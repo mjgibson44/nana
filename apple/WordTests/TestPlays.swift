@@ -25,17 +25,22 @@ enum TestPlays {
         return nil
     }
 
-    /// Spell the opener and confirm it. Returns the word.
+    /// Spell this seat's opener and confirm it. Returns the word.
+    ///
+    /// The board is counted before and after rather than against the word's
+    /// length: in Occupy every seat opens onto the *same* board, so a rival's
+    /// opener is already down when this one lands.
     @discardableResult
     static func placeOpener(on model: GameModel) throws -> String {
         XCTAssertNotNil(model.dictionary, "load the dictionary first")
         guard let (word, indices) = spellableWord(in: model) else {
             throw XCTSkip("this rack can't spell an opener")
         }
+        let before = model.board.count
         for index in indices { model.togglePick(index) }
         XCTAssertTrue(model.canConfirm, "\(word) should be confirmable")
         XCTAssertTrue(model.handle(.confirm))
-        XCTAssertEqual(model.board.count, word.count)
+        XCTAssertEqual(model.board.count, before + word.count)
         return word
     }
 

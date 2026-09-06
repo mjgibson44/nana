@@ -271,21 +271,20 @@ final class StagingPlayTests: XCTestCase {
         return theirs
     }
 
-    func testAWordDraggedOntoAnOccupyBoardCapturesWhatItRunsThrough() async throws {
+    func testAWordDraggedThroughARivalsLetterIsRefused() async throws {
         let model = await seated()
         model.adoptOccupy(rivalsWord())
         var sent: [(Int, OccupyPlacement)] = []
         model.onOccupyPlace = { sent.append(($0, $1)) }
 
-        let (word, through) = try attachByDragging(on: model)
-
-        XCTAssertEqual(model.owners[through], 0, "captured")
-        XCTAssertEqual(sent.count, 1)
-        XCTAssertFalse(sent[0].1.borrowed.isEmpty, "the letters it ran through went up as borrowed")
-        XCTAssertEqual(model.occupyWords.last?.word, word)
-        XCTAssertEqual(model.rack.count, OCCUPY_HAND, "refilled")
-        XCTAssertFalse(model.isFirstWord, "borrowing counts as opening")
-        XCTAssertFalse(model.hasStaged)
+        // Their STAR runs left from (20,20). Dragging a word across its line
+        // would build through their letters, which is nobody's to do.
+        drop(model, index: 0, on: Cell(row: 20, col: 21))
+        drop(model, index: 1, on: Cell(row: 20, col: 16))
+        XCTAssertFalse(model.confirmStaged())
+        XCTAssertEqual(model.toast?.text, "You can’t build through a rival’s letter.")
+        XCTAssertTrue(sent.isEmpty, "nothing went up")
+        XCTAssertEqual(model.owners[keyOf(20, 20)], 1, "and nothing changed hands")
     }
 
     func testARivalsWordLandingUnderAStagedTileSendsItBack() async {

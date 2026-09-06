@@ -168,17 +168,24 @@ private func jsonNumber(_ value: Double) -> String {
 /// Only a deliberate choice is written — the Play button on the setup sheet.
 /// Anything missing, stale or hand-edited reads as the defaults below.
 
-/// Solo's settings: its pace, and nothing else so far.
+/// Solo's settings: its pace, and what else the board is up to.
 public struct SoloSetup: Equatable {
     public var pace: SoloPace
+    /// New on Apple platforms — the web's Solo has no hazards, so a setup
+    /// written here is no longer byte-identical to the web's. That is fine:
+    /// the two stores never meet (UserDefaults on one side, localStorage on
+    /// the other), and a web-written setup still reads correctly here because
+    /// a missing key falls back to the default, like every other field.
+    public var hazard: SoloHazard
 
-    public init(pace: SoloPace) {
+    public init(pace: SoloPace, hazard: SoloHazard = .none) {
         self.pace = pace
+        self.hazard = hazard
     }
 }
 
 /// What a player who has never set Solo up gets.
-public let DEFAULT_SOLO = SoloSetup(pace: .regular)
+public let DEFAULT_SOLO = SoloSetup(pace: .regular, hazard: .none)
 
 private let SOLO_KEY = "nana.setup.solo.v1"
 
@@ -199,13 +206,21 @@ private func oneOf<T: Equatable>(_ value: T?, _ allowed: [T], _ fallback: T) -> 
 public func loadSoloSetup(from store: KeyValueStore) -> SoloSetup {
     let stored = readSetup(SOLO_KEY, from: store)
     let pace = (stored["pace"] as? String).flatMap(SoloPace.init(rawValue:))
-    return SoloSetup(pace: oneOf(pace, PACE_OPTIONS.map { $0.pace }, DEFAULT_SOLO.pace))
+    let hazard = (stored["hazard"] as? String).flatMap(SoloHazard.init(rawValue:))
+    return SoloSetup(
+        pace: oneOf(pace, PACE_OPTIONS.map { $0.pace }, DEFAULT_SOLO.pace),
+        hazard: oneOf(hazard, HAZARD_OPTIONS.map { $0.hazard }, DEFAULT_SOLO.hazard)
+    )
 }
 
 public func saveSoloSetup(_ setup: SoloSetup, to store: KeyValueStore) {
-    // Bytes match the web's `JSON.stringify(setup)`: `{"pace":"regular"}`.
-    // Storage full or blocked — the sheet just opens on the defaults next time.
-    store.set(SOLO_KEY, "{\"pace\":\"\(setup.pace.rawValue)\"}")
+    // Shaped like the web's `JSON.stringify(setup)` — `{"pace":"regular"}` —
+    // with the hazard added, which the web has no notion of. Storage full or
+    // blocked just means the sheet opens on the defaults next time.
+    store.set(
+        SOLO_KEY,
+        "{\"pace\":\"\(setup.pace.rawValue)\",\"hazard\":\"\(setup.hazard.rawValue)\"}"
+    )
 }
 
 // MARK: - Onboarding (onboarding.ts)

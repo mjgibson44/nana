@@ -20,7 +20,7 @@ struct GameScreen: View {
     /// Out: home from a solo game, out of the battle from a battle.
     var onLeave: () -> Void = {}
     /// Deal a fresh solo game. The router owns it so the pace gets remembered.
-    var onNewGame: ((SoloPace) -> Void)?
+    var onNewGame: ((SoloPace, SoloHazard) -> Void)?
 
     @State private var camera = BoardCamera()
     @State private var machine = GestureMachine()
@@ -52,10 +52,17 @@ struct GameScreen: View {
                     header
                     if model.isOccupy {
                         // The pile can't bury anyone here; the bar says who
-                        // holds how much of the board instead.
+                        // holds how much of the board instead, and the line
+                        // under it what the zone on the board is doing.
                         OccupyBarView(segments: occupySegments)
+                        if let zone = zoneStatus {
+                            OccupyZoneLineView(
+                                secondsLeft: zone.secondsLeft,
+                                secondsToNext: zone.secondsToNext,
+                                holdings: zoneHoldings(zone.counts))
+                        }
                     } else {
-                        PileGaugeView(count: model.pileCount, tone: model.pileTone)
+                        PileGaugeView(count: model.pileCount, limit: model.pileLimit, tone: model.pileTone)
                         if !rivals.isEmpty {
                             RivalGaugesView(rivals: rivals)
                         }
@@ -91,7 +98,10 @@ struct GameScreen: View {
             }
 
             if let splash = model.splash {
-                SplashView(splash: splash, pace: model.pace) {
+                SplashView(
+                    splash: splash, pace: model.pace, day: model.day,
+                    dayLabel: model.dailyDeal?.shortLabel
+                ) {
                     model.dismissSplash(at: .now)
                     focusGame()
                 }
@@ -206,14 +216,66 @@ struct GameScreen: View {
             secondsToTiles: model.secondsToNextTiles(at: clockNow),
             tilesComing: model.nextTileCount,
             clock: headerClock,
+            note: headerNote,
             onPause: pause,
             onMenu: openMenu)
+    }
+
+    /// How the day went, in the sentence a player would say themselves.
+    /// Strokes against par leads, because that is the number worth comparing;
+    /// the clean sweep is the flourish under it.
+    static func dailyNote(_ result: DailyResult) -> String {
+        let words = "\(result.strokes) word\(result.strokes == 1 ? "" : "s")"
+        let against: String =
+            switch result.underPar {
+            case 0: "\(words) — level par."
+            case 1...: "\(words) — \(result.underPar) under par."
+            default: "\(words) — \(-result.underPar) over par (\(result.par))."
+            }
+        return result.allTilesPlaced ? "\(against) Every tile placed." : against
+    }
+
+    /// The Daily's line: targets reached, and words spent against par. Both
+    /// numbers at once because neither means anything alone — five words is
+    /// good or bad entirely depending on how much of the board it reached.
+    private var headerNote: HeaderNote? {
+        guard let day = model.day, let progress = model.dailyProgress else { return nil }
+        let reached = "\(progress.reached)/\(day.targets.count)"
+        return HeaderNote(
+            text: "\(reached) · \(model.strokes)/\(day.par) words",
+            spoken: "\(progress.reached) of \(day.targets.count) targets reached, "
+                + "\(model.strokes) word\(model.strokes == 1 ? "" : "s") played, par \(day.par)",
+            done: progress.done)
     }
 
     /// Occupy's clock: the match clock, or the stall countdown once it's close.
     private var headerClock: HeaderClock? {
         guard let left = model.occupySecondsLeft(at: clockNow) else { return nil }
         return HeaderClock(secondsLeft: left, stallSeconds: model.occupyStallSecondsLeft(at: clockNow))
+    }
+
+    /// What the zone clock is doing, read once per tick for the line under
+    /// the bar and for the countdown drawn on the board itself.
+    private var zoneStatus: GameModel.OccupyZoneStatus? {
+        model.occupyZoneStatus(at: clockNow)
+    }
+
+    /// The open zone's tally in the bar's order: yours first, then each rival
+    /// in their own colour, so the same player is the same colour twice.
+    private func zoneHoldings(_ counts: [Int]) -> [OccupyZoneLineView.Holding] {
+        guard let battle, let occupy = battle.state?.occupy else { return [] }
+        let viewer = model.occupySeat
+        var holdings = occupy.seats.enumerated().map { seat, id in
+            OccupyZoneLineView.Holding(
+                id: seat,
+                name: battle.contestants.first { $0.id == id }?.name ?? "Player",
+                tiles: counts.indices.contains(seat) ? counts[seat] : 0,
+                colors: SeatColors.of(seat: seat, viewer: viewer))
+        }
+        if let viewer, let mine = holdings.firstIndex(where: { $0.id == viewer }) {
+            holdings.insert(holdings.remove(at: mine), at: 0)
+        }
+        return holdings
     }
 
     /// Everyone's share of the board, yours first, for the balanced bar.
@@ -275,7 +337,15 @@ struct GameScreen: View {
                     model.setSummaryPresented(true)
                 })
         }
-        if model.isBattle || model.isOccupy {
+        if model.isDaily {
+            // One go a day: there is no new game to start, and no speed to
+            // start it at.
+            items.append(
+                GameMenuView.Item(title: "HOME") {
+                    closeMenu()
+                    onLeave()
+                })
+        } else if model.isBattle || model.isOccupy {
             if let battle, battle.isHost {
                 if battle.canRestart {
                     items.append(
@@ -299,7 +369,7 @@ struct GameScreen: View {
             items.append(
                 GameMenuView.Item(title: "NEW GAME") {
                     closeMenu()
-                    startNewGame(pace: model.pace)
+                    startNewGame(pace: model.pace, hazard: model.hazard)
                 })
             items.append(
                 GameMenuView.Item(title: "HOME") {
@@ -403,7 +473,11 @@ struct GameScreen: View {
             wordsAt: model.wordsByCell.mapValues { $0.map(\.word) },
             owners: model.owners,
             viewerSeat: model.occupySeat,
-            zones: model.occupyZones)
+            zones: model.occupyZones,
+            zoneSecondsLeft: zoneStatus?.secondsLeft,
+            fires: Set(model.fire.fires.map(parseKey)),
+            scars: Set(model.fire.scars.map(parseKey)),
+            targets: Set(model.day?.targets.map(parseKey) ?? []))
     }
 
     /// Placed words are permanent in every mode, and nothing placed is ever
@@ -626,10 +700,14 @@ struct GameScreen: View {
         if let battle {
             return battle.canRestart ? { battle.restart() } : nil
         }
-        return { startNewGame(pace: model.pace) }
+        // One go a day, so there is nothing to play again — offering it would
+        // be offering something the door would then refuse.
+        if model.isDaily { return nil }
+        return { startNewGame(pace: model.pace, hazard: model.hazard) }
     }
 
     private var endNote: String? {
+        if let result = model.dailyResult { return Self.dailyNote(result) }
         guard let battle else { return nil }
         if battle.isFinished {
             let how: String? = {
@@ -722,14 +800,16 @@ struct GameScreen: View {
         model.pause(at: .now)
     }
 
-    private func startNewGame(pace: SoloPace) {
+    /// Again — the same game, not merely the same speed. A player who chose
+    /// to play under fire and pressed "play again" meant fire too.
+    private func startNewGame(pace: SoloPace, hazard: SoloHazard) {
         let now = Date.now
         clockNow = now
         settleGestures()
         if let onNewGame {
-            onNewGame(pace)
+            onNewGame(pace, hazard)
         } else {
-            model.newGame(pace: pace, now: now)
+            model.newGame(pace: pace, hazard: hazard, now: now)
         }
     }
 }

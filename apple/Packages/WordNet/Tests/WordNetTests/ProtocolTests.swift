@@ -96,10 +96,14 @@ struct WireProtocolTests {
         #expect(state.players.map(\.id) == ["a"])
     }
 
-    @Test func versionIsNineForTheOccupyReshape() {
+    @Test func versionIsTenForOccupysOwnWordsAndItsTimedZones() {
         // v5 was the web's; v6 added the host announcement (plan §7.2); v7
         // Occupy; v8 put the countdown in the snapshot; v9 unbounded the
-        // Occupy board, made it ten minutes, and put the zones in the snapshot.
-        #expect(PROTOCOL_VERSION == 9)
+        // Occupy board, made it ten minutes, and put the zones in the
+        // snapshot; v10 made every word its own player's and turned a zone
+        // into a minute-long contest that pays out at the whistle — a v9
+        // zone would decode as a 2× patch that no longer exists, which is
+        // what the gate is for.
+        #expect(PROTOCOL_VERSION == 10)
     }
 }

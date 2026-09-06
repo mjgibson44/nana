@@ -16,8 +16,11 @@ public enum StagedRefusal: Error, Equatable {
     case notInALine
     /// A hole between two of the tiles with nothing under it.
     case brokenLine
-    /// Every word after the first has to touch a letter already down.
+    /// Every word after the first has to touch a letter already down — one
+    /// of your own, on a shared board.
     case mustJoin
+    /// A rival's letter in the way. Occupy only: you can't build through one.
+    case throughRival
     case openerOffStart
     case notAWord([String])
 
@@ -27,6 +30,7 @@ public enum StagedRefusal: Error, Equatable {
         case .notInALine: return "Your tiles have to lie in one line."
         case .brokenLine: return "Fill the gap between your tiles."
         case .mustJoin: return "Your word has to join a letter that’s already down."
+        case .throughRival: return "You can’t build through a rival’s letter."
         case .openerOffStart: return "Your first word has to cover your start square."
         case let .notAWord(words):
             let names = words.map { $0.uppercased() }
@@ -43,7 +47,8 @@ public struct StagedWord: Equatable {
     /// direction makes the longer word.
     public var direction: Direction
     /// The letters already down that the word runs through along its line,
-    /// in reading order — what an Occupy placement borrows, and captures.
+    /// in reading order — what an Occupy placement borrows, all of them its
+    /// own player's.
     public var borrowed: [CellKey]
     /// Every run the placement makes or changes, all of them real words.
     public var runs: [WordRun]
@@ -58,14 +63,32 @@ public struct StagedWord: Equatable {
 /// Judge tiles dropped on the board as one word. `opener` says whether this
 /// player still has their first word to place; a first word that joins
 /// nothing has to cover `start`, and every other word has to join something.
+///
+/// `mine` says which of the letters already down this player may build with.
+/// Everything on a solo board is, which is the default; on an Occupy board
+/// only this seat's own tiles are, so a rival's letter is a wall rather than
+/// something to join or read through.
 public func judgeStaged(
     tiles: [CellKey: String], board: TileMap, opener: Bool, start: Cell,
-    isWord: (String) -> Bool
+    isWord: (String) -> Bool, mine: (CellKey) -> Bool = { _ in true }
 ) throws -> StagedWord {
     guard !tiles.isEmpty else { throw StagedRefusal.nothing }
     let cells = tiles.keys.map(parseKey)
     var next = board
     for (key, letter) in tiles { next[key] = letter }
+
+    // Whether a square is this word's to lie along: its own tiles, and the
+    // letters already down that this player may build with.
+    func usable(_ key: CellKey) -> Bool { tiles[key] != nil || mine(key) }
+
+    /// Nothing missing between the first tile and the last — and nothing in
+    /// the way that isn't this player's to build through.
+    func walk(_ line: [CellKey]) throws {
+        for key in line where tiles[key] == nil {
+            guard next[key] != nil else { throw StagedRefusal.brokenLine }
+            guard mine(key) else { throw StagedRefusal.throughRival }
+        }
+    }
 
     // One line, with nothing missing between the first tile and the last.
     var direction: Direction?
@@ -75,23 +98,17 @@ public func judgeStaged(
         if rows.count == 1 {
             direction = .across
             let row = cells[0].row
-            for col in cells.map(\.col).min()!...cells.map(\.col).max()!
-            where next[keyOf(row, col)] == nil {
-                throw StagedRefusal.brokenLine
-            }
+            try walk((cells.map(\.col).min()!...cells.map(\.col).max()!).map { keyOf(row, $0) })
         } else if cols.count == 1 {
             direction = .down
             let col = cells[0].col
-            for row in cells.map(\.row).min()!...cells.map(\.row).max()!
-            where next[keyOf(row, col)] == nil {
-                throw StagedRefusal.brokenLine
-            }
+            try walk((cells.map(\.row).min()!...cells.map(\.row).max()!).map { keyOf($0, col) })
         } else {
             throw StagedRefusal.notInALine
         }
     }
 
-    let runs = runsTouching(tiles.keys, in: next)
+    let runs = occupyRunsTouching(tiles.keys, in: next, mine: usable)
     let joins = runs.contains { run in run.cells.contains { tiles[$0] == nil } }
     if !joins {
         guard opener else { throw StagedRefusal.mustJoin }

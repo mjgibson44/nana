@@ -9,8 +9,16 @@ struct HomeScreen: View {
     static let title = "TIMETILES"
 
     var hasSavedGame: Bool
+    /// Whether today's puzzle is still to be played. Played out, the door
+    /// still opens — onto the day you had, not a second go at it.
+    var dailyPlayed: Bool = false
+    /// How many days in a row, shown on the door once there is a run worth
+    /// keeping. The reason to come back tomorrow belongs where you'd see it
+    /// on the way past, not on a stats page.
+    var dailyStreak: Int = 0
     var onResume: () -> Void
     var onSolo: () -> Void
+    var onDaily: () -> Void = {}
     var onBattle: () -> Void
     var onOccupy: () -> Void = {}
 
@@ -25,6 +33,14 @@ struct HomeScreen: View {
                     TileWordButton(text: "RESUME", action: onResume)
                 }
                 TileWordButton(text: "SOLO", action: onSolo)
+                TileWordButton(
+                    text: "DAILY", style: dailyPlayed ? .dim : .accent, action: onDaily)
+                if dailyStreak > 1 {
+                    Text("\(dailyStreak) day streak")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.inkSoft)
+                        .accessibilityLabel("\(dailyStreak) day streak")
+                }
                 TileWordButton(text: "BATTLE", action: onBattle)
                 TileWordButton(text: "OCCUPY", action: onOccupy)
             }
@@ -34,6 +50,8 @@ struct HomeScreen: View {
 }
 
 #Preview {
-    HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {}, onOccupy: {})
+    HomeScreen(
+        hasSavedGame: true, dailyPlayed: false, dailyStreak: 4,
+        onResume: {}, onSolo: {}, onDaily: {}, onBattle: {}, onOccupy: {})
         .preferredColorScheme(.dark)
 }

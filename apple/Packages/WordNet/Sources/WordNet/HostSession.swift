@@ -134,10 +134,12 @@ public final class HostSession {
     /// The seed of the game in progress, which also rolls where each zone
     /// goes.
     private var occupySeed: String?
-    /// How many zone slots the clock has handed out. A slot that found
-    /// nowhere to go is skipped rather than retried, so a crowded board
-    /// can't pile zones up later.
-    private var occupyZoneSlots = 0
+    /// The zone slot the clock has reached, and — when a slot's ground was
+    /// too crowded to take one — how long its retry has left. A slot is given
+    /// up after `OCCUPY_ZONE_RETRY_SECONDS` rather than held over, so a
+    /// crowded board can't pile zones up later.
+    private var occupyZoneSlot = 0
+    private var occupyZoneRetryUntil: TimeInterval?
 
     /// Write-once elimination stamps, monotonic per game (spec §2).
     private var outCounter = 0
@@ -428,12 +430,18 @@ public final class HostSession {
     }
 
     /// Occupy is over: on the clock, on a stall, or because the field
-    /// emptied. The board is frozen with its reason, and the verdict is read
+    /// emptied. Any zone still open is decided at the whistle rather than
+    /// dropped, the board is frozen with its reason, and the verdict is read
     /// off it — a player who left can't win, whatever they own.
     private func finishOccupy(_ end: OccupyEnd) {
         guard state.phase == .playing, var occupy = state.occupy else { return }
+        let now = clock()
+        let elapsed = occupyStartedAt.map { now.timeIntervalSince($0) } ?? 0
+        occupy = occupyCloseZones(
+            occupy, elapsed: elapsed, all: true, at: now.timeIntervalSince1970)
         occupy.end = end
         state.occupy = occupy
+        syncOccupyScores()
         state.phase = .finished
         let contestants = state.players.filter { !$0.waiting }
         if end == .field {
@@ -444,22 +452,44 @@ public final class HostSession {
         }
     }
 
-    /// Put down every zone the clock has made due. Where each goes is rolled
-    /// off the game's seed and the slot's number, so a replayed game grows
-    /// the same zones in the same places.
+    /// Open every zone the clock has made due. Where each goes is rolled off
+    /// the game's seed and the slot's number, so a replayed game grows the
+    /// same zones in the same places.
     private func spawnOccupyZones(elapsed: TimeInterval) -> Bool {
         guard var occupy = state.occupy else { return false }
         var spawned = false
-        while occupyZoneSlots < occupyZonesDue(elapsed: elapsed) {
-            let slot = occupyZoneSlots
-            occupyZoneSlots += 1
+        while occupyZoneSlot < occupyZonesDue(elapsed: elapsed) {
+            let slot = occupyZoneSlot
             let roll = seededRng("\(occupySeed ?? "")/zones/\(slot)")
-            guard let zone = occupySpawnZone(occupy, rng: roll) else { continue }
-            occupy.zones.append(zone)
-            spawned = true
+            if let zone = occupySpawnZone(occupy, slot: slot, rng: roll) {
+                occupy.zones.append(zone)
+                occupyZoneSlot += 1
+                occupyZoneRetryUntil = nil
+                spawned = true
+                continue
+            }
+            // Nowhere clear to put it. Try again for a few seconds — play
+            // opens a patch soon enough — then give the slot up.
+            let deadline = occupyZoneRetryUntil ?? (elapsed + OCCUPY_ZONE_RETRY_SECONDS)
+            occupyZoneRetryUntil = deadline
+            guard elapsed >= deadline else { break }
+            occupyZoneSlot += 1
+            occupyZoneRetryUntil = nil
         }
         if spawned { state.occupy = occupy }
         return spawned
+    }
+
+    /// Blow the whistle on every zone whose minute is up: the seat holding
+    /// the most tiles inside it banks the bonus, which lands in the scores
+    /// the roster already carries.
+    private func closeOccupyZones(elapsed: TimeInterval, at now: Date) -> Bool {
+        guard let occupy = state.occupy else { return false }
+        let closed = occupyCloseZones(occupy, elapsed: elapsed, at: now.timeIntervalSince1970)
+        guard closed != occupy else { return false }
+        state.occupy = closed
+        syncOccupyScores()
+        return true
     }
 
     // MARK: Host controls
@@ -493,7 +523,8 @@ public final class HostSession {
             occupyStartedAt = now
             occupyLastWordAt = now
             occupySeed = seed
-            occupyZoneSlots = 0
+            occupyZoneSlot = 0
+            occupyZoneRetryUntil = nil
         } else {
             state.occupy = nil
         }
@@ -532,6 +563,8 @@ public final class HostSession {
         occupyStartedAt = nil
         occupyLastWordAt = nil
         occupySeed = nil
+        occupyZoneSlot = 0
+        occupyZoneRetryUntil = nil
 
         if let data = Wire.encode(HostMessage.stop) {
             transport.broadcast(data)
@@ -610,10 +643,14 @@ public final class HostSession {
             announceHost(to: due)
         }
 
-        // Occupy's clocks, read by the referee alone: the zones it's time
-        // to put down, and the two ways time can end the game.
+        // Occupy's clocks, read by the referee alone: the zones it's time to
+        // open, the ones whose minute is up, and the two ways time can end
+        // the game.
         if state.phase == .playing, state.occupy?.end == nil, let startedAt = occupyStartedAt {
             let elapsed = now.timeIntervalSince(startedAt)
+            if closeOccupyZones(elapsed: elapsed, at: now) {
+                changed = true
+            }
             if spawnOccupyZones(elapsed: elapsed) {
                 changed = true
             }

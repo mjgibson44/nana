@@ -60,12 +60,30 @@ enum Palette {
         Color(hex: 0x1B3550), Color(hex: 0x4A2E0F), Color(hex: 0x3D1F55),
     ]
 
-    /// An Occupy zone, where tiles are worth double: its squares a shade
-    /// lighter than the lattice, an edge round the patch in the plain ink,
-    /// and "2×" on the middle square. No colour of its own, so it can't be
-    /// mistaken for anybody's tiles.
+    /// An Occupy zone being fought over: its squares a shade lighter than the
+    /// lattice, an edge round the patch in the plain ink, and the seconds
+    /// left on the middle square. No colour of its own while it's open, so
+    /// it can't be mistaken for anybody's tiles — the colour arrives at the
+    /// whistle, when it takes the winner's.
     static let zoneCell = Color(hex: 0x343434)
     static let zoneEdge = Color(hex: 0xD4D4D4)
+    /// A zone that has been decided: settled back toward the lattice, so the
+    /// live one is the one that draws the eye.
+    static let zoneCellSettled = Color(hex: 0x282828)
+
+    /// Wildfire. A burning square is the brightest empty cell on the board —
+    /// it is the one asking to be played on before the round ends — and takes
+    /// the same warm amber the pile gauge warns in, so the two kinds of
+    /// trouble read as one family.
+    static let fireCell = Color(hex: 0x6E3B05)
+    static let fireEdge = Color(hex: 0xE39A2B)
+    /// Dead ground: darker than the board itself, so it reads as a hole in it
+    /// rather than as a square with something on it.
+    static let scarCell = Color(hex: 0x0D0B0A)
+
+    /// The Daily's targets. The board's own accent, because reaching one is
+    /// the good thing that can happen here — the opposite of a fire.
+    static let targetEdge = Color(hex: 0xB6DA97)
 }
 
 /// The colours a seat's tiles wear, as seen from another seat.

@@ -38,10 +38,12 @@ final class BoardSnapshotTests: XCTestCase {
         XCTAssertTrue(CGImageDestinationFinalize(dest))
     }
 
-    /// An Occupy board with a zone on it and two tiles dropped but not yet
-    /// confirmed — the zone's lighter squares, its edge and its "2×" under
-    /// the tiles, and the staged tiles ghosted like an opener. Written to
-    /// /tmp/word-board-zone.png.
+    /// An Occupy board with both kinds of zone on it and two tiles dropped
+    /// but not yet confirmed — an open one, five squares a side, a shade
+    /// lighter with its bright edge and the seconds left on its middle
+    /// square; a decided one in its winner's seat colour, at low opacity,
+    /// carrying what it paid; and the staged tiles ghosted like an opener.
+    /// Written to /tmp/word-board-zone.png.
     func testSnapshotZoneAndStagedTiles() async throws {
         let model = GameModel()
         model.newGame(seed: "hello")
@@ -51,13 +53,19 @@ final class BoardSnapshotTests: XCTestCase {
 
         let metrics = BoardMetrics(
             bounds: Bounds(
-                minRow: box.minRow - 4, minCol: box.minCol - 3,
-                maxRow: box.maxRow + 5, maxCol: box.maxCol + 6),
+                minRow: box.minRow - 4, minCol: box.minCol - 9,
+                maxRow: box.maxRow + 6, maxCol: box.maxCol + 8),
             cellBase: 38, zoom: 0.8)
         var scene = BoardScene(
             metrics: metrics,
             tiles: model.board.entries.map { (key: $0.key, letter: $0.value) })
-        scene.zones = [OccupyZone(centre: Cell(row: box.maxRow + 2, col: box.maxCol + 1))]
+        scene.zones = [
+            OccupyZone(slot: 1, centre: Cell(row: box.maxRow + 3, col: box.maxCol + 4)),
+            OccupyZone(
+                slot: 0, centre: Cell(row: box.maxRow + 3, col: box.minCol - 5),
+                winner: 0, counts: [4, 2], resolved: true),
+        ]
+        scene.zoneSecondsLeft = 41
         scene.staged = [
             keyOf(box.maxRow + 1, box.maxCol): "e",
             keyOf(box.maxRow + 2, box.maxCol): "a",

@@ -53,7 +53,8 @@ dark UI. The rules, in one breath:
 - **Words are permanent.** Nothing on the board moves, turns, comes back off, or undoes —
   so only real words are allowed down, in Solo as much as in Battle.
 - **The pile is the only pressure.** Reach `PILE_LIMIT` (24) tiles in hand and the game
-  ends on the spot, in either mode. The gauge under the header fills toward it in green
+  ends on the spot, in either mode — `hazardPileLimit` gives Wildfire a little more room,
+  and the Daily is exempt (see below). The gauge under the header fills toward it in green
   and turns amber at 17 and red at 20; the pile is drawn as three rows of eight whatever it holds,
   so a full pile looks like the end. Solo opens on `SOLO_START_TILES` (16) and Battle on
   `BATTLE_OPENING_TILES` (12) — the app's own numbers, kept apart from
@@ -96,7 +97,8 @@ launch environment opens straight onto a game so a simulator can be screenshotte
 |---|---|
 | `Packages/WordCore` | The game core in pure Swift — **bit-exact with the web game** via golden fixtures generated from the TypeScript core (`npm run gen:fixtures`), so the same seed deals the same letters on both platforms. |
 | `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold — to drag, or to aim a gapped word through a placed letter — locked-board semantics, staged tiles that lift on any board, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
-| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, the v7 Occupy board and its placement round trip (v9: unbounded, with zones), and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
+| `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, the v7 Occupy board and its placement round trip (v9: unbounded, with zones; v10: each
+player's own words, and zones that open, close and pay out), and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
 | `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for placed cells, one gesture pipeline for board taps and pans, the word-building loop, the paced Solo session, the battle session and its results, the tile-lettered home and battle screens, synthesized audio + haptics, and save/restore across process death. `Board/BoardInputBridge.swift` is the one place that reaches past SwiftUI into UIKit/AppKit, for the three things SwiftUI won't report: the live pinch midpoint, the pointer's actual device kind, and Mac scroll wheels. |
 
 ```bash
@@ -119,14 +121,46 @@ its file order is determinism-critical).
 
 Conventions and the porting API contract live in [`PORTING.md`](PORTING.md).
 
-### The Daily Deal (retired from the app)
+### The Daily
 
-The mode is gone from the app, but `DailyDeal.swift` and `DailyRules` stay in `WordCore`
-with their tests: the recurring leaderboard is already configured against them in App
-Store Connect, and `Progression` still knows how to file a daily result should the mode
-come back. The seed is salted so the day's letters aren't derivable from the date alone
-(§8.4), and `TileStream` grows its deal off a *hidden* board so one seed yields the same
-letters however differently two people play them.
+One board a day, the same one for everybody — and the same *position*, not merely the
+same letters. `WordCore/DailyBoard.swift` builds the day out of a single hidden
+crossword grown from the day's seed: one of that crossword's own words is left on the
+board as the **seed word**, the rest of its letters are dealt, three of its remaining
+cells are ringed as **targets**, and **par** is how many words it used.
+
+The seed word is what makes the targets mean anything. The board has no origin —
+`boardBounds` grows around whatever is played and `normalize` slides every generated
+solution back to (0, 0) — so before something is down, "the target is at row 3, column
+7" says nothing, and any target is covered by starting on top of it. With a word down,
+the coordinate system is pinned and reaching a ring means building in a direction you
+did not choose with letters you were given.
+
+Everything the mode promises falls out of that construction rather than being asserted:
+the targets are reachable because they are cells of a crossword the deal is known to
+build, and par is achievable because that crossword achieves it — and beatable, because
+the letters come from several ordinary overlapping words and there are normally tighter
+arrangements. Par is derived, not tuned, so it is honest on every deal.
+
+- **Scored on words, low being good.** Which fights the points scoring productively:
+  `wordScore` is triangular and every run pays, so points want a densely crossed board
+  with many runs while par wants few words. The move that serves both is one word laid
+  across three others — four new runs for one stroke. The leaderboard is ranked on the
+  packed pair (`dailyLeaderboardScore`), strokes first and points as the tiebreak.
+- **No undo, and none needed to explain.** Words are permanent here as everywhere else,
+  so a stroke is a word played. Staging is what softens it: tiles sit ghosted on the
+  board and can be moved or cleared freely until the ✓.
+- **It cannot be lost.** No clock, and the pile explicitly cannot bury it — the whole
+  deal arrives at once and fills most of the pile, and nothing more is coming. The
+  tension is your number against par, not a loss you get no second go at.
+- **One go a day, and a day is picked back up rather than dealt again.** The puzzle
+  isn't stored in the save blob — it is a pure function of the day's seed, so it is
+  rebuilt and the saved board, pile and strokes are laid back over it.
+
+`DailyDeal.swift` next door owns the calendar rather than the puzzle: which day is live,
+when it rolls over, the salted seed (§8.4), and the streak. The recurring leaderboard is
+configured against it in App Store Connect and `Progression` files a day's result
+through the same funnel every other mode uses.
 
 ### Progression and leaderboards
 
@@ -181,6 +215,39 @@ actually play:
   *held* for a dropped player. A battle plays on around a disconnect rather than pausing,
   so a held seat has to read as held, not gone.
 
+### Wildfire
+
+Solo with a board that fights back — a second row on the setup screen rather than a door
+of its own, because it is the same game leaning on you differently. The rules are pure
+Swift in `WordCore/Wildfire.swift`.
+
+Fire rides the drip's own expiry, so a round stays one pulse: the tiles land, the board
+burns, the pile is measured. Everything alight when that happens was lit by the previous
+round, which is the round of grace and needs no bookkeeping to enforce — **every fire you
+can see burns at the end of this round unless you put it out**.
+
+- **It catches on empty squares next to tiles already down.** Never in open space: the
+  board has to stay connected, so a fire you cannot build next to is a fire with no
+  legal answer.
+- **Playing on it or beside it puts it out**, and pays `WILDFIRE_DOUSE_BONUS`. Adjacency
+  rather than exact coverage, so a fire costs a decision instead of a coin flip — and
+  the bonus is what keeps it an opportunity rather than a tax.
+- **Left alone, it scars its own square** — dead ground, forever — **takes one of the
+  tiles beside it back to the pile, and spreads.** Fire will not cross a scar, so one
+  that walks into old burnt ground goes out: the places you lost tiles are the places it
+  cannot go later.
+- **There is no health bar.** Burnt tiles land in the pile, and the pile is already the
+  only thing that ends a game, so fire kills through a rule the player knows and its cost
+  is priced in the number they are already watching. Wildfire plays to a limit
+  `WILDFIRE_PILE_RELIEF` higher, amber and red moved up with it, because the pile is
+  under attack from two sides now.
+
+Scarring is proportional to how badly it is going — answer your fires and the board stays
+whole, drown and it closes in — which is both the death spiral and the reason a late
+board looks nothing like an early one. The fire itself rides the save blob, so a game
+picked back up after process death comes back to the squares that were alight and the
+ground already lost.
+
 ### Occupy
 
 The third door: two to four players on **one shared board**, each opening from their own
@@ -208,42 +275,61 @@ first.
   backwards on your screen — like a Scrabble board seen from across the table — and a
   run counts as a word if it reads as one in **either direction** along its line
   (`occupyIsWord`), on the client and the referee alike.
-- **Capture by crossing.** Every later word borrows a letter through a gap tile, exactly
-  as everywhere else — and the borrowed letter flips to the borrower's colour. A letter
-  already in both an across and a down word has no free direction, so crossing your own
-  long word's letters is how you defend it.
-- **Value.** Every tile is worth the length of the longest word it sits in, and you score
-  the tiles you own. Two 3-letter words are worth 12; one 5-letter word is worth 20; so
-  spamming short words loses to building long ones, and a capture carries the tile's
-  value with it. The header shows your value; under it, the pile gauge is replaced by a
-  **balanced bar** of everyone's share (`OccupyBarView`), you first in green, each rival
-  in their own colour (`SeatColors`), the same colour their tiles wear on the board —
-  with **everyone's name and points under the bar** in the same colours, so the bar says
-  who's ahead and the numbers say by how much.
-- **Zones.** Now and then a **three-by-three zone** appears where every tile is worth
-  **double** (`OccupyZone`, `OCCUPY_ZONE_MULTIPLIER`): the first as the opening grace
-  ends, then one every `OCCUPY_ZONE_INTERVAL_SECONDS` (75 s) — eight or so a game. The
-  host places them (`HostSession.spawnOccupyZones`, off the game's seed so a replay grows
-  the same ones) on empty ground within `OCCUPY_ZONE_REACH` (5) of a letter already
-  down or of a start square nobody has opened from yet, clear of every start square and
-  every other zone (`occupyZoneCandidates`); a slot that finds nowhere is skipped, not
-  saved up. They ride the snapshot (`OccupyState.zones`) and are permanent: the bonus
-  stays with whatever lands there, capture included. On the board a zone's squares are a
-  shade lighter than the lattice, with an edge round the patch and "2×" on its middle
-  square, all drawn under the tiles (`BoardContentView`); a new one is announced with a
-  banner.
+- **Your words are your own.** Every later word borrows a letter through a gap tile,
+  exactly as everywhere else — and it has to be a letter you already own. A rival's tile
+  can't be borrowed (`OccupyRefusal.notYours`) and can't be built through
+  (`throughRival`); a tile's owner is stamped when it lands and never changes again. Two
+  players' tiles *may* sit flush against each other, and the line they make is not read
+  as one word: a run is a maximal **same-owner** line (`occupyOwnedRuns`), so each side
+  of a seam is judged and valued on its own — the seam is a border, not a word. One walk
+  answers both what a word has to be to land and what it is worth, so the two can't
+  drift apart. A letter already in both an across and a down word has no free direction,
+  so crossing your own long word's letters is still how you defend it; a rival's is
+  defended by being theirs.
+- **Value.** Every tile is worth the length of the longest word **of its owner's** that
+  it sits in, and you score the tiles you own. Two 3-letter words are worth 12; one
+  5-letter word is worth 20; so spamming short words loses to building long ones, and a
+  rival's letter next door adds nothing to either of you. The header shows your value;
+  under it, the pile gauge is replaced by a **balanced bar** of everyone's share
+  (`OccupyBarView`), you first in green, each rival in their own colour (`SeatColors`),
+  the same colour their tiles wear on the board — with **everyone's name and points
+  under the bar** in the same colours, so the bar says who's ahead and the numbers say
+  by how much.
+- **Zones.** A **five-by-five zone** opens a minute into the game and stays open for a
+  minute; at the whistle whoever owns the most tiles inside it banks `OCCUPY_ZONE_BONUS`
+  (25 points), a tie banks nothing, and fifteen seconds later the next one opens. Seven
+  run in a ten-minute game — no zone is opened with less than half a minute of match
+  clock left, so the end of a game belongs to the words already on the board — and one
+  still open when the game ends is decided there. The host opens and closes them
+  (`HostSession.spawnOccupyZones` / `closeOccupyZones`, the places rolled off the game's
+  seed so a replay grows the same ones) on empty ground within `OCCUPY_ZONE_REACH` (6)
+  of a letter already down or of a start square nobody has opened from yet, clear of
+  every start square and every other zone, and **preferring ground two or more seats can
+  reach** — with nothing to capture, a zone one player alone can play into is a gift
+  rather than a contest (`occupyZoneCandidates`). A slot with nowhere to go is retried
+  for ten seconds and then given up, not saved up. Zones ride the snapshot
+  (`OccupyState.zones`) with their own lifecycle — `slot`, `opensAt`, `closesAt`,
+  `winner`, `counts`, `resolved`, the times in seconds since the deal so every screen
+  runs the countdown off the start it already has — and what they pay is banked in
+  `OccupyState.bonuses`, which `scores` includes. On the board an open zone's squares
+  are a shade lighter than the lattice, with an edge round the patch and the seconds
+  left on its middle square; a decided one settles into its winner's colour with what it
+  paid (`BoardContentView`). A line under the bar says how the open zone stands and how
+  long is left, and every opening and whistle gets a banner.
 - **The pile** is dealt to `OCCUPY_HAND` (24) and refilled after every word — grown off
   the shared board as it stands, so every letter has a known way on — and never buries
   anyone.
 - **The end.** Ten minutes (`OCCUPY_SECONDS`), whatever the size of the field; or early,
   once nobody has placed a word for a full minute — with a thirty-second opening grace
   during which the stall clock doesn't run. The header turns the last twenty seconds of a
-  stall into a visible countdown. Most value wins; ties go to quadrants held (whoever
-  owns more tiles in a quadrant of the frame), then to whoever reached their score first.
+  stall into a visible countdown. Most value wins; ties go to zones taken, then to
+  quadrants held (whoever owns more tiles in a quadrant of the frame), then to whoever
+  reached their score first.
   A player who leaves ranks last whatever they own.
 
 Over the wire it's protocol **v7**, reshaped in **v9** (the frame in place of a size,
-and the zones in the snapshot): a client sends `place` (the new tiles and the borrowed
+and the zones in the snapshot) and again in **v10** (nothing changes hands, and a zone
+is a minute-long contest with a winner and a bonus): a client sends `place` (the new tiles and the borrowed
 squares — the outcome, not the picks), the host judges it against its board and
 dictionary, broadcasts the whole board in the next `state`, and only *then* answers the
 sender with `placed` — so a word a player has already been shown is never taken back for

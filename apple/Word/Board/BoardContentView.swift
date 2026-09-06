@@ -31,9 +31,24 @@ struct BoardScene {
     /// with no owner wears the word green.
     var owners: [CellKey: Int] = [:]
     var viewerSeat: Int? = nil
-    /// Occupy's zones, in this seat's frame: the patches where a tile is
-    /// worth double.
+    /// Occupy's zones, in this seat's frame: the patch being fought over,
+    /// and the ones already decided.
     var zones: [OccupyZone] = []
+    /// Seconds left on the open zone, drawn on its middle square.
+    var zoneSecondsLeft: Int? = nil
+    /// Wildfire: the squares alight. Every one of them burns at the end of
+    /// this round unless a tile lands on it or beside it.
+    ///
+    /// Cells rather than keys, because the lattice below walks every square on
+    /// screen — 1,100+ at full zoom-out — and asking these sets in cell terms
+    /// keeps that pass free of per-square string building.
+    var fires: Set<Cell> = []
+    /// And the ground fire has already taken. Nothing goes here again.
+    var scars: Set<Cell> = []
+    /// The Daily: the squares the crossword has to reach. Drawn under the
+    /// tiles rather than instead of them, so a target that has been covered
+    /// still shows its ring and the board reads as a scorecard.
+    var targets: Set<Cell> = []
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -49,26 +64,66 @@ struct BoardContentView: View {
             // The empty lattice: rounded cell fills over the board background,
             // the gaps between them reading as hairlines — and, in Occupy,
             // the zones: their squares a shade lighter, an edge round each
-            // patch, and "2×" on the middle square, all under the tiles.
+            // patch, and the countdown (or, once it's been decided, what it
+            // paid and to whom) on the middle square, all under the tiles.
             Canvas { context, _ in
                 let cell = metrics.cellSize
                 let step = metrics.step
                 let radius = Self.cornerRadius(for: cell)
                 let bounds = metrics.bounds
-                let zoneCells: Set<Cell> =
-                    scene.zones.isEmpty ? [] : Set(scene.zones.flatMap(\.cells))
+                let openCells: Set<Cell> = Set(
+                    scene.zones.filter(\.isOpen).flatMap(\.cells))
+                let settledCells: Set<Cell> = Set(
+                    scene.zones.filter { !$0.isOpen }.flatMap(\.cells))
+                let burning = scene.fires
+                let scarred = scene.scars
+                let targets = scene.targets
                 for row in 0..<metrics.rows {
                     for col in 0..<metrics.cols {
                         let rect = CGRect(
                             x: Double(col) * step, y: Double(row) * step,
                             width: cell, height: cell)
-                        let inZone =
-                            !zoneCells.isEmpty
-                            && zoneCells.contains(
-                                Cell(row: bounds.minRow + row, col: bounds.minCol + col))
+                        let here = Cell(row: bounds.minRow + row, col: bounds.minCol + col)
+                        // Dead ground reads as a hole in the board rather than
+                        // as a square with something on it — the point is that
+                        // nothing can go there. A burning square is the
+                        // brightest empty cell on screen, because it is the one
+                        // asking to be played on before the round ends.
+                        let isScarred = !scarred.isEmpty && scarred.contains(here)
+                        let isBurning = !isScarred && !burning.isEmpty && burning.contains(here)
+                        let fill: Color
+                        if isScarred {
+                            fill = Palette.scarCell
+                        } else if isBurning {
+                            fill = Palette.fireCell
+                        } else if !openCells.isEmpty, openCells.contains(here) {
+                            fill = Palette.zoneCell
+                        } else if !settledCells.isEmpty, settledCells.contains(here) {
+                            fill = Palette.zoneCellSettled
+                        } else {
+                            fill = Palette.surface
+                        }
                         context.fill(
                             Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
-                            with: .color(inZone ? Palette.zoneCell : Palette.surface))
+                            with: .color(fill))
+                        if isBurning {
+                            context.stroke(
+                                Path(
+                                    roundedRect: rect, cornerRadius: radius,
+                                    style: .continuous),
+                                with: .color(Palette.fireEdge),
+                                lineWidth: Self.zoneEdgeWidth(for: cell))
+                        }
+                        if !targets.isEmpty, targets.contains(here) {
+                            // A ring rather than a fill: it has to still be
+                            // legible once a tile is sitting on top of it,
+                            // which is the moment it matters most.
+                            let ring = rect.insetBy(dx: cell * 0.18, dy: cell * 0.18)
+                            context.stroke(
+                                Path(ellipseIn: ring),
+                                with: .color(Palette.targetEdge),
+                                lineWidth: Self.zoneEdgeWidth(for: cell))
+                        }
                     }
                 }
                 for zone in scene.zones {
@@ -76,17 +131,22 @@ struct BoardContentView: View {
                     let side = Double(OCCUPY_ZONE_SIZE) * step - CELL_HAIRLINE
                     let edge = CGRect(x: first.minX, y: first.minY, width: side, height: side)
                         .insetBy(dx: -CELL_HAIRLINE / 2, dy: -CELL_HAIRLINE / 2)
+                    // Open: the plain ink, and the seconds left. Decided: the
+                    // winner's own colour, dimmed, and what it paid them.
+                    let tint = Self.zoneTint(zone, viewer: scene.viewerSeat)
                     context.stroke(
                         Path(
                             roundedRect: edge, cornerRadius: radius + CELL_HAIRLINE / 2,
                             style: .continuous),
-                        with: .color(Palette.zoneEdge),
+                        with: .color(zone.isOpen ? tint : tint.opacity(0.6)),
                         lineWidth: Self.zoneEdgeWidth(for: cell))
+                    guard let glyph = Self.zoneGlyph(zone, secondsLeft: scene.zoneSecondsLeft)
+                    else { continue }
                     let middle = metrics.rect(of: zone.centre)
                     context.draw(
-                        Text("2×")
-                            .font(.system(size: cell * 0.5, weight: .bold))
-                            .foregroundStyle(Palette.zoneEdge),
+                        Text(glyph)
+                            .font(.system(size: cell * 0.45, weight: .bold))
+                            .foregroundStyle(zone.isOpen ? tint : tint.opacity(0.6)),
                         at: CGPoint(x: middle.midX, y: middle.midY))
                 }
             }
@@ -164,6 +224,20 @@ struct BoardContentView: View {
         max(1.5, cellSize * 0.06)
     }
 
+    /// A zone's colour: nobody's while it's open, the winner's once it isn't.
+    static func zoneTint(_ zone: OccupyZone, viewer: Int?) -> Color {
+        guard !zone.isOpen else { return Palette.zoneEdge }
+        guard let winner = zone.winner else { return Palette.inkSoft }
+        return SeatColors.of(seat: winner, viewer: viewer).ink
+    }
+
+    /// What a zone says on its middle square: the countdown while it's being
+    /// fought over, then what it paid — or a dash for one nobody held.
+    static func zoneGlyph(_ zone: OccupyZone, secondsLeft: Int?) -> String? {
+        guard !zone.isOpen else { return secondsLeft.map { "\($0)s" } }
+        return zone.winner == nil ? "—" : "+\(OCCUPY_ZONE_BONUS)"
+    }
+
     /// What a placed tile says out loud: its letter, where it sits, and the
     /// words it reads in.
     static func tileLabel(for key: CellKey, in scene: BoardScene, letter: String) -> String {
@@ -177,8 +251,8 @@ struct BoardContentView: View {
         if let owner = scene.owners[key] {
             parts.append(owner == scene.viewerSeat ? "yours" : "a rival’s")
         }
-        if scene.zones.contains(where: { $0.contains(cell) }) {
-            parts.append("worth double")
+        if let zone = scene.zones.first(where: { $0.contains(cell) }) {
+            parts.append(zone.isOpen ? "in the open zone" : "in a zone already decided")
         }
         parts.append("tap to place your word through it")
         return parts.joined(separator: ", ")

@@ -64,6 +64,26 @@ struct LeaderboardSubmissionTests {
         #expect(posts[0].day == deal.day)
     }
 
+    @Test("a daily posts its packed strokes-and-points, not its points")
+    func aDailyPostsItsPackedScore() {
+        let deal = dailyDeal(day: 20_500)
+        let result = DailyResult(
+            strokes: 5, par: 7, points: 200, reached: 3, allTilesPlaced: true)
+        let posts = submissions(
+            mode: .daily, pace: .regular, score: 200, daily: deal, dailyResult: result,
+            dailyWithinDay: true, battleWins: 0, at: 1)
+        #expect(posts.count == 1)
+        #expect(posts[0].score == dailyLeaderboardScore(result))
+        #expect(posts[0].score != 200, "the board is ranked on words, not points")
+
+        // And a day that somehow reports no result still posts something
+        // sortable rather than nothing.
+        let bare = submissions(
+            mode: .daily, pace: .regular, score: 200, daily: deal, dailyWithinDay: true,
+            battleWins: 0, at: 1)
+        #expect(bare[0].score == 200)
+    }
+
     @Test("a daily that outlived its puzzle posts nothing")
     func aLateDailyPostsNothing() {
         // The bug plan §8.2 says to pin: a recurring board would happily file

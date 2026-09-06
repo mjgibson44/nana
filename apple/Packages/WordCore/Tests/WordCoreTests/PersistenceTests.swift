@@ -52,11 +52,22 @@ private final class BlockedStore: KeyValueStore {
         #expect(loadSoloSetup(from: store).pace == .regular)
     }
 
-    @Test("writes the exact bytes the web build stores")
-    func writesTheExactBytesTheWebBuildStores() {
+    @Test("writes the web's shape, with the hazard the web has no notion of")
+    func writesTheWebsShapePlusTheHazard() {
         let store = MemoryStore()
         saveSoloSetup(SoloSetup(pace: .fast), to: store)
-        #expect(store.values["nana.setup.solo.v1"] == "{\"pace\":\"fast\"}")
+        #expect(
+            store.values["nana.setup.solo.v1"] == "{\"pace\":\"fast\",\"hazard\":\"none\"}")
+    }
+
+    @Test("a setup the web wrote still reads, hazard and all")
+    func aWebWrittenSetupStillReads() {
+        // The one direction that has to keep working: the web knows nothing
+        // about hazards, and a key that isn't there falls back to the
+        // default, like every other field.
+        let store = MemoryStore()
+        store.set("nana.setup.solo.v1", "{\"pace\":\"fast\"}")
+        #expect(loadSoloSetup(from: store) == SoloSetup(pace: .fast, hazard: .none))
     }
 }
 
