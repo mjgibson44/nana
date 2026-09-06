@@ -49,9 +49,39 @@ final class ScreenSnapshotTests: XCTestCase {
 
     func testSoloSetupRenders() throws {
         try render(
-            SoloSetupScreen(pace: .regular, onPlay: { _ in }, onClose: {}), name: "solo-setup")
+            SoloSetupScreen(pace: .regular, onPlay: { _, _ in }, onClose: {}), name: "solo-setup")
         try render(
-            SoloSetupScreen(pace: .fast, onPlay: { _ in }, onClose: {}), name: "solo-setup-fast")
+            SoloSetupScreen(pace: .fast, onPlay: { _, _ in }, onClose: {}), name: "solo-setup-fast")
+        try render(
+            SoloSetupScreen(pace: .regular, hazard: .wildfire, onPlay: { _, _ in }, onClose: {}),
+            name: "solo-setup-wildfire")
+    }
+
+    /// The Daily: the word already down, the rings to reach, and the header
+    /// counting targets and strokes where a clock would be.
+    func testTheDailyRenders() async throws {
+        let model = GameModel()
+        try model.newDaily(dailyDeal(day: 20_500))
+        await model.loadDictionary()
+        model.dismissSplash()
+        try render(GameScreen(model: model), name: "daily")
+    }
+
+    /// And a board that has been burning for a few rounds: squares alight,
+    /// ground already lost.
+    func testAWildfireBoardRenders() async throws {
+        let model = GameModel()
+        model.newGame(seed: "snapshot", pace: .regular, hazard: .wildfire)
+        await model.loadDictionary()
+        try TestPlays.placeOpener(on: model)
+        // A square alight above the opener and burnt ground below it, so the
+        // picture carries both of fire's states at once.
+        let opener = parseKey(model.board.keys[0])
+        model.setFire(
+            Wildfire(
+                fires: [keyOf(opener.row - 1, opener.col)],
+                scars: [keyOf(opener.row + 1, opener.col)]))
+        try render(GameScreen(model: model), name: "wildfire")
     }
 
     func testTheGameMenuRenders() throws {

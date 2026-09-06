@@ -17,7 +17,7 @@ struct SoloSetupScreen: View {
     /// The pace the last Solo game was played at.
     var pace: SoloPace
     /// And what the board was up to.
-    var hazard: SoloHazard
+    var hazard: SoloHazard = .none
     var onPlay: (SoloPace, SoloHazard) -> Void
     var onClose: () -> Void
 

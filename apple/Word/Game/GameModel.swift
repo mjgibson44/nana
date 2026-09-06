@@ -612,7 +612,6 @@ final class GameModel {
         mode = .endless
         self.hazard = hazard
         fire = Wildfire()
-        firesDoused = 0
         day = nil
         dailyDeal = nil
         strokes = 0
@@ -925,6 +924,7 @@ final class GameModel {
         longestWordPlaced = 0
         boardClears = 0
         recoveredFromOverLimit = false
+        firesDoused = 0
     }
 
     func dismissSplash(at now: Date = .now) {
@@ -1953,7 +1953,6 @@ final class GameModel {
         mode = .endless
         hazard = saved.soloHazard
         fire = saved.fire
-        firesDoused = 0
         day = nil
         dailyDeal = nil
         strokes = 0
@@ -1983,7 +1982,6 @@ final class GameModel {
         mode = .daily
         hazard = .none
         fire = Wildfire()
-        firesDoused = 0
         day = built
         dailyDeal = deal
         clearBattle()
