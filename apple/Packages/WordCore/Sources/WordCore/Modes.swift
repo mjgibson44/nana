@@ -42,7 +42,11 @@ public enum SoloPace: String, CaseIterable, Sendable {
 /// what claiming one buys. A modifier rides on the setup sheet beside the
 /// pace rather than taking a door of its own: it is the same mode, offering
 /// you something different.
-public enum SoloModifier: String, CaseIterable, Sendable {
+///
+/// Named for Solo, where it started, but no longer Solo's alone: a Battle
+/// room picks one too (`BattleState.modifier`), and it is `Codable` because
+/// a room-wide rule has to reach every player over the wire.
+public enum SoloModifier: String, CaseIterable, Codable, Sendable {
     case none
     /// Gold cells worth points, most the moment they appear.
     case gold
@@ -80,6 +84,23 @@ public struct ModeInfo {
 public enum GameDoor: String, CaseIterable {
     case solo, battle, occupy
 }
+
+/// Whether Occupy has a door on the home screen.
+///
+/// **Off for now, and the mode is not deleted.** Its ideas are being folded
+/// into Battle instead — the shared board you can block each other on is
+/// Battle's `BattleBoardView.shared` — so the code, the protocol and the
+/// tests all stay live and exercised while the door is closed. This is one
+/// constant rather than a deletion precisely because the two may yet diverge
+/// again: a mode that earns its own door back can have it.
+///
+/// Everything behind the door still works, including the local two-seat
+/// harness `RootView` starts for development.
+public let OCCUPY_DOOR_ENABLED = false
+
+/// The doors actually offered on the home screen.
+public let OPEN_DOORS: [GameDoor] =
+    GameDoor.allCases.filter { $0 != .occupy || OCCUPY_DOOR_ENABLED }
 
 public let SOLO_INFO = ModeInfo(
     name: "Solo",

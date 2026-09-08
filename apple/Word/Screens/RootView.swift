@@ -89,18 +89,7 @@ struct RootView: View {
                     onClose: leaveBattle)
 
             case .battleLobby:
-                BattleLobbyScreen(
-                    mode: battleMode,
-                    state: battle?.state,
-                    selfID: battle?.selfID ?? "",
-                    isHost: battle?.isHost ?? false,
-                    canStart: battle?.canStart ?? false,
-                    isReconnecting: battle?.isReconnecting ?? false,
-                    rejection: battle?.rejection,
-                    autoStart: battle?.autoStart,
-                    countdown: battle?.countdown,
-                    onStart: { battle?.start() },
-                    onLeave: leaveBattle)
+                lobbyScreen
 
             case .game:
                 GameScreen(
@@ -195,6 +184,51 @@ struct RootView: View {
     private func hoursUntil(_ date: Date) -> String {
         let hours = max(1, Int(ceil(date.timeIntervalSinceNow / 3600)))
         return "\(hours) hour\(hours == 1 ? "" : "s")"
+    }
+
+    /// The room, with its rules editable by whoever referees it. Lifted out
+    /// of the router's `switch` because the body's type-checking budget is
+    /// finite and this screen has the most arguments of any of them.
+    private var lobbyScreen: some View {
+        let isHost = battle?.isHost == true
+        // Bound with explicit types: a ternary between a method reference and
+        // `nil` in an argument position is more than the inferencer will
+        // chew through inside a view this size.
+        var changeBoard: ((BattleBoardView) -> Void)?
+        var changeModifier: ((SoloModifier) -> Void)?
+        if isHost {
+            changeBoard = { view in setRoomBoardView(view) }
+            changeModifier = { modifier in setRoomModifier(modifier) }
+        }
+        return BattleLobbyScreen(
+            mode: battleMode,
+            state: battle?.state,
+            selfID: battle?.selfID ?? "",
+            isHost: isHost,
+            canStart: battle?.canStart ?? false,
+            isReconnecting: battle?.isReconnecting ?? false,
+            rejection: battle?.rejection,
+            autoStart: battle?.autoStart,
+            countdown: battle?.countdown,
+            onStart: { battle?.start() },
+            onLeave: leaveBattle,
+            // Only a host may change the room's rules, and the rows read as
+            // controls or as facts on exactly that basis.
+            onBoardView: changeBoard,
+            onModifier: changeModifier)
+    }
+
+    /// The host set the room's layout, or what is on its squares. Told to
+    /// the room first — the snapshot is the truth every screen reads — and
+    /// remembered on this device, so hosting again opens where you left off.
+    private func setRoomBoardView(_ view: BattleBoardView) {
+        battle?.setBoardView(view)
+        settings.battle.boardView = view
+    }
+
+    private func setRoomModifier(_ modifier: SoloModifier) {
+        battle?.setModifier(modifier)
+        settings.battle.modifier = modifier
     }
 
     private func startSolo(pace: SoloPace, modifier: SoloModifier) {
@@ -391,7 +425,10 @@ struct RootView: View {
             displayName: { transport.displayName(for: $0) },
             autoStart: kind?.rule,
             announceTimeout: kind == nil
-                ? HOST_ANNOUNCE_TIMEOUT_SECONDS : HOST_CLAIM_TIMEOUT_SECONDS)
+                ? HOST_ANNOUNCE_TIMEOUT_SECONDS : HOST_CLAIM_TIMEOUT_SECONDS,
+            // What this device would open a room with. Only read if we end
+            // up hosting one; a client plays by the host's snapshot.
+            setup: settings.battle)
         session.onGameStart = { route = .game }
         session.onReturnToLobby = { route = .battleLobby }
         if let kind {

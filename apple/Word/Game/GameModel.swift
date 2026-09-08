@@ -713,11 +713,14 @@ final class GameModel {
     /// the shared stream in step — every client asks the stream for the same
     /// first number.
     func newBattle(
-        seed: String, selfID: String, spectating: Bool = false, now: Date = .now
+        seed: String, selfID: String, spectating: Bool = false,
+        modifier: SoloModifier = .none, now: Date = .now
     ) {
         self.seed = seed
         mode = .battle
-        modifier = .none
+        // The room's, not this player's: a modifier is a rule everyone in a
+        // battle plays under, and it arrives on the host's snapshot.
+        self.modifier = modifier
         prizes = PrizeField()
         day = nil
         dailyDeal = nil
@@ -1036,6 +1039,7 @@ final class GameModel {
     func advanceClock(at now: Date = .now) {
         if mode == .battle {
             advanceBattle(at: now)
+            advancePrizes(at: now)
             return
         }
         // Occupy's clocks are the host's; nothing lands from them here.
@@ -1123,8 +1127,19 @@ final class GameModel {
     /// Dropping `lastPrizeTick` whenever the clock is held (an overlay, a
     /// pause, a game not yet resumed) re-anchors the delta on release, so
     /// time spent behind a card is never charged to a prize's twenty seconds.
+    ///
+    /// **In a battle every board runs this, and that is the whole
+    /// synchronisation.** Nothing about prizes crosses the wire on separate
+    /// boards, and nothing needs to: every player's clock starts at the same
+    /// deal and counts the same seconds, so squares appear on every board at
+    /// the same moment and are worth the same. Where each one *sits* is
+    /// necessarily local — the boards are different boards — which is why
+    /// this is deliberately not seeded off a shared stream position. A
+    /// spectator's board is skipped: they have nothing to claim with.
     private func advancePrizes(at now: Date) {
-        guard mode == .endless, modifier.prize != nil, !isComplete, !solo.clockHeld else {
+        guard mode == .endless || mode == .battle, modifier.prize != nil,
+            !isComplete, !spectating, !solo.clockHeld
+        else {
             lastPrizeTick = nil
             return
         }

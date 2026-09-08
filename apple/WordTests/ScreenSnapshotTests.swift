@@ -204,6 +204,29 @@ final class ScreenSnapshotTests: XCTestCase {
             name: "occupy-entry")
     }
 
+    /// The Battle lobby's room settings: the host's, tappable, and the same
+    /// rows read-only on a client's screen.
+    func testTheBattleLobbysRoomSettingsRender() throws {
+        let state = BattleState(
+            phase: .lobby,
+            players: [
+                BattlePlayer(id: "a", name: "Ada", host: true),
+                BattlePlayer(id: "b", name: "Grace"),
+            ],
+            game: 0, winnerId: nil, modifier: .gold)
+        try render(
+            BattleLobbyScreen(
+                state: state, selfID: "a", isHost: true, canStart: true,
+                isReconnecting: false, rejection: nil, onStart: {}, onLeave: {},
+                onBoardView: { _ in }, onModifier: { _ in }),
+            name: "battle-lobby-host")
+        try render(
+            BattleLobbyScreen(
+                state: state, selfID: "b", isHost: false, canStart: false,
+                isReconnecting: false, rejection: nil, onStart: {}, onLeave: {}),
+            name: "battle-lobby-client")
+    }
+
     func testOccupyResultsRender() throws {
         try render(
             GameEndView(

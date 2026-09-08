@@ -42,7 +42,12 @@ struct HomeScreen: View {
                         .accessibilityLabel("\(dailyStreak) day streak")
                 }
                 TileWordButton(text: "BATTLE", action: onBattle)
-                TileWordButton(text: "OCCUPY", action: onOccupy)
+                // Occupy's door is closed for now — its ideas live on as
+                // Battle's shared board rather than as a mode of their own
+                // (`OCCUPY_DOOR_ENABLED`).
+                if OCCUPY_DOOR_ENABLED {
+                    TileWordButton(text: "OCCUPY", action: onOccupy)
+                }
             }
             Spacer()
         }

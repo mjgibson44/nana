@@ -36,6 +36,10 @@ final class BattleSession {
     /// Which game this room plays: a Battle, or Occupy. The host's rules and
     /// the lobby's size follow from it.
     let mode: GameMode
+    /// What this room opens set to. Only a host's copy is ever read — a
+    /// client plays by whatever the host's snapshot says — so this is the
+    /// door's choice, carried in to seed the lobby.
+    private let setup: BattleSetup
     /// The rule a random match deals itself by; nil for a friends' lobby,
     /// where the host presses START.
     let autoStart: AutoStartRule?
@@ -91,10 +95,12 @@ final class BattleSession {
         /// battle without waiting three minutes.
         clock: @escaping () -> Date = { .now },
         autoStart: AutoStartRule? = nil,
-        announceTimeout: TimeInterval = HOST_ANNOUNCE_TIMEOUT_SECONDS
+        announceTimeout: TimeInterval = HOST_ANNOUNCE_TIMEOUT_SECONDS,
+        setup: BattleSetup = BattleSetup()
     ) {
         self.role = role
         self.mode = mode
+        self.setup = setup
         self.transport = transport
         self.model = model
         self.displayName = displayName
@@ -223,6 +229,21 @@ final class BattleSession {
         return Set(contestants.filter(\.left).compactMap { occupy.seat(of: $0.id) })
     }
 
+    /// The room's settings as the snapshot has them — what everyone is
+    /// actually playing by, host and client alike.
+    var boardView: BattleBoardView { state?.boardView ?? setup.boardView }
+    var modifier: SoloModifier { state?.modifier ?? setup.modifier }
+
+    /// Change what the room plays by. Only a host can, and only in the lobby;
+    /// a client's call is a no-op rather than a local lie.
+    func setBoardView(_ view: BattleBoardView) {
+        host?.setBoardView(view)
+    }
+
+    func setModifier(_ modifier: SoloModifier) {
+        host?.setModifier(modifier)
+    }
+
     /// A battle can only go again with enough seats still filled.
     var canRestart: Bool {
         guard isHost, isFinished, let state else { return false }
@@ -294,20 +315,19 @@ final class BattleSession {
     // MARK: Wiring
 
     private func makeHostSession() -> HostSession {
-        // Occupy's referee judges words against the host's dictionary. If
-        // it hasn't loaded yet, the client's own check is trusted rather
-        // than every word being called fake.
-        let rules: BattleRules =
-            mode == .occupy
-            ? .occupy(isWord: { [weak model] word in model?.dictionary?.contains(word) ?? true })
-            : .battle
-        return HostSession(
+        HostSession(
             transport: transport, displayName: displayName, makeSeed: makeSeed,
             clock: clock, autoStart: autoStart,
             graceSeconds: dealsItself ? Self.strangerGraceSeconds : RECONNECT_GRACE_SECONDS,
             // A stranger who lands after the deal has nothing to watch for.
             admitsMidGame: !dealsItself,
-            rules: rules)
+            rules: mode == .occupy ? .occupy : .battle,
+            // A shared board's referee judges words against the host's
+            // dictionary. If it hasn't loaded yet the client's own check is
+            // trusted, rather than every word being called fake.
+            isWord: { [weak model] word in model?.dictionary?.contains(word) ?? true },
+            boardView: setup.boardView,
+            modifier: setup.modifier)
     }
 
     private func makeClientSession() -> ClientSession {
@@ -417,7 +437,8 @@ final class BattleSession {
                 spectating: selfSeat?.waiting == true, now: clock())
         } else {
             model?.newBattle(
-                seed: seed, selfID: selfID, spectating: selfSeat?.waiting == true, now: clock())
+                seed: seed, selfID: selfID, spectating: selfSeat?.waiting == true,
+                modifier: state?.modifier ?? .none, now: clock())
         }
         onGameStart?()
     }

@@ -4,7 +4,7 @@ import WordCore
 /// The wire protocol, ported from `src/net/battleSession.ts` (spec:
 /// `docs/apple-port-notes/protocol.md` §1).
 ///
-/// **Version 9.** Four steps up from the web's 5:
+/// **Version 11.** Six steps up from the web's 5:
 ///
 ///  - v6 added `host`. On the web the join code *is* the host's address, so a
 ///    client always knows whom to `hello`. A GKMatch formed from a party code
@@ -25,11 +25,18 @@ import WordCore
 ///    winner and a bonus rather than a permanent multiplier — so its snapshot
 ///    carries a lifecycle (`slot`, `opensAt`, `closesAt`, `winner`, `counts`,
 ///    `resolved`) and the state carries `bonuses`.
+///  - v11 gave Battle the two settings a room agrees on before it deals:
+///    `BattleState.boardView` (everyone on one board, or each on their own)
+///    and `BattleState.modifier` (the prize cells Solo's setup sheet offers).
+///    Both are room-wide rules, so they ride the snapshot every screen
+///    already reads rather than messages of their own — and both default on
+///    an older snapshot to what a room without them was: separate boards,
+///    nothing on them.
 ///
 /// The version gate is load-bearing rather than ceremonial: there has been no
 /// Game Center sandbox since 2016 (TN2417), so a prerelease build can and will
 /// meet a released one.
-public let PROTOCOL_VERSION = 10
+public let PROTOCOL_VERSION = 11
 
 /// Who a message is from or to. Maps to `GKPlayer.gamePlayerID` — the stable
 /// per-game identity that replaces the web's sessionStorage `playerKey`.

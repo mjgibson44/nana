@@ -57,6 +57,73 @@ public struct BattlePlayer: Codable, Equatable, Identifiable {
     }
 }
 
+/// How a room's boards are laid out.
+///
+/// New on Apple platforms, and the one idea worth keeping out of Occupy now
+/// that its door is closed (`OCCUPY_DOOR_ENABLED`): a room where everyone
+/// builds on the same squares plays completely differently from a room of
+/// parallel solitaires, because your rivals' words are in your way. It is a
+/// setting on Battle rather than a mode of its own for the same reason a
+/// Solo modifier is a row on the setup sheet — it is the same game, with the
+/// board arranged differently.
+///
+/// A room-wide rule, so it rides the host's snapshot rather than each
+/// player's settings: everyone in a room is necessarily playing the same one.
+public enum BattleBoardView: String, CaseIterable, Codable, Sendable {
+    /// Each player on their own board, seeing only their own. Battle as it
+    /// has always played.
+    case separate
+    /// Everyone on one board, from opposite corners. Your words are your own
+    /// and cross only your own letters, so a rival's word is a wall.
+    case shared
+}
+
+/// The Battle setting's tabs, in the order they're offered.
+public let BOARD_VIEW_OPTIONS: [(view: BattleBoardView, name: String)] = [
+    (view: .separate, name: "Separate"),
+    (view: .shared, name: "Shared"),
+]
+
+/// Whether a room may actually be set to `.shared` yet.
+///
+/// **Off, and the reason is that the referee is ready and the board is not.**
+/// Everything a shared room needs of the *protocol* is done and tested: the
+/// setting rides the snapshot, the host deals an `OccupyState` for it, seats
+/// it four, referees placements against it with `occupyApply`, and keeps
+/// Occupy's zones and ten-minute clock out of it. What is not done is the
+/// half that lives in the app: `GameModel` still routes a landing down
+/// Battle's own path, which keeps a local board and knows nothing about
+/// owners, seats or the host's answer.
+///
+/// Finishing it means one deliberate refactor rather than a patch — the
+/// model asks `mode == .occupy` in some thirty places, and about two thirds
+/// of those questions are really *"is this board shared?"* (whose letters may
+/// I cross, where does the opener go, which runs are mine) while the rest are
+/// really *"is this Occupy?"* (tile-value scoring, the zone clock, the
+/// ten-minute whistle). Splitting that question in two is what a shared
+/// Battle needs, plus a commit path that is Occupy's board round trip with
+/// Battle's scoring, attacks and elimination on top.
+///
+/// Shipping the switch before that would deal a room where the host has a
+/// shared board and every client plays a private one, which is worse than no
+/// switch at all.
+public let BATTLE_SHARED_BOARD_ENABLED = false
+
+/// The layouts a room may actually be set to.
+public let OPEN_BOARD_VIEWS: [(view: BattleBoardView, name: String)] =
+    BOARD_VIEW_OPTIONS.filter { $0.view != .shared || BATTLE_SHARED_BOARD_ENABLED }
+
+/// What the lobby says each layout does, in the one sentence that matters.
+public func boardViewNote(_ view: BattleBoardView) -> String {
+    switch view {
+    case .separate:
+        "Everyone gets their own board. Words you place send tiles to your rivals."
+    case .shared:
+        "Everyone builds on one board, from opposite corners. "
+            + "Your words cross only your own letters — a rival's word is a wall."
+    }
+}
+
 /// The whole shared truth, owned by the host and broadcast on every change.
 public struct BattleState: Codable, Equatable {
     public var phase: BattlePhase
@@ -68,8 +135,16 @@ public struct BattleState: Codable, Equatable {
     /// Which game this lobby plays. New on Apple platforms — the web's lobby
     /// only ever holds a Battle, which is what a snapshot without it means.
     public var mode: GameMode
-    /// The shared board, while the lobby plays Occupy (`Occupy.swift`).
+    /// The shared board, while the lobby plays Occupy (`Occupy.swift`) — or
+    /// a Battle whose `boardView` is `.shared`, which uses the same carrier.
     public var occupy: OccupyState?
+    /// Whether this room's players share a board or each get their own.
+    /// Battle's, and the host's to choose; Occupy is always shared.
+    public var boardView: BattleBoardView
+    /// What the boards are up to, beyond the drip — the same prize cells
+    /// Solo's setup sheet offers (`Prizes.swift`). A room-wide rule, so
+    /// every player's board lights up under the same one.
+    public var modifier: SoloModifier
     /// Seconds until a self-starting lobby deals — a random match counting
     /// down once everyone is here. Nil whenever no countdown is running. An
     /// Apple-side addition (the web's snapshot has no such field); optional,
@@ -78,7 +153,8 @@ public struct BattleState: Codable, Equatable {
 
     public init(
         phase: BattlePhase, players: [BattlePlayer], game: Int, winnerId: String?,
-        mode: GameMode = .battle, occupy: OccupyState? = nil, countdown: Int? = nil
+        mode: GameMode = .battle, occupy: OccupyState? = nil, countdown: Int? = nil,
+        boardView: BattleBoardView = .separate, modifier: SoloModifier = .none
     ) {
         self.phase = phase
         self.players = players
@@ -87,11 +163,18 @@ public struct BattleState: Codable, Equatable {
         self.mode = mode
         self.occupy = occupy
         self.countdown = countdown
+        // Occupy has only ever had one layout, and saying so here means
+        // nothing downstream has to ask the mode as well as the setting.
+        self.boardView = mode == .occupy ? .shared : boardView
+        self.modifier = modifier
     }
 
     private enum Key: String, CodingKey {
-        case phase, players, game, winnerId, mode, occupy, countdown
+        case phase, players, game, winnerId, mode, occupy, countdown, boardView, modifier
     }
+
+    /// Whether this room's players are all building on the same squares.
+    public var isSharedBoard: Bool { boardView == .shared }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Key.self)
@@ -102,6 +185,12 @@ public struct BattleState: Codable, Equatable {
         mode = try container.decodeIfPresent(GameMode.self, forKey: .mode) ?? .battle
         occupy = try container.decodeIfPresent(OccupyState.self, forKey: .occupy)
         countdown = try container.decodeIfPresent(Int.self, forKey: .countdown)
+        // Absent means a snapshot from before the setting existed, which was
+        // Battle on separate boards with nothing on them.
+        boardView =
+            try container.decodeIfPresent(BattleBoardView.self, forKey: .boardView)
+            ?? (mode == .occupy ? .shared : .separate)
+        modifier = try container.decodeIfPresent(SoloModifier.self, forKey: .modifier) ?? .none
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -113,6 +202,8 @@ public struct BattleState: Codable, Equatable {
         try container.encode(mode, forKey: .mode)
         try container.encodeIfPresent(occupy, forKey: .occupy)
         try container.encodeIfPresent(countdown, forKey: .countdown)
+        try container.encode(boardView, forKey: .boardView)
+        try container.encode(modifier, forKey: .modifier)
     }
 }
 

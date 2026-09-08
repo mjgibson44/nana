@@ -96,14 +96,47 @@ struct WireProtocolTests {
         #expect(state.players.map(\.id) == ["a"])
     }
 
-    @Test func versionIsTenForOccupysOwnWordsAndItsTimedZones() {
+    @Test func versionIsElevenForBattlesRoomWideSettings() {
         // v5 was the web's; v6 added the host announcement (plan §7.2); v7
         // Occupy; v8 put the countdown in the snapshot; v9 unbounded the
         // Occupy board, made it ten minutes, and put the zones in the
         // snapshot; v10 made every word its own player's and turned a zone
         // into a minute-long contest that pays out at the whistle — a v9
         // zone would decode as a 2× patch that no longer exists, which is
-        // what the gate is for.
-        #expect(PROTOCOL_VERSION == 10)
+        // what the gate is for; v11 gave Battle a board view and a modifier,
+        // and a v10 client would silently play a different game from the
+        // room it is sitting in.
+        #expect(PROTOCOL_VERSION == 11)
+    }
+
+    @Test func aSnapshotFromBeforeTheSettingsDecodesAsARoomWithoutThem() throws {
+        // The compatibility direction that matters within a version: both
+        // fields are absent from anything older, and absent has to mean the
+        // game those rooms were actually playing.
+        let json = "{\"phase\":\"lobby\",\"players\":[],\"game\":0,\"mode\":\"battle\"}"
+        let state = try JSONDecoder().decode(BattleState.self, from: Data(json.utf8))
+        #expect(state.boardView == .separate)
+        #expect(state.modifier == .none)
+        #expect(!state.isSharedBoard)
+    }
+
+    @Test func anOccupySnapshotWithoutABoardViewIsStillShared() throws {
+        // Occupy has only ever had one layout, so a snapshot that predates
+        // the setting must not decode as the layout Occupy cannot play.
+        let json = "{\"phase\":\"lobby\",\"players\":[],\"game\":0,\"mode\":\"occupy\"}"
+        let state = try JSONDecoder().decode(BattleState.self, from: Data(json.utf8))
+        #expect(state.boardView == .shared)
+        #expect(state.isSharedBoard)
+    }
+
+    @Test func theRoomsSettingsSurviveTheWire() throws {
+        let state = BattleState(
+            phase: .playing, players: [], game: 3, winnerId: nil,
+            boardView: .shared, modifier: .gold)
+        let back = try JSONDecoder().decode(
+            BattleState.self, from: JSONEncoder().encode(state))
+        #expect(back.boardView == .shared)
+        #expect(back.modifier == .gold)
+        #expect(back == state)
     }
 }

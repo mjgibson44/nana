@@ -42,13 +42,16 @@ public let PARTY_IDLE_SECONDS: TimeInterval = 20
 public let START_COUNTDOWN_SECONDS = 5
 
 /// Which game a lobby plays, and so which rules its referee enforces:
-/// Battle's survival rules, or Occupy's shared board.
-public enum BattleRules {
+/// Battle's survival rules, or Occupy's territory.
+///
+/// The host's dictionary used to ride in here, on `.occupy`'s associated
+/// value. It doesn't any more: refereeing a word is something the *board*
+/// needs, not the mode, and a shared Battle needs it as much as Occupy does.
+/// It is a `HostSession` parameter now, so there is one source of truth for
+/// it whichever game the room plays.
+public enum BattleRules: Equatable {
     case battle
-    /// `isWord` is the host's dictionary. A host whose dictionary hasn't
-    /// loaded should answer `true` — trusting the client's own check — rather
-    /// than call every word fake.
-    case occupy(isWord: (String) -> Bool)
+    case occupy
 
     public var mode: GameMode {
         switch self {
@@ -57,7 +60,9 @@ public enum BattleRules {
         }
     }
 
-    /// How many seats the lobby has, and how many it needs before it can start.
+    /// How many seats the lobby has, and how many it needs before it can
+    /// start. A shared board is capped tighter than the mode is — see
+    /// `HostSession.maxPlayers`.
     public var minPlayers: Int {
         switch self {
         case .battle: return BATTLE_MIN_PLAYERS
@@ -127,6 +132,22 @@ public final class HostSession {
     private let clock: () -> Date
     /// Which game this lobby plays.
     public let rules: BattleRules
+
+    /// How many seats this room actually has.
+    ///
+    /// A shared board seats four however many the mode would allow: the
+    /// layout starts each player in their own corner (`occupyStartCell`), and
+    /// there are four corners. Eight players on one board would also be eight
+    /// people's words in each other's way, which is a different game from the
+    /// one this setting is offering.
+    public var maxPlayers: Int {
+        state.isSharedBoard ? min(rules.maxPlayers, OCCUPY_MAX_PLAYERS) : rules.maxPlayers
+    }
+
+    public var minPlayers: Int { rules.minPlayers }
+    /// The host's dictionary, consulted only when refereeing a word onto a
+    /// shared board.
+    private let isWord: (String) -> Bool
     /// Occupy's two clocks: when the deal was, and when the last word landed.
     /// The host is the only one whose reading counts.
     private var occupyStartedAt: Date?
@@ -178,7 +199,16 @@ public final class HostSession {
         autoStart: AutoStartRule? = nil,
         graceSeconds: TimeInterval = RECONNECT_GRACE_SECONDS,
         admitsMidGame: Bool = true,
-        rules: BattleRules = .battle
+        rules: BattleRules = .battle,
+        /// The host's dictionary, for refereeing words onto a shared board.
+        /// A host whose dictionary hasn't loaded answers `true` — trusting
+        /// the client's own check — rather than calling every word fake.
+        isWord: @escaping (String) -> Bool = { _ in true },
+        /// The room's opening settings. The host's to pick and everyone's to
+        /// play by, so they seed the snapshot here and change through
+        /// `setBoardView` / `setModifier` while the lobby is still a lobby.
+        boardView: BattleBoardView = .separate,
+        modifier: SoloModifier = .none
     ) {
         self.transport = transport
         self.displayName = displayName
@@ -188,6 +218,7 @@ public final class HostSession {
         self.graceSeconds = graceSeconds
         self.admitsMidGame = admitsMidGame
         self.rules = rules
+        self.isWord = isWord
         state = BattleState(
             phase: .lobby,
             players: [
@@ -198,7 +229,9 @@ public final class HostSession {
             ],
             game: 0,
             winnerId: nil,
-            mode: rules.mode)
+            mode: rules.mode,
+            boardView: boardView,
+            modifier: modifier)
         let now = clock()
         lastPing = now
         lastArrival = now
@@ -291,7 +324,7 @@ public final class HostSession {
         // Seats are capped — eight for a Battle, four for Occupy — and the
         // next hello is turned away.
         let seated = state.players.filter { !$0.left }.count
-        guard seated < rules.maxPlayers else {
+        guard seated < maxPlayers else {
             reject(sender, reason: rules.mode == .occupy ? "That game is full." : "That battle is full.")
             return
         }
@@ -370,7 +403,7 @@ public final class HostSession {
     /// never taken back for the instant between the answer and the board
     /// that agrees with it.
     private func handlePlacement(from sender: PlayerID, serial: Int, placement: OccupyPlacement) {
-        guard case let .occupy(isWord) = rules, state.phase == .playing, var occupy = state.occupy,
+        guard state.isSharedBoard, state.phase == .playing, var occupy = state.occupy,
             let index = state.players.firstIndex(where: { $0.id == sender }),
             !state.players[index].waiting, !state.players[index].left,
             let seat = occupy.seat(of: sender)
@@ -496,6 +529,45 @@ public final class HostSession {
 
     /// Deal a fresh game to everyone present. Anyone disconnected or counted
     /// out is purged first: a new game deals in only who's actually here.
+    /// Change what the room plays by. The host's alone, and only while the
+    /// lobby is still a lobby: a rule that changed mid-game would leave every
+    /// board playing a different one for the length of a broadcast.
+    ///
+    /// Publishing rather than merely storing is what makes the setting a
+    /// room-wide fact — a client that never asks for it still gets it, on the
+    /// snapshot it already reads.
+    public func setBoardView(_ view: BattleBoardView) {
+        // Occupy has one layout and it isn't a choice.
+        guard rules != .occupy, state.phase == .lobby, state.boardView != view else { return }
+        state.boardView = view
+        // A room that just narrowed its seats has to turn the overflow away
+        // rather than deal a board with nowhere to put them.
+        trimToSeats()
+        publish()
+    }
+
+    public func setModifier(_ modifier: SoloModifier) {
+        guard state.phase == .lobby, state.modifier != modifier else { return }
+        state.modifier = modifier
+        publish()
+    }
+
+    /// Turn away anyone past the seat cap, newest first.
+    ///
+    /// Only ever called by `setBoardView`, because it is the only thing that
+    /// can shrink a lobby that people are already sitting in. They are told
+    /// why rather than silently dropped.
+    private func trimToSeats() {
+        while state.players.filter({ !$0.left }).count > maxPlayers {
+            guard let index = state.players.lastIndex(where: { !$0.left && !$0.host }) else {
+                return
+            }
+            let id = state.players[index].id
+            state.players.remove(at: index)
+            reject(id, reason: "That game is full.")
+        }
+    }
+
     public func start() {
         let now = clock()
         let seed = makeSeed()
@@ -515,9 +587,11 @@ public final class HostSession {
         state.winnerId = nil
         countdownEndsAt = nil
         state.countdown = nil
-        if case .occupy = rules {
+        if state.isSharedBoard {
             // Seats are dealt in roster order, so the host is always seat 0
-            // and the second player sits diagonal from it.
+            // and the second player sits diagonal from it. A shared Battle
+            // uses the same carrier as Occupy — one board, one owner map,
+            // one seat order — because that is exactly what it needs.
             let seats = state.players.map(\.id)
             state.occupy = OccupyState(seats: seats)
             occupyStartedAt = now
@@ -646,7 +720,12 @@ public final class HostSession {
         // Occupy's clocks, read by the referee alone: the zones it's time to
         // open, the ones whose minute is up, and the two ways time can end
         // the game.
-        if state.phase == .playing, state.occupy?.end == nil, let startedAt = occupyStartedAt {
+        // Zones, the ten-minute clock and the stall rule are *Occupy's*
+        // scoring, not the shared board's — a shared Battle borrows the board
+        // and keeps its own rounds, attacks and elimination.
+        if rules == .occupy, state.phase == .playing, state.occupy?.end == nil,
+            let startedAt = occupyStartedAt
+        {
             let elapsed = now.timeIntervalSince(startedAt)
             if closeOccupyZones(elapsed: elapsed, at: now) {
                 changed = true
@@ -684,7 +763,7 @@ public final class HostSession {
         if let endsAt = countdownEndsAt {
             // Counting down. A field that shrinks below a battle stops it;
             // nobody is dealt a game against no one.
-            guard seated >= rules.minPlayers else {
+            guard seated >= minPlayers else {
                 countdownEndsAt = nil
                 state.countdown = nil
                 publish()
@@ -706,11 +785,11 @@ public final class HostSession {
         let ready: Bool
         switch autoStart {
         case .duel:
-            ready = seated >= rules.minPlayers
+            ready = seated >= minPlayers
         case .party:
             // The door has been quiet long enough, and there's a game's
             // worth of people behind it — two if a third came and went.
-            ready = seated >= rules.minPlayers
+            ready = seated >= minPlayers
                 && now.timeIntervalSince(lastArrival) >= PARTY_IDLE_SECONDS
         }
         guard ready else { return }

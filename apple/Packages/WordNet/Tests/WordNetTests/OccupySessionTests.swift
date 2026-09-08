@@ -59,7 +59,8 @@ final class OccupyLobby {
             displayName: { "Player \($0)" },
             makeSeed: { "occupy-seed" },
             clock: { [simulated] in simulated.now },
-            rules: .occupy(isWord: { words.contains($0) }))
+            rules: .occupy,
+            isWord: { words.contains($0) })
         host.events.onState = { [weak self] _ in self?.heard["host", default: []].append("state") }
         host.events.onPlaced = { [weak self] serial in
             self?.heard["host", default: []].append("placed:\(serial)")

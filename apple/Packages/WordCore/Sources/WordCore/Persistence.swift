@@ -191,7 +191,28 @@ public struct SoloSetup: Equatable {
 /// What a player who has never set Solo up gets.
 public let DEFAULT_SOLO = SoloSetup(pace: .regular, modifier: .none)
 
+/// A Battle room's settings: how the boards are laid out, and what is on
+/// them.
+///
+/// Both are room-wide rules the host picks and everyone plays by
+/// (`BattleState.boardView`, `BattleState.modifier`), so what is stored here
+/// is only ever *this device's* opening choice as a host — the door remembers
+/// what you set up last, exactly as Solo's does. A client's copy is never
+/// consulted: it plays by the host's snapshot.
+public struct BattleSetup: Equatable {
+    public var boardView: BattleBoardView
+    public var modifier: SoloModifier
+
+    public init(boardView: BattleBoardView = .separate, modifier: SoloModifier = .none) {
+        self.boardView = boardView
+        self.modifier = modifier
+    }
+}
+
+public let DEFAULT_BATTLE = BattleSetup()
+
 private let SOLO_KEY = "nana.setup.solo.v1"
+private let BATTLE_KEY = "nana.setup.battle.v1"
 
 /// Whatever is under `key`, as an object — or an empty one for anything that
 /// isn't readable, isn't JSON, or isn't a plain object to begin with.
@@ -214,6 +235,24 @@ public func loadSoloSetup(from store: KeyValueStore) -> SoloSetup {
     return SoloSetup(
         pace: oneOf(pace, PACE_OPTIONS.map { $0.pace }, DEFAULT_SOLO.pace),
         modifier: oneOf(modifier, MODIFIER_OPTIONS.map { $0.modifier }, DEFAULT_SOLO.modifier)
+    )
+}
+
+public func loadBattleSetup(from store: KeyValueStore) -> BattleSetup {
+    let stored = readSetup(BATTLE_KEY, from: store)
+    let view = (stored["boardView"] as? String).flatMap(BattleBoardView.init(rawValue:))
+    let modifier = (stored["modifier"] as? String).flatMap(SoloModifier.init(rawValue:))
+    return BattleSetup(
+        boardView: oneOf(view, BOARD_VIEW_OPTIONS.map { $0.view }, DEFAULT_BATTLE.boardView),
+        modifier: oneOf(modifier, MODIFIER_OPTIONS.map { $0.modifier }, DEFAULT_BATTLE.modifier)
+    )
+}
+
+public func saveBattleSetup(_ setup: BattleSetup, to store: KeyValueStore) {
+    store.set(
+        BATTLE_KEY,
+        "{\"boardView\":\"\(setup.boardView.rawValue)\","
+            + "\"modifier\":\"\(setup.modifier.rawValue)\"}"
     )
 }
 

@@ -270,7 +270,52 @@ Both the field and the spawn stream's position ride the save blob (`PrizeField.s
 so a game restored across process death comes back to the squares that were lit, with the
 seconds they had left, and goes on lighting the ones it would have lit.
 
+### Battle's room settings
+
+Two rules a room agrees on before it deals, both the host's to pick and everyone's to
+play by. They ride the host's snapshot (`BattleState.boardView`, `BattleState.modifier`,
+protocol v11) rather than each player's own settings, because a room where two people
+are playing different games is not a room — a client's stored setup is never consulted,
+and the lobby shows every player the rule they will actually play under. The host edits
+it in the lobby and only in the lobby: a rule changed mid-game would leave each board on
+a different one for the length of a broadcast.
+
+- **Squares** — the same prize cells Solo's setup sheet offers, applied to every board in
+  the room. On separate boards **the timing is shared and the square is local**, and that
+  needs no wire at all: every player's clock starts at the same deal and counts the same
+  seconds, so a gold square appears on every screen at the same moment and is worth the
+  same to whoever reaches it first. Where it *sits* is necessarily each board's own
+  business, since they are different boards. Gold's points feed `bankedBonus`, which is
+  the score already reported to the room; Salvage clears the pile Battle eliminates you
+  for overflowing. A spectator's board is never lit — they have nothing to claim with.
+- **Board** — `separate` (Battle as it has always played) or `shared`, which is the one
+  idea worth keeping out of Occupy now that its door is closed: everyone building on the
+  same squares, where a rival's word is a wall.
+
+**`shared` is not offered yet** (`BATTLE_SHARED_BOARD_ENABLED`), and the flag is there
+because the referee is ready and the board is not. Everything the *protocol* needs is
+done and tested — the host deals an `OccupyState` for a shared room, seats it four
+(`HostSession.maxPlayers`; the layout starts each player in a corner and there are four
+corners), referees placements against it with `occupyApply`, and keeps Occupy's zones,
+ten-minute clock and stall rule out of it. What is missing is the app half: `GameModel`
+still routes every Battle landing down its own path, which keeps a local board and knows
+nothing about owners, seats or the host's answer.
+
+Finishing it is one deliberate refactor rather than a patch. The model asks
+`mode == .occupy` in about thirty places, and roughly two thirds of those are really
+asking *"is this board shared?"* — whose letters may I cross, where does the opener go,
+which runs are mine — while the rest are really asking *"is this Occupy?"* — tile-value
+scoring, the zone clock, the whistle. Splitting that one question into two is the work,
+plus a commit path that is Occupy's board round trip with Battle's scoring, attacks and
+elimination on top. Shipping the switch before that would deal a room where the host has
+a shared board and every client plays a private one, which is worse than no switch.
+
 ### Occupy
+
+**The door is closed** (`OCCUPY_DOOR_ENABLED`) — the mode is not deleted, and its code,
+protocol and tests all stay live and exercised, because its best idea is being folded
+into Battle as the shared board above rather than kept behind a door of its own. What
+follows describes the mode as built.
 
 The third door: two to four players on **one shared board**, each opening from their own
 corner of the middle ground (two players sit diagonal), fighting over the same squares

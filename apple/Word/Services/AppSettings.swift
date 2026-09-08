@@ -48,6 +48,17 @@ final class AppSettings {
         }
     }
 
+    /// How a Battle this device hosts opens: the board layout and the
+    /// modifier. Only ever read when hosting — a client plays by the host's
+    /// snapshot — so this is the door remembering what you set up last,
+    /// exactly as the Solo pair above does.
+    var battle: BattleSetup {
+        didSet {
+            guard battle != oldValue else { return }
+            saveBattleSetup(battle, to: store)
+        }
+    }
+
     init(store: KeyValueStore = UserDefaultsStore()) {
         self.store = store
         soundEnabled = WordCore.isSoundEnabled(in: store)
@@ -56,6 +67,7 @@ final class AppSettings {
         let setup = loadSoloSetup(from: store)
         pace = setup.pace
         modifier = setup.modifier
+        battle = loadBattleSetup(from: store)
     }
 
     // MARK: Stats (stats.ts)
