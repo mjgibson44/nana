@@ -233,13 +233,21 @@ final class GameModel {
     private(set) var mode: GameMode = .endless
 
     /// What else the board is up to, in Solo. `.none` is the game as it has
-    /// always played; `.wildfire` lights the board (`WordCore/Wildfire.swift`).
-    private(set) var hazard: SoloHazard = .none
-    /// The cells alight and the ground already lost. Empty in every mode but
-    /// Wildfire, so everything below can ask it without asking the hazard.
-    private(set) var fire = Wildfire()
-    /// Fires put out this game, for the summary.
-    private(set) var firesDoused = 0
+    /// always played; the others light prize cells on it
+    /// (`WordCore/Prizes.swift`).
+    private(set) var modifier: SoloModifier = .none
+    /// The gold squares on the board and the clock that puts the next one
+    /// there. Empty in every mode but a modified Solo, so everything below
+    /// can ask it without first asking the modifier.
+    private(set) var prizes = PrizeField()
+    /// Prizes claimed this game, for the summary.
+    private(set) var prizesClaimed = 0
+    /// When the prize clock was last advanced, or nil while it's held. The
+    /// prizes run on wall time rather than on the drip's round boundaries
+    /// (`Prizes.swift` says why), so the tick has to carry its own delta —
+    /// and dropping this on a pause is what stops time behind an overlay
+    /// being charged to a prize's twenty seconds.
+    private var lastPrizeTick: Date?
 
     /// The day's puzzle, when one is being played: the word already down, the
     /// cells to reach, and the par to beat.
@@ -255,13 +263,23 @@ final class GameModel {
     /// can be moved or cleared freely until the ✓.
     private(set) var strokes = 0
 
-    /// Put the board's fire somewhere directly.
+    /// Put gold squares on the board directly.
     ///
-    /// The game never calls this — fire is the round clock's to light and the
-    /// player's to put out. It exists so a test can start from a board that
-    /// would otherwise take several rounds of real play to arrive at.
-    func setFire(_ next: Wildfire) {
-        fire = next
+    /// The game never calls this — prizes are the clock's to light and the
+    /// player's to claim. It exists so a test can start from a board that
+    /// would otherwise take a minute of real play to arrive at.
+    func setPrizes(_ next: PrizeField) {
+        prizes = next
+    }
+
+    /// Put a specific hand in the pile.
+    ///
+    /// The game never calls this either — the pile is the deal's to fill and
+    /// the board's to empty. It exists so a test can reach a state the deal
+    /// would take a whole game to hand out, such as the nearly empty pile
+    /// `claimPrizes` has to clear without taking more tiles than there are.
+    func setPile(_ letters: [String]) {
+        rack = letters
     }
 
     /// Occupy's shared board and seat, while `mode == .occupy`.
@@ -580,18 +598,16 @@ final class GameModel {
     /// end a game.
     var pileCount: Int { rack.count }
 
-    /// How full the pile may get before it buries you. `PILE_LIMIT` in every
-    /// game but a burning one, which gets `WILDFIRE_PILE_RELIEF` more room:
-    /// fire feeds the same pile the clock feeds, and a limit set for one
-    /// source of tiles would make the mode about the gauge rather than the
-    /// fire.
-    var pileLimit: Int { hazardPileLimit(PILE_LIMIT, hazard) }
-
-    /// The gauge's colours move with the limit, so amber and red keep saying
-    /// what they have always said: "one more batch" and "one more batch could
-    /// end this".
-    var pileWarn: Int { PILE_WARN + pileLimit - PILE_LIMIT }
-    var pileUrgent: Int { PILE_URGENT + pileLimit - PILE_LIMIT }
+    /// How full the pile may get before it buries you — the same number in
+    /// every mode that can be lost.
+    ///
+    /// Wildfire needed relief here because it fed the pile from a second
+    /// source. No modifier does that any more: Gold Rush never touches the
+    /// pile, and Salvage only ever takes tiles off it. So the limit is the
+    /// limit, and the gauge means one thing everywhere.
+    var pileLimit: Int { PILE_LIMIT }
+    var pileWarn: Int { PILE_WARN }
+    var pileUrgent: Int { PILE_URGENT }
 
     /// How the day's puzzle stands: which targets are covered, whether it is
     /// finished, and whether every tile went down as well.
@@ -646,12 +662,12 @@ final class GameModel {
 
     func newGame(
         seed: String = randomSeed(), pace: SoloPace = .regular,
-        hazard: SoloHazard = .none, now: Date = .now
+        modifier: SoloModifier = .none, now: Date = .now
     ) {
         self.seed = seed
         mode = .endless
-        self.hazard = hazard
-        fire = Wildfire()
+        self.modifier = modifier
+        prizes = PrizeField()
         day = nil
         dailyDeal = nil
         strokes = 0
@@ -679,8 +695,8 @@ final class GameModel {
         let built = try dailyBoard(seed: deal.seed)
         seed = deal.seed
         mode = .daily
-        hazard = .none
-        fire = Wildfire()
+        modifier = .none
+        prizes = PrizeField()
         day = built
         dailyDeal = deal
         strokes = 0
@@ -701,8 +717,8 @@ final class GameModel {
     ) {
         self.seed = seed
         mode = .battle
-        hazard = .none
-        fire = Wildfire()
+        modifier = .none
+        prizes = PrizeField()
         day = nil
         dailyDeal = nil
         strokes = 0
@@ -998,7 +1014,8 @@ final class GameModel {
         longestWordPlaced = 0
         boardClears = 0
         recoveredFromOverLimit = false
-        firesDoused = 0
+        prizesClaimed = 0
+        lastPrizeTick = nil
     }
 
     func dismissSplash(at now: Date = .now) {
@@ -1025,8 +1042,8 @@ final class GameModel {
         if mode == .occupy { return }
         if let tiles = solo.advance(at: now) {
             dealBonusTiles(tiles, message: "+\(tiles) tile\(tiles == 1 ? "" : "s")")
-            advanceFire()
         }
+        advancePrizes(at: now)
         soundTick(at: now)
     }
 
@@ -1094,30 +1111,29 @@ final class GameModel {
         finishGame(reason: .buried)
     }
 
-    /// One round of fire, on the same expiry that lands the tiles — so the
-    /// mode keeps one pulse rather than two clocks. Everything alight has had
-    /// its round of grace by now, so this is where it costs something: the
-    /// ground scars, a tile beside each fire comes back to the pile, and the
-    /// fire steps on. New fires catch behind it, and get their own round.
+    /// The prize clock, on the UI heartbeat rather than on the drip's expiry.
     ///
-    /// The pile is where the damage lands, so `appendDealtTiles` does the
-    /// rest — including checking whether that was the tile that buried you.
-    /// Burnt tiles sound like a rival's attack, because they mean the same
-    /// thing: tiles arriving in your pile that you did not choose.
-    private func advanceFire() {
-        guard hazard == .wildfire, !isComplete, !board.isEmpty else { return }
-        let round = wildfireAdvance(
-            fire, board: board, ignitions: wildfireIgnitions(dripsElapsed),
-            rng: seededRng("\(seed)/fire/\(dripsElapsed)"))
-        fire = round.fire
-        guard !round.burnt.isEmpty else { return }
-
-        var next = board
-        for key in round.burnt { next[key] = nil }
-        setBoard(next)
-        let count = round.burnt.count
-        appendDealtTiles(round.returned, cue: .attack)
-        rejectToast("Fire took \(count) tile\(count == 1 ? "" : "s")")
+    /// Wildfire could ride the round boundary because it *was* the round; a
+    /// prize has twenty seconds of its own that must not be rounded to the
+    /// nearest fifteen, so this runs every tick and carries the elapsed time
+    /// itself. `prizeAdvance` is pure and takes the delta, which is what lets
+    /// a 4Hz heartbeat and a test stepping a minute at a time agree.
+    ///
+    /// Nothing lands in the pile from here — a prize left alone simply goes.
+    /// Dropping `lastPrizeTick` whenever the clock is held (an overlay, a
+    /// pause, a game not yet resumed) re-anchors the delta on release, so
+    /// time spent behind a card is never charged to a prize's twenty seconds.
+    private func advancePrizes(at now: Date) {
+        guard mode == .endless, modifier.prize != nil, !isComplete, !solo.clockHeld else {
+            lastPrizeTick = nil
+            return
+        }
+        defer { lastPrizeTick = now }
+        guard let last = lastPrizeTick else { return }
+        let round = prizeAdvance(
+            prizes, board: board, delta: now.timeIntervalSince(last),
+            rng: seededRng("\(seed)/prize/\(prizes.spawns)"))
+        prizes = round.field
     }
 
     /// The clear bonus lands before the refill. The view supplies the web's
@@ -1701,14 +1717,6 @@ final class GameModel {
     private func land(plan result: PlacementPlan, picks picksToPlace: [Pick], borrowed: [CellKey])
         -> Bool
     {
-        // Burnt ground takes nothing, ever. Checked here rather than in the
-        // placement planner so every road to a landing — the row, the aim, the
-        // staged tiles — is refused the same way and says the same thing.
-        guard wildfireAllows(fire, cells: result.steps.map(\.key)) else {
-            rejectToast("That ground is burnt out.")
-            return false
-        }
-
         var next = board
         for step in result.steps { next[step.key] = step.letter }
         let placed = result.steps.map(\.key)
@@ -1758,7 +1766,7 @@ final class GameModel {
         rack = rack.enumerated().filter { !spent.contains($0.offset) }.map(\.element)
         clearAim()
         cues?.play(.commit)
-        douseFires(reachedBy: result.steps.map(\.key))
+        claimPrizes(covering: result.steps.map(\.key))
         soundPileAlarm()
         spendStroke()
 
@@ -1803,23 +1811,38 @@ final class GameModel {
         finishGame(reason: .solved)
     }
 
-    /// A word that lands on a burning cell — or beside one — puts it out, and
-    /// scores for it.
+    /// A word that lands a tile on a gold square claims it, for whatever it
+    /// is worth at the moment it lands.
     ///
-    /// Beside it counts on purpose: needing a tile on the exact square would
-    /// mean losing fires to the letters you happened to hold, and a fire
-    /// should cost a decision rather than a coin flip. The bonus is what keeps
-    /// fire an opportunity instead of a tax — answering the board is never a
-    /// pure cost.
-    func douseFires(reachedBy cells: [CellKey]) {
-        guard hazard == .wildfire, !fire.fires.isEmpty else { return }
-        let (next, doused) = wildfireDouse(fire, played: cells)
-        guard !doused.isEmpty else { return }
-        fire = next
-        firesDoused += doused.count
-        let bonus = wildfireDouseBonus(doused.count)
-        bankedBonus += bonus
-        rejectToast(doused.count == 1 ? "Fire out! +\(bonus)" : "\(doused.count) fires out! +\(bonus)")
+    /// Exactly on the square, unlike Wildfire's dousing: a fire had to be
+    /// answerable with the letters you happened to hold or it was a coin
+    /// flip, whereas a prize you stumble onto has asked nothing of you. The
+    /// claim is the point.
+    ///
+    /// Priced here rather than at spawn because that is the entire mechanic —
+    /// `prizeValue` reads the seconds the square has left, so the same square
+    /// pays a hundred to the word that goes straight for it and ten to the
+    /// one that gets round to it.
+    func claimPrizes(covering cells: [CellKey]) {
+        guard let kind = modifier.prize, !prizes.isEmpty else { return }
+        let (next, claimed) = prizeClaim(prizes, covering: cells)
+        guard !claimed.isEmpty else { return }
+        prizes = next
+        prizesClaimed += claimed.count
+        let value = prizeClaimValue(kind, claimed)
+        let many = claimed.count > 1 ? "\(claimed.count) gold! " : "Gold! "
+        switch kind {
+        case .points:
+            bankedBonus += value
+            rejectToast("\(many)+\(value)")
+        case .relief:
+            // Never more than there is: a claim on a nearly empty pile clears
+            // what's there and says so, rather than promising ten and taking
+            // three without explaining itself.
+            let taken = min(value, rack.count)
+            rack.removeLast(taken)
+            rejectToast("\(many)−\(taken) tile\(taken == 1 ? "" : "s") off the pile")
+        }
     }
 
     /// Occupy's landing: the word goes on this screen's board at once and
@@ -1943,11 +1966,6 @@ final class GameModel {
                 endDrag()
                 return
             }
-            guard wildfireAllows(fire, key) else {
-                rejectToast("That ground is burnt out.")
-                endDrag()
-                return
-            }
             self.drag = nil
             staged.append(StagedTile(key: key, rackIndex: drag.rackIndex))
         case .pile:
@@ -2043,8 +2061,8 @@ final class GameModel {
             seed: seed,
             mode: mode.rawValue,
             pace: pace.rawValue,
-            hazard: hazard.rawValue,
-            fire: fire,
+            modifier: modifier.rawValue,
+            prizes: prizes,
             board: board,
             rack: rack,
             phase: phase == .drip ? "drip" : "initial",
@@ -2068,8 +2086,8 @@ final class GameModel {
         }
         seed = saved.seed
         mode = .endless
-        hazard = saved.soloHazard
-        fire = saved.fire
+        modifier = saved.soloModifier
+        prizes = saved.prizes
         day = nil
         dailyDeal = nil
         strokes = 0
@@ -2097,8 +2115,8 @@ final class GameModel {
         guard let deal = saved.deal, let built = try? dailyBoard(seed: deal.seed) else { return }
         seed = deal.seed
         mode = .daily
-        hazard = .none
-        fire = Wildfire()
+        modifier = .none
+        prizes = PrizeField()
         day = built
         dailyDeal = deal
         clearBattle()

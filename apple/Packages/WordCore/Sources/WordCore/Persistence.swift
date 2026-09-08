@@ -171,21 +171,25 @@ private func jsonNumber(_ value: Double) -> String {
 /// Solo's settings: its pace, and what else the board is up to.
 public struct SoloSetup: Equatable {
     public var pace: SoloPace
-    /// New on Apple platforms — the web's Solo has no hazards, so a setup
+    /// New on Apple platforms — the web's Solo has no modifiers, so a setup
     /// written here is no longer byte-identical to the web's. That is fine:
     /// the two stores never meet (UserDefaults on one side, localStorage on
     /// the other), and a web-written setup still reads correctly here because
     /// a missing key falls back to the default, like every other field.
-    public var hazard: SoloHazard
+    ///
+    /// Stored under `modifier`, which is also what retires Wildfire from a
+    /// player's saved setup: a blob still holding `{"hazard":"wildfire"}` has
+    /// no key this reads, so it falls back to `.none` with no migration code.
+    public var modifier: SoloModifier
 
-    public init(pace: SoloPace, hazard: SoloHazard = .none) {
+    public init(pace: SoloPace, modifier: SoloModifier = .none) {
         self.pace = pace
-        self.hazard = hazard
+        self.modifier = modifier
     }
 }
 
 /// What a player who has never set Solo up gets.
-public let DEFAULT_SOLO = SoloSetup(pace: .regular, hazard: .none)
+public let DEFAULT_SOLO = SoloSetup(pace: .regular, modifier: .none)
 
 private let SOLO_KEY = "nana.setup.solo.v1"
 
@@ -206,20 +210,20 @@ private func oneOf<T: Equatable>(_ value: T?, _ allowed: [T], _ fallback: T) -> 
 public func loadSoloSetup(from store: KeyValueStore) -> SoloSetup {
     let stored = readSetup(SOLO_KEY, from: store)
     let pace = (stored["pace"] as? String).flatMap(SoloPace.init(rawValue:))
-    let hazard = (stored["hazard"] as? String).flatMap(SoloHazard.init(rawValue:))
+    let modifier = (stored["modifier"] as? String).flatMap(SoloModifier.init(rawValue:))
     return SoloSetup(
         pace: oneOf(pace, PACE_OPTIONS.map { $0.pace }, DEFAULT_SOLO.pace),
-        hazard: oneOf(hazard, HAZARD_OPTIONS.map { $0.hazard }, DEFAULT_SOLO.hazard)
+        modifier: oneOf(modifier, MODIFIER_OPTIONS.map { $0.modifier }, DEFAULT_SOLO.modifier)
     )
 }
 
 public func saveSoloSetup(_ setup: SoloSetup, to store: KeyValueStore) {
     // Shaped like the web's `JSON.stringify(setup)` — `{"pace":"regular"}` —
-    // with the hazard added, which the web has no notion of. Storage full or
-    // blocked just means the sheet opens on the defaults next time.
+    // with the modifier added, which the web has no notion of. Storage full
+    // or blocked just means the sheet opens on the defaults next time.
     store.set(
         SOLO_KEY,
-        "{\"pace\":\"\(setup.pace.rawValue)\",\"hazard\":\"\(setup.hazard.rawValue)\"}"
+        "{\"pace\":\"\(setup.pace.rawValue)\",\"modifier\":\"\(setup.modifier.rawValue)\"}"
     )
 }
 

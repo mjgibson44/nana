@@ -97,28 +97,38 @@ describe('endlessDripSeconds, fast', () => {
 });
 
 describe('endlessDripTiles, fast', () => {
-  it('deals threes for the first eight rounds', () => {
+  it('deals threes for the first twelve rounds', () => {
     for (let i = 0; i < FAST_BATCH_ROUNDS; i++) {
       expect(endlessDripTiles(i, 'fast')).toBe(FAST_SMALL_BATCH);
       expect(endlessDripTiles(i, 'fast')).toBe(3);
     }
   });
 
-  it('grows the batch by one every eight rounds', () => {
-    // Two minutes at each size: eight fifteen-second rounds.
+  it('grows the batch by one every twelve rounds', () => {
+    // Three minutes at each size: twelve fifteen-second rounds.
     expect(endlessDripTiles(FAST_BATCH_ROUNDS, 'fast')).toBe(4);
     expect(endlessDripTiles(FAST_BATCH_ROUNDS * 2 - 1, 'fast')).toBe(4);
     expect(endlessDripTiles(FAST_BATCH_ROUNDS * 2, 'fast')).toBe(5);
     expect(endlessDripTiles(FAST_BATCH_ROUNDS * 3, 'fast')).toBe(6);
   });
 
-  it('tops out at ten and stays there', () => {
-    // Three grown seven times: round 56 is the first to deal ten.
+  it('tops out at six and stays there', () => {
+    // Three grown three times: round 36 is the first to deal six, which is
+    // nine minutes in — the whole climb, and then the game it settles into.
     const firstMaxRound = FAST_BATCH_ROUNDS * (FAST_MAX_BATCH - FAST_SMALL_BATCH);
-    expect(firstMaxRound).toBe(56);
+    expect(firstMaxRound).toBe(36);
+    expect(firstMaxRound * FAST_DRIP_SECONDS).toBe(540);
     expect(endlessDripTiles(firstMaxRound - 1, 'fast')).toBe(FAST_MAX_BATCH - 1);
     expect(endlessDripTiles(firstMaxRound, 'fast')).toBe(FAST_MAX_BATCH);
     expect(endlessDripTiles(1000, 'fast')).toBe(FAST_MAX_BATCH);
+  });
+
+  it('never deals a batch a hand cannot answer', () => {
+    // Six a round is the ceiling on purpose: ten outran any hand, so a run's
+    // last third was watching rather than playing.
+    for (let i = 0; i <= 1000; i++) {
+      expect(endlessDripTiles(i, 'fast')).toBeLessThanOrEqual(6);
+    }
   });
 
   it('only ever grows', () => {

@@ -420,3 +420,46 @@ guard now enforces that rather than leaving it to arithmetic.
   design's "the daily cannot be failed". Allowing a word to be taken back in
   the Daily alone would fix it, at the cost of the app's one consistent rule
   and some `GameModel` work.
+
+
+---
+
+## Postscript — Wildfire retired, September 2026
+
+*Added 2026-09-08. Everything above about Wildfire is now history; the Daily is
+unaffected and still plays as described.*
+
+Wildfire shipped, was played, and was replaced by **prize cells**
+(`WordCore/Prizes.swift`, and the "Solo modifiers" section of `apple/README.md`).
+Keeping the record of why, because the diagnosis is more reusable than the mode:
+
+**The good idea survived. The sign was wrong.** Fire's real contribution was that Solo's
+board had nowhere to *go* — freedom is what makes the mode calm, and it is also why a
+long run has no shape. Fire fixed that by making one square matter. But it made it matter
+as a punishment, and that turned the feedback loop upside down: playing well produced
+nothing, playing badly closed the board in. So the rational line was to ignore a fire for
+exactly as long as you could afford to, and the mode's most interesting decision was one
+players were incentivised not to engage with. The design above even predicted the shape
+of this — *"being told where to play might read as nagging"* — and then priced the
+douse bonus as the fix. A bonus for answering a threat is still a tax with a discount.
+
+A prize keeps the geometry and inverts the sign. Same "one square matters", same "it is
+on a clock", same "it is near your board so you can reach it" — but claiming it pays, and
+ignoring it costs only what you could have had. Players chase opportunities and resent
+taxes, and that is the whole difference.
+
+**Two mechanics collapsed into one.** Fire needed ignition, spread, scarring, dousing,
+a firebreak rule and a pile relief constant to be the mode it was. A prize needs a spawn
+rule, a clock and a claim; what it *pays* is one enum (`PrizeKind`), which is how Gold
+Rush and Salvage are the same mechanic taught once rather than two modes. Scars went with
+it — dead ground was the one thing on the board that could make a position unwinnable
+through no decision the player made.
+
+**The decay is the mechanic.** Fire's clock only ever answered "have you dealt with this
+yet". A prize's clock sets its price continuously, so the square is not points waiting for
+you — it is a bid to change what you were going to play *right now*, falling while you
+think about it. That is a decision on every tick rather than a deadline on one.
+
+**What it cost.** Prizes cannot ride the drip's round boundary the way fire did, so they
+carry a real clock and the UI heartbeat drives them. That is the one place this design is
+more expensive than the one it replaced, and the reasoning is in `Prizes.swift`.

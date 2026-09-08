@@ -42,9 +42,14 @@ ACTIVITY = {
 
 DAILY_RESET_HOUR_UTC = 8  # keep in step with DailyRules.resetHourUTC
 
+# The two Solo boards carry a `.v2` suffix: a leaderboard's scores cannot be
+# reinterpreted after the rules move, so resetting one means a new identifier.
+# The old `solo.regular` / `solo.fast` boards still exist in App Store Connect
+# and are simply never submitted to again — this script only ever adds, so it
+# leaves them alone. Hide or delete them there by hand.
 LEADERBOARDS = [
-    {"id": "solo.regular", "name": "Solo — Regular", "ref": "Solo Regular"},
-    {"id": "solo.fast", "name": "Solo — Fast", "ref": "Solo Fast"},
+    {"id": "solo.regular.v2", "name": "Solo — Regular", "ref": "Solo Regular v2"},
+    {"id": "solo.fast.v2", "name": "Solo — Fast", "ref": "Solo Fast v2"},
     {
         "id": "daily.deal",
         "name": "Daily Deal",

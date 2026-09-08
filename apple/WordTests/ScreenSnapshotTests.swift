@@ -53,8 +53,11 @@ final class ScreenSnapshotTests: XCTestCase {
         try render(
             SoloSetupScreen(pace: .fast, onPlay: { _, _ in }, onClose: {}), name: "solo-setup-fast")
         try render(
-            SoloSetupScreen(pace: .regular, hazard: .wildfire, onPlay: { _, _ in }, onClose: {}),
-            name: "solo-setup-wildfire")
+            SoloSetupScreen(pace: .regular, modifier: .gold, onPlay: { _, _ in }, onClose: {}),
+            name: "solo-setup-gold")
+        try render(
+            SoloSetupScreen(pace: .regular, modifier: .salvage, onPlay: { _, _ in }, onClose: {}),
+            name: "solo-setup-salvage")
     }
 
     /// The Daily: the word already down, the rings to reach, and the header
@@ -67,21 +70,21 @@ final class ScreenSnapshotTests: XCTestCase {
         try render(GameScreen(model: model), name: "daily")
     }
 
-    /// And a board that has been burning for a few rounds: squares alight,
-    /// ground already lost.
-    func testAWildfireBoardRenders() async throws {
+    /// And a board with gold on it: two squares lit, one worth its full
+    /// price and one nearly out of time, so the picture carries both ends of
+    /// the decay at once.
+    func testAGoldBoardRenders() async throws {
         let model = GameModel()
-        model.newGame(seed: "snapshot", pace: .regular, hazard: .wildfire)
+        model.newGame(seed: "snapshot", pace: .regular, modifier: .gold)
         await model.loadDictionary()
         try TestPlays.placeOpener(on: model)
-        // A square alight above the opener and burnt ground below it, so the
-        // picture carries both of fire's states at once.
         let opener = parseKey(model.board.keys[0])
-        model.setFire(
-            Wildfire(
-                fires: [keyOf(opener.row - 1, opener.col)],
-                scars: [keyOf(opener.row + 1, opener.col)]))
-        try render(GameScreen(model: model), name: "wildfire")
+        model.setPrizes(
+            PrizeField(prizes: [
+                Prize(key: keyOf(opener.row - 1, opener.col), secondsLeft: PRIZE_SECONDS),
+                Prize(key: keyOf(opener.row + 1, opener.col), secondsLeft: 1),
+            ]))
+        try render(GameScreen(model: model), name: "gold")
     }
 
     func testTheGameMenuRenders() throws {

@@ -79,31 +79,42 @@ import Testing
 }
 
 @Suite("Modes: endlessDripTiles, fast") struct ModesEndlessDripTilesFast {
-    @Test("deals threes for the first eight rounds")
-    func dealsThreesForTheFirstEightRounds() {
+    @Test("deals threes for the first twelve rounds")
+    func dealsThreesForTheFirstTwelveRounds() {
         for i in 0..<FAST_BATCH_ROUNDS {
             #expect(endlessDripTiles(i, .fast) == FAST_SMALL_BATCH)
             #expect(endlessDripTiles(i, .fast) == 3)
         }
     }
 
-    @Test("grows the batch by one every eight rounds")
-    func growsTheBatchByOneEveryEightRounds() {
-        // Two minutes at each size: eight fifteen-second rounds.
+    @Test("grows the batch by one every twelve rounds")
+    func growsTheBatchByOneEveryTwelveRounds() {
+        // Three minutes at each size: twelve fifteen-second rounds.
         #expect(endlessDripTiles(FAST_BATCH_ROUNDS, .fast) == 4)
         #expect(endlessDripTiles(FAST_BATCH_ROUNDS * 2 - 1, .fast) == 4)
         #expect(endlessDripTiles(FAST_BATCH_ROUNDS * 2, .fast) == 5)
         #expect(endlessDripTiles(FAST_BATCH_ROUNDS * 3, .fast) == 6)
     }
 
-    @Test("tops out at ten and stays there")
-    func topsOutAtTenAndStaysThere() {
-        // Three grown seven times: round 56 is the first to deal ten.
+    @Test("tops out at six and stays there")
+    func topsOutAtSixAndStaysThere() {
+        // Three grown three times: round 36 is the first to deal six, which is
+        // nine minutes in — the whole climb, and then the game it settles into.
         let firstMaxRound = FAST_BATCH_ROUNDS * (FAST_MAX_BATCH - FAST_SMALL_BATCH)
-        #expect(firstMaxRound == 56)
+        #expect(firstMaxRound == 36)
+        #expect(firstMaxRound * FAST_DRIP_SECONDS == 540)
         #expect(endlessDripTiles(firstMaxRound - 1, .fast) == FAST_MAX_BATCH - 1)
         #expect(endlessDripTiles(firstMaxRound, .fast) == FAST_MAX_BATCH)
         #expect(endlessDripTiles(1000, .fast) == FAST_MAX_BATCH)
+    }
+
+    @Test("never deals a batch a hand cannot answer")
+    func neverDealsABatchAHandCannotAnswer() {
+        // Six a round is the ceiling on purpose: ten outran any hand, so a
+        // run's last third was watching rather than playing.
+        for i in 0...1000 {
+            #expect(endlessDripTiles(i, .fast) <= 6)
+        }
     }
 
     @Test("only ever grows")

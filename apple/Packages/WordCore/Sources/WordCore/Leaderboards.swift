@@ -19,8 +19,26 @@ import Foundation
 /// the bundle have exactly one list to agree on.
 public enum LeaderboardID: String, CaseIterable, Codable, Sendable {
     /// Classic, all-time, best score.
-    case soloRegular = "solo.regular"
-    case soloFast = "solo.fast"
+    ///
+    /// **`.v2` is a deliberate reset, not a typo.** A leaderboard's scores
+    /// cannot be reinterpreted after the fact — they are just integers, with
+    /// no record of the rules that produced them — so when the rules move far
+    /// enough, the only honest fix is a new board. Two changes made these
+    /// two unrankable against their own history:
+    ///
+    ///  - **Fast's curve was recut** (`FAST_MAX_BATCH` 10 → 6,
+    ///    `FAST_BATCH_ROUNDS` 8 → 12). A run under the old ceiling ended
+    ///    sooner and for a different reason.
+    ///  - **Solo's modifiers changed what a game can be worth.** Wildfire is
+    ///    gone and Gold Rush pays up to `GOLD_TOP_POINTS` a claim
+    ///    (`Prizes.swift`), several times what any word pays — and modifiers
+    ///    post to the same board the plain game does, so the ceiling moved
+    ///    for both paces, not just Fast.
+    ///
+    /// The old boards keep their scores in App Store Connect; nothing submits
+    /// to them again. Bump the suffix again the next time either is true.
+    case soloRegular = "solo.regular.v2"
+    case soloFast = "solo.fast.v2"
     /// **Recurring**: 24h duration, 24h restart — Apple's documented
     /// daily-puzzle shape. The occurrence a score belongs to is decided by
     /// when the game *started*, not when it finished (see `DailyResult`).

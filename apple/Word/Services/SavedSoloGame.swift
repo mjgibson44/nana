@@ -16,8 +16,9 @@ struct SavedSoloGame: Codable, Equatable {
     /// Bumped if the shape changes; a stale blob is dropped, never migrated.
     /// v3 dropped the Daily Deal's fields along with the mode; v4 added the
     /// hazard and the fire it lit; v5 brought the Daily back, as the day it
-    /// was and the strokes spent on it.
-    static let version = 5
+    /// was and the strokes spent on it; v6 retired Wildfire and put the
+    /// prize field where the fire was.
+    static let version = 6
     static let key = "nana.solo.save.v1"
 
     var version: Int = Self.version
@@ -26,13 +27,18 @@ struct SavedSoloGame: Codable, Equatable {
     /// otherwise, since Solo is the only thing older blobs held.
     var mode: String = GameMode.endless.rawValue
     var pace: String
-    /// What the board was up to — `SoloHazard`'s raw value. Defaulted so a
+    /// What the board was up to — `SoloModifier`'s raw value. Defaulted so a
     /// blob can still be built by naming only the fields a plain game has.
-    var hazard: String = SoloHazard.none.rawValue
-    /// The cells alight and the ground already lost. Saved rather than
-    /// replayed: a restored game comes back to exactly the board it left,
-    /// burns and all, without having to rewind fire's randomness.
-    var fire: Wildfire = Wildfire()
+    var modifier: String = SoloModifier.none.rawValue
+    /// The gold squares and their clocks. Saved rather than replayed: a
+    /// restored game comes back to exactly the board it left, with the
+    /// seconds each square had left, and without having to rewind the spawn
+    /// randomness — `PrizeField.spawns` is the stream's position.
+    ///
+    /// Seconds left rather than deadlines, for the same reason
+    /// `remainingSeconds` is: a game picked back up tomorrow must not find
+    /// every prize already expired on arrival.
+    var prizes: PrizeField = PrizeField()
     var board: TileMap
     var rack: [String]
     var phase: String
@@ -52,7 +58,7 @@ struct SavedSoloGame: Codable, Equatable {
     var savedAt: Double
 
     var soloPace: SoloPace { SoloPace(rawValue: pace) ?? .regular }
-    var soloHazard: SoloHazard { SoloHazard(rawValue: hazard) ?? .none }
+    var soloModifier: SoloModifier { SoloModifier(rawValue: modifier) ?? .none }
     var gameMode: GameMode { GameMode(rawValue: mode) ?? .endless }
     /// The day this was, rebuilt from its number — everything about a day
     /// follows from that, the seed included.

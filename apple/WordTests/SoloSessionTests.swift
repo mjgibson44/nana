@@ -50,12 +50,15 @@ final class SoloSessionTests: XCTestCase {
         var expiry = start.addingTimeInterval(60)
         XCTAssertEqual(session.advance(at: expiry), 3)
 
-        for elapsed in 1...8 {
+        // Written against the constant rather than a literal: the batch grows
+        // on the round the curve says it does, and the curve is tuned.
+        for elapsed in 1...FAST_BATCH_ROUNDS {
             expiry = expiry.addingTimeInterval(15)
-            XCTAssertEqual(session.advance(at: expiry), elapsed == 8 ? 4 : 3)
+            XCTAssertEqual(
+                session.advance(at: expiry), elapsed == FAST_BATCH_ROUNDS ? 4 : 3)
         }
 
-        XCTAssertEqual(session.dripsElapsed, 8)
+        XCTAssertEqual(session.dripsElapsed, FAST_BATCH_ROUNDS)
         XCTAssertEqual(session.splash, .speedUp(seconds: 15, tiles: 4))
         XCTAssertEqual(session.remaining(at: expiry.addingTimeInterval(100)), 15)
     }

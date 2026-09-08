@@ -36,19 +36,24 @@ struct BoardScene {
     var zones: [OccupyZone] = []
     /// Seconds left on the open zone, drawn on its middle square.
     var zoneSecondsLeft: Int? = nil
-    /// Wildfire: the squares alight. Every one of them burns at the end of
-    /// this round unless a tile lands on it or beside it.
+    /// The gold squares, each with what it is worth at this instant.
     ///
-    /// Cells rather than keys, because the lattice below walks every square on
-    /// screen — 1,100+ at full zoom-out — and asking these sets in cell terms
-    /// keeps that pass free of per-square string building.
-    var fires: Set<Cell> = []
-    /// And the ground fire has already taken. Nothing goes here again.
-    var scars: Set<Cell> = []
+    /// The value is carried rather than recomputed because it changes four
+    /// times a second and the board is the only thing that shows it — and it
+    /// arrives in cell terms because the lattice below walks every square on
+    /// screen (1,100+ at full zoom-out) and must not build a key string per
+    /// square to ask.
+    var prizes: [PrizeMark] = []
     /// The Daily: the squares the crossword has to reach. Drawn under the
     /// tiles rather than instead of them, so a target that has been covered
     /// still shows its ring and the board reads as a scorecard.
     var targets: Set<Cell> = []
+
+    /// One gold square: where it is, and what claiming it right now pays.
+    struct PrizeMark: Equatable {
+        var cell: Cell
+        var value: Int
+    }
 }
 
 /// The board itself: a single Canvas draws the cell lattice (1,100+ cells at
@@ -75,8 +80,10 @@ struct BoardContentView: View {
                     scene.zones.filter(\.isOpen).flatMap(\.cells))
                 let settledCells: Set<Cell> = Set(
                     scene.zones.filter { !$0.isOpen }.flatMap(\.cells))
-                let burning = scene.fires
-                let scarred = scene.scars
+                // Keyed by cell so the lattice pass below is a dictionary
+                // lookup per square rather than a scan of the prize list.
+                let gold = Dictionary(
+                    scene.prizes.map { ($0.cell, $0.value) }, uniquingKeysWith: { first, _ in first })
                 let targets = scene.targets
                 for row in 0..<metrics.rows {
                     for col in 0..<metrics.cols {
@@ -84,18 +91,13 @@ struct BoardContentView: View {
                             x: Double(col) * step, y: Double(row) * step,
                             width: cell, height: cell)
                         let here = Cell(row: bounds.minRow + row, col: bounds.minCol + col)
-                        // Dead ground reads as a hole in the board rather than
-                        // as a square with something on it — the point is that
-                        // nothing can go there. A burning square is the
-                        // brightest empty cell on screen, because it is the one
-                        // asking to be played on before the round ends.
-                        let isScarred = !scarred.isEmpty && scarred.contains(here)
-                        let isBurning = !isScarred && !burning.isEmpty && burning.contains(here)
+                        // A gold square is the brightest empty cell on
+                        // screen, because it is the one asking to be played
+                        // on before its twenty seconds are up.
+                        let worth = gold.isEmpty ? nil : gold[here]
                         let fill: Color
-                        if isScarred {
-                            fill = Palette.scarCell
-                        } else if isBurning {
-                            fill = Palette.fireCell
+                        if worth != nil {
+                            fill = Palette.prizeCell
                         } else if !openCells.isEmpty, openCells.contains(here) {
                             fill = Palette.zoneCell
                         } else if !settledCells.isEmpty, settledCells.contains(here) {
@@ -106,13 +108,22 @@ struct BoardContentView: View {
                         context.fill(
                             Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
                             with: .color(fill))
-                        if isBurning {
+                        if let worth {
                             context.stroke(
                                 Path(
                                     roundedRect: rect, cornerRadius: radius,
                                     style: .continuous),
-                                with: .color(Palette.fireEdge),
+                                with: .color(Palette.prizeEdge),
                                 lineWidth: Self.zoneEdgeWidth(for: cell))
+                            // What it pays *now*, on the square itself. The
+                            // number falling as you watch is the mechanic, so
+                            // showing anything else — a countdown, a static
+                            // price — would be showing the wrong thing.
+                            context.draw(
+                                Text("\(worth)")
+                                    .font(.system(size: cell * 0.36, weight: .bold))
+                                    .foregroundStyle(Palette.prizeEdge),
+                                at: CGPoint(x: rect.midX, y: rect.midY))
                         }
                         if !targets.isEmpty, targets.contains(here) {
                             // A ring rather than a fill: it has to still be

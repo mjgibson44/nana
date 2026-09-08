@@ -137,13 +137,29 @@ export const ENDLESS_BIG_BATCH = 7;
  * minute is fifteen seconds, and the batch is what grows instead. */
 export const FAST_DRIP_SECONDS = 15;
 
-/** The batch the fast pace opens on, and the one it tops out at. */
+/**
+ * The batch the fast pace opens on, and the one it tops out at.
+ *
+ * The ceiling is six. Ten was arithmetic rather than a game: forty tiles a
+ * minute outruns any hand, so every run ended the same way at roughly the
+ * same time, and the last third of it was watching the pile fill rather than
+ * playing. Six is still more than a good player clears comfortably, and it
+ * leaves the ending to the board rather than to the batch size.
+ */
 export const FAST_SMALL_BATCH = 3;
-export const FAST_MAX_BATCH = 10;
+export const FAST_MAX_BATCH = 6;
 
-/** How many fast rounds a batch size lasts before growing by one — eight
- * fifteen-second rounds, so two minutes at each size. */
-export const FAST_BATCH_ROUNDS = 8;
+/**
+ * How many fast rounds a batch size lasts before growing by one — twelve
+ * fifteen-second rounds, so three minutes at each size.
+ *
+ * Stretched from eight along with the lower ceiling: a shorter climb taken at
+ * the old speed would put the game at its hardest inside six minutes and then
+ * leave it there. Three minutes a step means the top of the curve arrives at
+ * nine minutes rather than fourteen — sooner than before, but reached through
+ * four settled plateaus instead of eight blurred ones.
+ */
+export const FAST_BATCH_ROUNDS = 12;
 
 /** How long the opening phase runs at `pace`. */
 export function endlessInitialSeconds(pace: SoloPace): number {
@@ -163,8 +179,8 @@ export function endlessDripSeconds(intervalsElapsed: number, pace: SoloPace): nu
 /**
  * How many tiles the batch landing after `intervalsElapsed` drip intervals
  * brings. Regular: five for each of the first ten rounds, then seven forever.
- * Fast: three to begin with, one more every eight rounds, and no more than
- * ten however long you last.
+ * Fast: three to begin with, one more every twelve rounds, and no more than
+ * six however long you last.
  */
 export function endlessDripTiles(intervalsElapsed: number, pace: SoloPace): number {
   if (pace === 'fast') {

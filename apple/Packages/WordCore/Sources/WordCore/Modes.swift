@@ -30,19 +30,35 @@ public enum GameMode: String, Sendable, Codable {
 ///  - `regular`: two minutes to open, then five-tile rounds of 45 seconds
 ///    tightening to 30, and batches that grow to seven.
 ///  - `fast`: one minute to open, then a 15-second round forever, starting at
-///    three tiles and growing by one every eight rounds up to ten.
+///    three tiles and growing by one every twelve rounds up to six.
 public enum SoloPace: String, CaseIterable, Sendable {
     case regular, fast
 }
 
-/// What else Solo has to contend with, beyond the pile.
+/// What else the board is doing, beyond the pile and the clock.
 ///
 /// New on Apple platforms. `none` is Endless exactly as the web plays it;
-/// `wildfire` is the same game with a board that burns (`Wildfire.swift`).
-/// It rides on the setup sheet beside the pace rather than taking a door of
-/// its own: it is the same mode, leaning on you differently.
-public enum SoloHazard: String, CaseIterable, Sendable {
-    case none, wildfire
+/// the others light prize cells on it (`Prizes.swift`) and differ only in
+/// what claiming one buys. A modifier rides on the setup sheet beside the
+/// pace rather than taking a door of its own: it is the same mode, offering
+/// you something different.
+public enum SoloModifier: String, CaseIterable, Sendable {
+    case none
+    /// Gold cells worth points, most the moment they appear.
+    case gold
+    /// Gold cells worth tiles off your pile, most the moment they appear.
+    case salvage
+
+    /// What claiming one of this modifier's cells buys, or nil when the
+    /// board isn't offering anything. The only thing that differs between
+    /// them, which is why it is one property rather than a branch per site.
+    public var prize: PrizeKind? {
+        switch self {
+        case .none: nil
+        case .gold: .points
+        case .salvage: .relief
+        }
+    }
 }
 
 public struct ModeInfo {
@@ -89,34 +105,59 @@ public let PACE_OPTIONS: [(pace: SoloPace, name: String)] = [
     (pace: .fast, name: "Fast"),
 ]
 
-/// The Hazard setting's tabs. Like the pace, this row is a switch and nothing
-/// more — what fire actually costs you belongs on `WILDFIRE_INFO`, not on a
+/// The Board setting's tabs. Like the pace, this row is a switch and nothing
+/// more — what a modifier actually offers belongs on its own card, not on a
 /// sheet being skimmed on the way past.
-public let HAZARD_OPTIONS: [(hazard: SoloHazard, name: String)] = [
-    (hazard: .none, name: "Clear"),
-    (hazard: .wildfire, name: "Wildfire"),
+///
+/// Names are kept to eight characters because they are set in tiles, and a
+/// row of nine won't fit the narrowest phone.
+public let MODIFIER_OPTIONS: [(modifier: SoloModifier, name: String)] = [
+    (modifier: .none, name: "Clear"),
+    (modifier: .gold, name: "Gold"),
+    (modifier: .salvage, name: "Salvage"),
 ]
 
-/// What the splash cards call each hazard. `none` adds nothing to the pace's
-/// own name — a card reading "Solo · Regular · Clear" would be announcing the
-/// absence of a thing the player has never heard of.
-public let HAZARD_NAMES: [SoloHazard: String] = [
+/// What the splash cards call each modifier. `none` adds nothing to the
+/// pace's own name — a card reading "Solo · Regular · Clear" would be
+/// announcing the absence of a thing the player has never heard of.
+public let MODIFIER_NAMES: [SoloModifier: String] = [
     .none: "",
-    .wildfire: "Wildfire",
+    .gold: "Gold Rush",
+    .salvage: "Salvage",
 ]
 
-/// Wildfire's explainer, raised the first time it's picked on the setup sheet.
-/// It leads with the answer rather than the threat: the first thing to know
-/// about a burning cell is that playing beside it puts it out.
-public let WILDFIRE_INFO = ModeInfo(
-    name: "Wildfire",
-    tagline: "Solo, with a board that burns.",
+/// Gold Rush's explainer, raised the first time it's picked on the setup
+/// sheet. It leads with the decay, because that is the whole mechanic: a
+/// gold cell is not points waiting for you, it is a bid to change what you
+/// were about to play.
+public let GOLD_RUSH_INFO = ModeInfo(
+    name: "Gold Rush",
+    tagline: "Solo, with somewhere worth going.",
     details: [
-        "Cells catch fire — play on or beside one to put it out, and score for it",
-        "Leave one and it takes a tile back to your pile, scars the ground and spreads",
-        "Burnt tiles land back in your pile — and the pile is what buries you",
+        "Gold squares appear near your board and last \(Int(PRIZE_SECONDS)) seconds",
+        "Land a tile on one to claim it — on the square itself, not beside it",
+        "Worth \(GOLD_TOP_POINTS) the moment it appears, less every second you wait",
     ]
 )
+
+/// Salvage's explainer. Same sentence structure as Gold Rush's on purpose:
+/// it is the same mechanic, and the only line that differs is the one saying
+/// what a claim buys.
+public let SALVAGE_INFO = ModeInfo(
+    name: "Salvage",
+    tagline: "Solo, with a way out of a full pile.",
+    details: [
+        "Gold squares appear near your board and last \(Int(PRIZE_SECONDS)) seconds",
+        "Land a tile on one to claim it — on the square itself, not beside it",
+        "Clears \(SALVAGE_TOP_TILES) tiles off your pile at once, fewer the longer you wait",
+    ]
+)
+
+/// Which explainer each modifier raises, if any.
+public let MODIFIER_INFO: [SoloModifier: ModeInfo] = [
+    .gold: GOLD_RUSH_INFO,
+    .salvage: SALVAGE_INFO,
+]
 
 /// Battle's home-screen card. The rules in one breath: permanent words,
 /// attack tiles split across the field, a hard pile limit, and the game runs
@@ -209,12 +250,24 @@ public let ENDLESS_BIG_BATCH = 7
 public let FAST_DRIP_SECONDS = 15
 
 /// The batch the fast pace opens on, and the one it tops out at.
+///
+/// The ceiling is six. Ten was arithmetic rather than a game: forty tiles a
+/// minute outruns any hand, so every run ended the same way at roughly the
+/// same time, and the last third of it was watching the pile fill rather than
+/// playing. Six is still more than a good player clears comfortably, and it
+/// leaves the ending to the board rather than to the batch size.
 public let FAST_SMALL_BATCH = 3
-public let FAST_MAX_BATCH = 10
+public let FAST_MAX_BATCH = 6
 
-/// How many fast rounds a batch size lasts before growing by one — eight
-/// fifteen-second rounds, so two minutes at each size.
-public let FAST_BATCH_ROUNDS = 8
+/// How many fast rounds a batch size lasts before growing by one — twelve
+/// fifteen-second rounds, so three minutes at each size.
+///
+/// Stretched from eight along with the lower ceiling: a shorter climb taken at
+/// the old speed would put the game at its hardest inside six minutes and then
+/// leave it there. Three minutes a step means the top of the curve arrives at
+/// nine minutes rather than fourteen — sooner than before, but reached through
+/// four settled plateaus instead of eight blurred ones.
+public let FAST_BATCH_ROUNDS = 12
 
 /// How long the opening phase runs at `pace`.
 public func endlessInitialSeconds(_ pace: SoloPace) -> Int {
@@ -231,8 +284,8 @@ public func endlessDripSeconds(_ intervalsElapsed: Int, _ pace: SoloPace) -> Int
 
 /// How many tiles the batch landing after `intervalsElapsed` drip intervals
 /// brings. Regular: five for each of the first ten rounds, then seven forever.
-/// Fast: three to begin with, one more every eight rounds, and no more than
-/// ten however long you last.
+/// Fast: three to begin with, one more every twelve rounds, and no more than
+/// six however long you last.
 public func endlessDripTiles(_ intervalsElapsed: Int, _ pace: SoloPace) -> Int {
     if pace == .fast {
         let grown = max(0, intervalsElapsed) / FAST_BATCH_ROUNDS

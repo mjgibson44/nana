@@ -87,7 +87,7 @@ final class GameCenterTests: XCTestCase {
         // silently orphans a board.
         XCTAssertEqual(
             Set(LeaderboardID.allCases.map(\.rawValue)),
-            ["solo.regular", "solo.fast", "daily.deal", "battle.wins"])
+            ["solo.regular.v2", "solo.fast.v2", "daily.deal", "battle.wins"])
     }
 
     func testTheEntitlementsDeclareGameCenterAndICloud() throws {

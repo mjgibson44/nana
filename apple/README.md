@@ -53,8 +53,8 @@ dark UI. The rules, in one breath:
 - **Words are permanent.** Nothing on the board moves, turns, comes back off, or undoes —
   so only real words are allowed down, in Solo as much as in Battle.
 - **The pile is the only pressure.** Reach `PILE_LIMIT` (24) tiles in hand and the game
-  ends on the spot, in either mode — `hazardPileLimit` gives Wildfire a little more room,
-  and the Daily is exempt (see below). The gauge under the header fills toward it in green
+  ends on the spot, in either mode, under every modifier — only the Daily is exempt
+  (see below). The gauge under the header fills toward it in green
   and turns amber at 17 and red at 20; the pile is drawn as three rows of eight whatever it holds,
   so a full pile looks like the end. Solo opens on `SOLO_START_TILES` (16) and Battle on
   `BATTLE_OPENING_TILES` (12) — the app's own numbers, kept apart from
@@ -215,38 +215,60 @@ actually play:
   *held* for a dropped player. A battle plays on around a disconnect rather than pausing,
   so a held seat has to read as held, not gone.
 
-### Wildfire
+### Solo modifiers: prize cells
 
-Solo with a board that fights back — a second row on the setup screen rather than a door
-of its own, because it is the same game leaning on you differently. The rules are pure
-Swift in `WordCore/Wildfire.swift`.
+A second row on the Solo setup screen — **Clear**, **Gold**, **Salvage** — rather than a
+door of its own, because each is the same game offering you something different. The
+rules are pure Swift in `WordCore/Prizes.swift`, and the two live modifiers are one
+mechanic with two payouts (`SoloModifier.prize`), not two mechanics.
 
-Fire rides the drip's own expiry, so a round stays one pulse: the tiles land, the board
-burns, the pile is measured. Everything alight when that happens was lit by the previous
-round, which is the round of grace and needs no bookkeeping to enforce — **every fire you
-can see burns at the end of this round unless you put it out**.
+**These replaced Wildfire**, which is retired. Fire's good idea was that the board should
+give you somewhere to *go* — Solo's freedom is calm, and calm is also why a long run has
+no shape. Its bad idea was that the somewhere was a punishment: play well and nothing
+happened, play badly and the board closed in, so the sensible line was to ignore the fire
+for as long as you could afford to. A prize inverts the sign and keeps the geometry.
 
-- **It catches on empty squares next to tiles already down.** Never in open space: the
-  board has to stay connected, so a fire you cannot build next to is a fire with no
-  legal answer.
-- **Playing on it or beside it puts it out**, and pays `WILDFIRE_DOUSE_BONUS`. Adjacency
-  rather than exact coverage, so a fire costs a decision instead of a coin flip — and
-  the bonus is what keeps it an opportunity rather than a tax.
-- **Left alone, it scars its own square** — dead ground, forever — **takes one of the
-  tiles beside it back to the pile, and spreads.** Fire will not cross a scar, so one
-  that walks into old burnt ground goes out: the places you lost tiles are the places it
-  cannot go later.
-- **There is no health bar.** Burnt tiles land in the pile, and the pile is already the
-  only thing that ends a game, so fire kills through a rule the player knows and its cost
-  is priced in the number they are already watching. Wildfire plays to a limit
-  `WILDFIRE_PILE_RELIEF` higher, amber and red moved up with it, because the pile is
-  under attack from two sides now.
+- **A square lights up every `PRIZE_SPAWN_SECONDS` (15)** on empty ground within
+  `PRIZE_REACH` (2) of a tile already down, never more than `PRIZE_MAX_LIVE` (2) at once.
+  Close enough to reach with one word; far enough that reaching it is a decision about
+  where to build. The first comes sooner (`PRIZE_FIRST_SPAWN_SECONDS`, 8) so a game shows
+  what the modifier does inside the opening phase.
+- **It lives `PRIZE_SECONDS` (20) and then vanishes, costing nothing.** An ignored prize
+  is an opportunity missed, never a punishment — there is no channel for one to hurt you.
+- **Claim it by landing a tile on that exact square.** Exact, not adjacent, and
+  deliberately the opposite of dousing a fire: a punishment had to be answerable with
+  whatever you happened to hold or it was a coin flip, while a reward should be earned by
+  putting a letter where you meant to.
+- **What it pays decays with its own clock** — full price the instant it appears, sliding
+  linearly to a floor as the timer runs out. Linear because the player has to price it at
+  a glance: half the time left is half the prize. This is the whole mechanic. A gold
+  square is not points waiting for you, it is a bid to change what you were about to play
+  *right now*, and the longer you think the less it is worth.
 
-Scarring is proportional to how badly it is going — answer your fires and the board stays
-whole, drown and it closes in — which is both the death spiral and the reason a late
-board looks nothing like an early one. The fire itself rides the save blob, so a game
-picked back up after process death comes back to the squares that were alight and the
-ground already lost.
+| | pays | top | floor |
+|---|---|---|---|
+| **Gold Rush** (`.points`) | points, into the banked bonus | `GOLD_TOP_POINTS` (100) | `GOLD_FLOOR_POINTS` (10) |
+| **Salvage** (`.relief`) | tiles off your pile | `SALVAGE_TOP_TILES` (10) | `SALVAGE_FLOOR_TILES` (1) |
+
+The top price for gold is above what any word pays, on purpose: a square worth less than
+the word already in your hand changes no decisions.
+
+**Prizes run on wall time, not the drip's rounds.** Wildfire could ride the round boundary
+because it *was* the round; twenty seconds rounded to the nearest fifteen would put every
+deadline at an arbitrary point inside a round, with two counters drifting against each
+other on screen. So each square carries its own seconds left and `prizeAdvance` takes the
+elapsed time — which is also why the UI heartbeat drives it (`GameModel.advancePrizes`)
+rather than the drip's expiry. Seconds left rather than deadlines, like the round clock in
+`SavedSoloGame`: a game paused, or picked back up tomorrow, must not find its squares
+expired on arrival, and time behind a card is never charged to a prize.
+
+**The pile is the pile again.** Wildfire needed `WILDFIRE_PILE_RELIEF` because it fed the
+gauge from a second source; nothing does now — gold never touches the pile and salvage
+only ever takes off it — so `PILE_LIMIT` and its amber and red mean one thing everywhere.
+
+Both the field and the spawn stream's position ride the save blob (`PrizeField.spawns`),
+so a game restored across process death comes back to the squares that were lit, with the
+seconds they had left, and goes on lighting the ones it would have lit.
 
 ### Occupy
 

@@ -54,7 +54,7 @@
 /// The knobs the shape of the puzzle depends on. Measured rather than guessed:
 /// each was chosen by running this construction over 500 seeds against the
 /// canonical TypeScript generator and looking at what came out (see
-/// `docs/daily-and-wildfire.md`).
+/// `docs/daily-and-modifiers.md`).
 public enum DailyBoardRules {
     /// Tiles in the day's crossword, the seed word included — so the player is
     /// dealt this many less the length of the word already down, which lands

@@ -5,7 +5,7 @@ and an argument for how to pick from it.*
 
 > **Update (2026-09-06):** the Daily takes **seed word + target cells + commit
 > scoring**, and **Wildfire** becomes a Solo variant rather than a daily rule.
-> Both are designed in `daily-and-wildfire.md`; what follows is the record of
+> Both are designed in `daily-and-modifiers.md`; what follows is the record of
 > the options considered, including the ones parked.
 
 ## Where things stand

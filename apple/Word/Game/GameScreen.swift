@@ -20,7 +20,7 @@ struct GameScreen: View {
     /// Out: home from a solo game, out of the battle from a battle.
     var onLeave: () -> Void = {}
     /// Deal a fresh solo game. The router owns it so the pace gets remembered.
-    var onNewGame: ((SoloPace, SoloHazard) -> Void)?
+    var onNewGame: ((SoloPace, SoloModifier) -> Void)?
 
     @State private var camera = BoardCamera()
     @State private var machine = GestureMachine()
@@ -369,7 +369,7 @@ struct GameScreen: View {
             items.append(
                 GameMenuView.Item(title: "NEW GAME") {
                     closeMenu()
-                    startNewGame(pace: model.pace, hazard: model.hazard)
+                    startNewGame(pace: model.pace, modifier: model.modifier)
                 })
             items.append(
                 GameMenuView.Item(title: "HOME") {
@@ -475,8 +475,11 @@ struct GameScreen: View {
             viewerSeat: model.occupySeat,
             zones: model.occupyZones,
             zoneSecondsLeft: zoneStatus?.secondsLeft,
-            fires: Set(model.fire.fires.map(parseKey)),
-            scars: Set(model.fire.scars.map(parseKey)),
+            prizes: model.prizes.prizes.map {
+                BoardScene.PrizeMark(
+                    cell: parseKey($0.key),
+                    value: prizeValue(model.modifier.prize ?? .points, $0))
+            },
             targets: Set(model.day?.targets.map(parseKey) ?? []))
     }
 
@@ -703,7 +706,7 @@ struct GameScreen: View {
         // One go a day, so there is nothing to play again — offering it would
         // be offering something the door would then refuse.
         if model.isDaily { return nil }
-        return { startNewGame(pace: model.pace, hazard: model.hazard) }
+        return { startNewGame(pace: model.pace, modifier: model.modifier) }
     }
 
     private var endNote: String? {
@@ -801,15 +804,15 @@ struct GameScreen: View {
     }
 
     /// Again — the same game, not merely the same speed. A player who chose
-    /// to play under fire and pressed "play again" meant fire too.
-    private func startNewGame(pace: SoloPace, hazard: SoloHazard) {
+    /// to play for gold and pressed "play again" meant gold too.
+    private func startNewGame(pace: SoloPace, modifier: SoloModifier) {
         let now = Date.now
         clockNow = now
         settleGestures()
         if let onNewGame {
-            onNewGame(pace, hazard)
+            onNewGame(pace, modifier)
         } else {
-            model.newGame(pace: pace, hazard: hazard, now: now)
+            model.newGame(pace: pace, modifier: modifier, now: now)
         }
     }
 }

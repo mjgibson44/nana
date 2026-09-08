@@ -32,10 +32,21 @@ struct LeaderboardBoardTests {
 
     @Test("ids are stable — the GameKit bundle is matched on these strings")
     func idsAreStable() {
-        #expect(LeaderboardID.soloRegular.rawValue == "solo.regular")
-        #expect(LeaderboardID.soloFast.rawValue == "solo.fast")
+        #expect(LeaderboardID.soloRegular.rawValue == "solo.regular.v2")
+        #expect(LeaderboardID.soloFast.rawValue == "solo.fast.v2")
         #expect(LeaderboardID.daily.rawValue == "daily.deal")
         #expect(LeaderboardID.battleWins.rawValue == "battle.wins")
+    }
+
+    @Test("the reset Solo boards are not the retired ones")
+    func theResetSoloBoardsAreNotTheRetiredOnes() {
+        // Resetting a board means a new identifier — scores are bare integers
+        // with no record of the rules that made them, so the old boards have
+        // to be left where they are rather than reinterpreted. Submitting to
+        // `solo.fast` again would file post-change runs against pre-change
+        // ones, which is the bug this suffix exists to prevent.
+        let retired: Set<String> = ["solo.regular", "solo.fast"]
+        #expect(Set(LeaderboardID.allCases.map(\.rawValue)).isDisjoint(with: retired))
     }
 }
 

@@ -52,22 +52,48 @@ private final class BlockedStore: KeyValueStore {
         #expect(loadSoloSetup(from: store).pace == .regular)
     }
 
-    @Test("writes the web's shape, with the hazard the web has no notion of")
-    func writesTheWebsShapePlusTheHazard() {
+    @Test("writes the web's shape, with the modifier the web has no notion of")
+    func writesTheWebsShapePlusTheModifier() {
         let store = MemoryStore()
-        saveSoloSetup(SoloSetup(pace: .fast), to: store)
+        saveSoloSetup(SoloSetup(pace: .fast, modifier: .gold), to: store)
         #expect(
-            store.values["nana.setup.solo.v1"] == "{\"pace\":\"fast\",\"hazard\":\"none\"}")
+            store.values["nana.setup.solo.v1"] == "{\"pace\":\"fast\",\"modifier\":\"gold\"}")
     }
 
-    @Test("a setup the web wrote still reads, hazard and all")
+    @Test("a setup the web wrote still reads, modifier and all")
     func aWebWrittenSetupStillReads() {
         // The one direction that has to keep working: the web knows nothing
-        // about hazards, and a key that isn't there falls back to the
+        // about modifiers, and a key that isn't there falls back to the
         // default, like every other field.
         let store = MemoryStore()
         store.set("nana.setup.solo.v1", "{\"pace\":\"fast\"}")
-        #expect(loadSoloSetup(from: store) == SoloSetup(pace: .fast, hazard: .none))
+        #expect(loadSoloSetup(from: store) == SoloSetup(pace: .fast, modifier: .none))
+    }
+
+    @Test("a setup still naming Wildfire opens on a clear board")
+    func aWildfireSetupOpensClear() {
+        // Retiring a modifier is a rename of the key it was stored under, so
+        // the blob a Wildfire player left behind needs no migration: nothing
+        // reads `hazard` any more, and the pace they chose still survives.
+        let store = MemoryStore()
+        store.set("nana.setup.solo.v1", "{\"pace\":\"fast\",\"hazard\":\"wildfire\"}")
+        #expect(loadSoloSetup(from: store) == SoloSetup(pace: .fast, modifier: .none))
+    }
+
+    @Test("a modifier that no longer exists reads as none")
+    func anUnknownModifierReadsAsNone() {
+        let store = MemoryStore()
+        store.set("nana.setup.solo.v1", "{\"pace\":\"regular\",\"modifier\":\"meteors\"}")
+        #expect(loadSoloSetup(from: store).modifier == .none)
+    }
+
+    @Test("every modifier survives the round trip")
+    func everyModifierRoundTrips() {
+        for modifier in SoloModifier.allCases {
+            let store = MemoryStore()
+            saveSoloSetup(SoloSetup(pace: .regular, modifier: modifier), to: store)
+            #expect(loadSoloSetup(from: store).modifier == modifier)
+        }
     }
 }
 

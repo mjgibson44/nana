@@ -71,15 +71,14 @@ enum Palette {
     /// live one is the one that draws the eye.
     static let zoneCellSettled = Color(hex: 0x282828)
 
-    /// Wildfire. A burning square is the brightest empty cell on the board —
-    /// it is the one asking to be played on before the round ends — and takes
-    /// the same warm amber the pile gauge warns in, so the two kinds of
-    /// trouble read as one family.
-    static let fireCell = Color(hex: 0x6E3B05)
-    static let fireEdge = Color(hex: 0xE39A2B)
-    /// Dead ground: darker than the board itself, so it reads as a hole in it
-    /// rather than as a square with something on it.
-    static let scarCell = Color(hex: 0x0D0B0A)
+    /// A prize square (`WordCore/Prizes.swift`). The brightest empty cell on
+    /// the board — it is the one asking to be played on before its twenty
+    /// seconds are up — and gold rather than the pile gauge's amber, because
+    /// this is the one thing on the board that is *good* news. The edge
+    /// carries the number as well as the outline, so it is set bright enough
+    /// to read at a digit's size.
+    static let prizeCell = Color(hex: 0x5C4708)
+    static let prizeEdge = Color(hex: 0xF2C94C)
 
     /// The Daily's targets. The board's own accent, because reaching one is
     /// the good thing that can happen here — the opposite of a fire.

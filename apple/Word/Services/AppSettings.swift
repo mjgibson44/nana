@@ -34,17 +34,17 @@ final class AppSettings {
     var pace: SoloPace {
         didSet {
             guard pace != oldValue else { return }
-            saveSoloSetup(SoloSetup(pace: pace, hazard: hazard), to: store)
+            saveSoloSetup(SoloSetup(pace: pace, modifier: modifier), to: store)
         }
     }
 
     /// And what the board is up to. Kept beside the pace and written with it,
     /// so the setup screen opens on the whole of the last game rather than
     /// half of it.
-    var hazard: SoloHazard {
+    var modifier: SoloModifier {
         didSet {
-            guard hazard != oldValue else { return }
-            saveSoloSetup(SoloSetup(pace: pace, hazard: hazard), to: store)
+            guard modifier != oldValue else { return }
+            saveSoloSetup(SoloSetup(pace: pace, modifier: modifier), to: store)
         }
     }
 
@@ -55,7 +55,7 @@ final class AppSettings {
         hapticsEnabled = store.get(Self.hapticsKey) != "off"
         let setup = loadSoloSetup(from: store)
         pace = setup.pace
-        hazard = setup.hazard
+        modifier = setup.modifier
     }
 
     // MARK: Stats (stats.ts)

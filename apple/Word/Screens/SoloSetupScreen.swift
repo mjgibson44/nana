@@ -10,22 +10,22 @@ import WordCore
 /// is a game, and the screen opens on whatever was played last so playing the
 /// same thing again stays one tap.
 ///
-/// Wildfire sits here rather than behind a door of its own because it is the
-/// same game leaning on you differently — same board, same pile, same way of
-/// building a word — and a second door would say otherwise.
+/// The modifiers sit here rather than behind doors of their own because each
+/// is the same game offering you something different — same board, same pile,
+/// same way of building a word — and a second door would say otherwise.
 struct SoloSetupScreen: View {
     /// The pace the last Solo game was played at.
     var pace: SoloPace
     /// And what the board was up to.
-    var hazard: SoloHazard = .none
-    var onPlay: (SoloPace, SoloHazard) -> Void
+    var modifier: SoloModifier = .none
+    var onPlay: (SoloPace, SoloModifier) -> Void
     var onClose: () -> Void
 
     @State private var chosen: SoloPace?
-    @State private var chosenHazard: SoloHazard?
+    @State private var chosenModifier: SoloModifier?
 
     private var selected: SoloPace { chosen ?? pace }
-    private var selectedHazard: SoloHazard { chosenHazard ?? hazard }
+    private var selectedModifier: SoloModifier { chosenModifier ?? modifier }
 
     var body: some View {
         ScreenColumn {
@@ -61,19 +61,19 @@ struct SoloSetupScreen: View {
                     .accessibilityAddTraits(.isHeader)
                     .padding(.bottom, Spacing.tileGap)
 
-                ForEach(HAZARD_OPTIONS, id: \.hazard) { option in
-                    let isSelected = selectedHazard == option.hazard
+                ForEach(MODIFIER_OPTIONS, id: \.modifier) { option in
+                    let isSelected = selectedModifier == option.modifier
                     TileWordButton(
                         text: option.name.uppercased(),
                         style: isSelected ? .accent : .dim
                     ) {
-                        chosenHazard = option.hazard
+                        chosenModifier = option.modifier
                     }
                     .accessibilityLabel(option.name)
                     .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
                 }
 
-                Text(hazardNote)
+                Text(modifierNote)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Palette.inkSoft)
                     .multilineTextAlignment(.center)
@@ -81,7 +81,7 @@ struct SoloSetupScreen: View {
                     .padding(.vertical, Spacing.tileGap)
 
                 TileWordButton(text: "PLAY", style: .accentButton) {
-                    onPlay(selected, selectedHazard)
+                    onPlay(selected, selectedModifier)
                 }
                 TileWordButton(text: "BACK", action: onClose)
                     .padding(.top, Spacing.tileGap)
@@ -101,21 +101,27 @@ struct SoloSetupScreen: View {
             + "then +\(tiles) every \(seconds)."
     }
 
-    /// What fire costs, in the one sentence that matters: it burns on a clock
-    /// you already know, and playing near it is the answer. The rest is on
-    /// `WILDFIRE_INFO`.
-    private var hazardNote: String {
-        switch selectedHazard {
+    /// What a modifier offers, in the one sentence that matters — which for
+    /// both of them is the decay, because that is what makes a gold square a
+    /// decision rather than a chore. The rest is on `MODIFIER_INFO`.
+    private var modifierNote: String {
+        let life = Int(PRIZE_SECONDS)
+        switch selectedModifier {
         case .none:
-            "Nothing but the pile and the clock."
-        case .wildfire:
-            "Squares catch fire. Play on or beside one to put it out — "
-                + "leave it and it takes a tile back and spreads."
+            return "Nothing but the pile and the clock."
+        case .gold:
+            return "Gold squares appear near your board for \(life)s. "
+                + "Land a tile on one for \(GOLD_TOP_POINTS) points — "
+                + "less every second you leave it."
+        case .salvage:
+            return "Gold squares appear near your board for \(life)s. "
+                + "Land a tile on one to clear \(SALVAGE_TOP_TILES) tiles off your pile — "
+                + "fewer every second you leave it."
         }
     }
 }
 
 #Preview {
-    SoloSetupScreen(pace: .regular, hazard: .none, onPlay: { _, _ in }, onClose: {})
+    SoloSetupScreen(pace: .regular, modifier: .none, onPlay: { _, _ in }, onClose: {})
         .preferredColorScheme(.dark)
 }
