@@ -585,6 +585,14 @@ rather than a designed mark. Fine for TestFlight, worth replacing before the App
 
 ### What's left, and what it's waiting on
 
+- **Battle's shared board is half built** — the referee, not the board. See "Battle's
+  room settings" above for exactly what is done and what the remaining refactor is; the
+  switch is off (`BATTLE_SHARED_BOARD_ENABLED`) until the app half lands. This one needs
+  no devices, only the work.
+- **Two numbers want a playtest, not a decision.** `PRIZE_REACH` (how far from your board
+  a prize may land — the likeliest thing on `Prizes.swift` to be wrong) and
+  `SALVAGE_TOP_TILES` in a Battle, where ten tiles is most of an opening hand, so an early
+  claim is capped by the pile and a late one is not.
 - **Phase 3 needs exercising, not writing.** The app signs with Game Center and iCloud KVS
   entitlements in the binary (verified: `codesign -d --entitlements`), but *none of the
   runtime behavior has been seen work* — the sign-in sheet, a score landing on a real
