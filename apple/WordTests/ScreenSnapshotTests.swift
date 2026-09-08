@@ -49,7 +49,9 @@ final class ScreenSnapshotTests: XCTestCase {
 
     func testSoloSetupRenders() throws {
         try render(
-            SoloSetupScreen(pace: .regular, onPlay: { _, _ in }, onClose: {}), name: "solo-setup")
+            SoloSetupScreen(
+                pace: .regular, hasSavedGame: true, onResume: {}, onPlay: { _, _ in },
+                onClose: {}), name: "solo-setup")
         try render(
             SoloSetupScreen(pace: .fast, onPlay: { _, _ in }, onClose: {}), name: "solo-setup-fast")
         try render(
@@ -97,10 +99,10 @@ final class ScreenSnapshotTests: XCTestCase {
 
     func testHomeScreenRenders() throws {
         try render(
-            HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {}, onOccupy: {}),
+            HomeScreen(dailyStreak: 4, onSolo: {}, onBattle: {}, onOccupy: {}),
             name: "home")
         try render(
-            HomeScreen(hasSavedGame: false, onResume: {}, onSolo: {}, onBattle: {}, onOccupy: {}),
+            HomeScreen(onSolo: {}, onBattle: {}, onOccupy: {}),
             name: "home-fresh")
     }
 

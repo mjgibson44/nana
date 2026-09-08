@@ -90,6 +90,22 @@ struct TileWord: View {
     }
 }
 
+/// A screen's own name, spelled a size up from the rows under it — TIMETILES
+/// over the doors, SOLO over the questions, MENU over the items. A long title
+/// on a narrow phone drops back to the ordinary tile size rather than running
+/// off the edge.
+struct TileTitle: View {
+    var text: String
+    var style: TileStyle = .accent
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            TileWord(text: text, style: style, size: Spacing.titleTile)
+            TileWord(text: text, style: style, size: Spacing.tile)
+        }
+    }
+}
+
 /// A word in tiles that does something when pressed. The whole row is the
 /// target, blanks included.
 struct TileWordButton: View {
@@ -179,14 +195,16 @@ struct ScreenColumn<Content: View>: View {
     }
 }
 
-/// A block of tile rows on the results and lobby screens: each row starts at
-/// the same left edge, and the block as a whole is centred on the screen —
-/// the layout every mockup shares.
+/// A block of tile rows on the results, menu and overlay screens: every row
+/// centred on the same middle line, and the block as a whole centred on the
+/// screen. Rows are different lengths — GAME END over a two-digit score over
+/// SEE GAME — and a shared left edge left the short ones looking dropped to
+/// one side of a screen with nothing else on it.
 struct TileBlock<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.tileGap) {
+        VStack(spacing: Spacing.tileGap) {
             content
         }
         .fixedSize(horizontal: true, vertical: false)
