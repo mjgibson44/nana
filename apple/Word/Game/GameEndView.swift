@@ -122,25 +122,32 @@ struct GameEndView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// The centred block every mockup shares: rows starting at one left edge.
+    /// The headline block: the score, and the ways off this screen, each row
+    /// centred under the last.
     private var block: some View {
         TileBlock {
-            TileWord(text: "GAME END", style: .accent)
+            TileTitle(text: "GAME END")
 
-            if let placing {
-                BigTile(text: placing)
-                    .accessibilityLabel("You finished \(placing)")
-            } else {
-                let digits = String(score).map(String.init)
-                let unit = digits.count > 5 ? Spacing.tile * 0.6 : Spacing.tile
-                HStack(spacing: Spacing.tileGap) {
-                    ForEach(Array(digits.enumerated()), id: \.offset) { _, digit in
-                        BigTile(text: digit, unit: unit)
+            // The number is the headline, so it gets a section's air under it
+            // rather than sitting a tile-gap off the buttons that leave the
+            // screen.
+            Group {
+                if let placing {
+                    BigTile(text: placing)
+                        .accessibilityLabel("You finished \(placing)")
+                } else {
+                    let digits = String(score).map(String.init)
+                    let unit = digits.count > 5 ? Spacing.tile * 0.6 : Spacing.tile
+                    HStack(spacing: Spacing.tileGap) {
+                        ForEach(Array(digits.enumerated()), id: \.offset) { _, digit in
+                            BigTile(text: digit, unit: unit)
+                        }
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Final score \(score)")
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Final score \(score)")
             }
+            .padding(.bottom, Spacing.section - Spacing.tileGap)
 
             if let restart {
                 TileWordButton(text: "RESTART", action: restart)

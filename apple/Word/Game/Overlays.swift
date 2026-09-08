@@ -20,7 +20,7 @@ struct SplashView: View {
             VStack(spacing: Spacing.gap) {
                 TileBlock {
                     ForEach(Array(title.split(separator: " ").enumerated()), id: \.offset) { _, word in
-                        TileWord(text: String(word), style: .accent)
+                        TileTitle(text: String(word))
                     }
                 }
                 Text(note)
@@ -74,7 +74,8 @@ struct PauseView: View {
         ScreenColumn {
             Spacer()
             TileBlock {
-                TileWord(text: "PAUSED", style: .accent)
+                TileTitle(text: "PAUSED")
+                    .padding(.bottom, Spacing.section - Spacing.tileGap)
                 TileWordButton(text: "RESUME", action: onResume)
                     .focused($resumeFocused)
                     .keyboardShortcut(.cancelAction)
@@ -113,16 +114,16 @@ struct GameMenuView: View {
                 .onTapGesture(perform: onClose)
                 .accessibilityHidden(true)
             TileBlock {
-                TileWord(text: "MENU", style: .accent)
+                TileTitle(text: "MENU")
                     .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, Spacing.tileGap)
+                    .padding(.bottom, Spacing.section - Spacing.tileGap)
                 ForEach(items) { item in
                     TileWordButton(
                         text: item.title, style: item.accent ? .accentButton : .plain,
                         action: item.action)
                 }
                 TileWordButton(text: "CLOSE", action: onClose)
-                    .padding(.top, Spacing.tileGap)
+                    .padding(.top, Spacing.section - Spacing.tileGap)
                     .keyboardShortcut(.cancelAction)
             }
             .padding(Spacing.margin)

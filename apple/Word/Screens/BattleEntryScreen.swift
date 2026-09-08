@@ -34,7 +34,7 @@ struct BattleEntryScreen: View {
         ScreenColumn {
             Spacer()
             VStack(spacing: Spacing.tileGap) {
-                TileWord(text: mode == .occupy ? "OCCUPY" : "BATTLE", style: .accent)
+                TileTitle(text: mode == .occupy ? "OCCUPY" : "BATTLE")
                     .accessibilityAddTraits(.isHeader)
                     .padding(.bottom, Spacing.tileGap)
 
@@ -49,7 +49,7 @@ struct BattleEntryScreen: View {
                         .accessibilityLabel("Finding a \(searching.rawValue)")
                     note(searchStatus ?? "Finding players…")
                     TileWordButton(text: "CANCEL", action: onCancelSearch)
-                        .padding(.top, Spacing.tileGap)
+                        .padding(.top, Spacing.section)
                 } else if let partyCode {
                     // The code, spelled out like everything else: read it out,
                     // or share the link from the Games app.
@@ -59,13 +59,14 @@ struct BattleEntryScreen: View {
                     note("Read this out, or share the link from the Games app.")
                 } else {
                     note("Play strangers")
+                        .padding(.top, Spacing.section)
                     TileWordButton(text: RandomMatchKind.duel.word, action: onDuel)
                         .disabled(isBusy)
                     TileWordButton(text: RandomMatchKind.party.word, action: onParty)
                         .disabled(isBusy)
 
                     note("Play friends")
-                        .padding(.top, Spacing.tileGap)
+                        .padding(.top, Spacing.section)
                     if supportsPartyCodes {
                         TileWordButton(text: "HOST", action: onHost)
                             .disabled(isBusy)
@@ -110,7 +111,7 @@ struct BattleEntryScreen: View {
 
                 if searching == nil {
                     TileWordButton(text: "BACK", action: onClose)
-                        .padding(.top, Spacing.tileGap)
+                        .padding(.top, Spacing.section)
                 }
             }
             Spacer()

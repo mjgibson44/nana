@@ -13,11 +13,20 @@ import WordCore
 /// The modifiers sit here rather than behind doors of their own because each
 /// is the same game offering you something different — same board, same pile,
 /// same way of building a word — and a second door would say otherwise.
+///
+/// A Solo game the OS took away mid-run is picked back up here too, beside
+/// PLAY: the two are the same either/or — carry on, or throw that game away
+/// for one dealt on the settings above — and putting them a row apart is what
+/// makes that choice legible.
 struct SoloSetupScreen: View {
     /// The pace the last Solo game was played at.
     var pace: SoloPace
     /// And what the board was up to.
     var modifier: SoloModifier = .none
+    /// Whether there's a Solo game left half-played. A saved *Daily* isn't
+    /// one of these — that day is picked back up behind the DAILY door.
+    var hasSavedGame: Bool = false
+    var onResume: () -> Void = {}
     var onPlay: (SoloPace, SoloModifier) -> Void
     var onClose: () -> Void
 
@@ -30,61 +39,52 @@ struct SoloSetupScreen: View {
     var body: some View {
         ScreenColumn {
             Spacer()
-            // Centred rows with a centred note, like the other doors
-            // (`BattleEntryScreen`) rather than the left-edged blocks the
-            // results screen uses.
-            VStack(spacing: Spacing.tileGap) {
-                TileWord(text: "SPEED", style: .accent)
+            // One settled block per question, a section gap apart. The title
+            // says which game this is; the two questions are labelled in
+            // plain type under it, because a word set in tiles is something
+            // you press.
+            VStack(spacing: Spacing.section) {
+                TileTitle(text: "SOLO")
                     .accessibilityAddTraits(.isHeader)
                     .padding(.bottom, Spacing.tileGap)
 
-                ForEach(PACE_OPTIONS, id: \.pace) { option in
-                    let isSelected = selected == option.pace
-                    TileWordButton(
-                        text: option.name.uppercased(),
-                        style: isSelected ? .accent : .dim
-                    ) {
-                        chosen = option.pace
+                section("Speed", note: paceNote) {
+                    ForEach(PACE_OPTIONS, id: \.pace) { option in
+                        let isSelected = selected == option.pace
+                        TileWordButton(
+                            text: option.name.uppercased(),
+                            style: isSelected ? .accent : .dim
+                        ) {
+                            chosen = option.pace
+                        }
+                        .accessibilityLabel(option.name)
+                        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
                     }
-                    .accessibilityLabel(option.name)
-                    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
                 }
 
-                Text(note)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.inkSoft)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-                    .padding(.vertical, Spacing.tileGap)
-
-                TileWord(text: "BOARD", style: .accent)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, Spacing.tileGap)
-
-                ForEach(MODIFIER_OPTIONS, id: \.modifier) { option in
-                    let isSelected = selectedModifier == option.modifier
-                    TileWordButton(
-                        text: option.name.uppercased(),
-                        style: isSelected ? .accent : .dim
-                    ) {
-                        chosenModifier = option.modifier
+                section("Board", note: modifierNote) {
+                    ForEach(MODIFIER_OPTIONS, id: \.modifier) { option in
+                        let isSelected = selectedModifier == option.modifier
+                        TileWordButton(
+                            text: option.name.uppercased(),
+                            style: isSelected ? .accent : .dim
+                        ) {
+                            chosenModifier = option.modifier
+                        }
+                        .accessibilityLabel(option.name)
+                        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
                     }
-                    .accessibilityLabel(option.name)
-                    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
                 }
 
-                Text(modifierNote)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.inkSoft)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-                    .padding(.vertical, Spacing.tileGap)
-
-                TileWordButton(text: "PLAY", style: .accentButton) {
-                    onPlay(selected, selectedModifier)
+                VStack(spacing: Spacing.tileGap) {
+                    if hasSavedGame {
+                        TileWordButton(text: "RESUME", style: .accent, action: onResume)
+                    }
+                    TileWordButton(text: "PLAY", style: .accentButton) {
+                        onPlay(selected, selectedModifier)
+                    }
                 }
                 TileWordButton(text: "BACK", action: onClose)
-                    .padding(.top, Spacing.tileGap)
             }
             Spacer()
         }
@@ -93,7 +93,7 @@ struct SoloSetupScreen: View {
     /// What the chosen speed actually costs you, in the three numbers that
     /// decide a game: the hand you open with, how long you get to work it,
     /// and how hard the clock leans afterwards.
-    private var note: String {
+    private var paceNote: String {
         let opening = formatSeconds(Double(endlessInitialSeconds(selected)))
         let seconds = GameHeaderView.clockText(endlessDripSeconds(0, selected))
         let tiles = endlessDripTiles(0, selected)
@@ -119,9 +119,41 @@ struct SoloSetupScreen: View {
                 + "fewer every second you leave it."
         }
     }
+
+    /// One question: what it is in plain type, the answers in tiles, and what
+    /// the chosen answer means in plain type under them.
+    ///
+    /// The layout rework dropped these notes, and flagged at the time that it
+    /// left the board setting unexplained anywhere in the app. They are back
+    /// under that rework's own rule rather than against it — plain type
+    /// explains, tiles are what you press — because a modifier's whole
+    /// mechanic is that a square is worth less the longer you leave it, and
+    /// nothing else says so: there is no card, and the board can only show
+    /// the number falling once you are already playing.
+    private func section<Content: View>(
+        _ label: String, note: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: Spacing.tileGap) {
+            caption(label)
+                .padding(.bottom, Spacing.tileGap)
+            content()
+            caption(note)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+                .padding(.top, Spacing.tileGap)
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Palette.inkSoft)
+    }
 }
 
 #Preview {
-    SoloSetupScreen(pace: .regular, modifier: .none, onPlay: { _, _ in }, onClose: {})
+    SoloSetupScreen(
+        pace: .regular, modifier: .gold, hasSavedGame: true,
+        onResume: {}, onPlay: { _, _ in }, onClose: {})
         .preferredColorScheme(.dark)
 }

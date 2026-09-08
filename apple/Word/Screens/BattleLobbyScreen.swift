@@ -39,13 +39,15 @@ struct BattleLobbyScreen: View {
         ScreenColumn {
             Spacer()
             VStack(spacing: Spacing.tileGap) {
-                TileWord(text: "LOBBY", style: .accent)
-                    .accessibilityAddTraits(.isHeader)
-                if mode == .occupy {
-                    TileWord(text: "OCCUPY", style: .dim)
-                        .accessibilityLabel("Occupy")
+                VStack(spacing: Spacing.tileGap) {
+                    TileTitle(text: "LOBBY")
+                        .accessibilityAddTraits(.isHeader)
+                    if mode == .occupy {
+                        TileWord(text: "OCCUPY", style: .dim)
+                            .accessibilityLabel("Occupy")
+                    }
                 }
-                Color.clear.frame(height: 0)
+                .padding(.bottom, Spacing.section - Spacing.tileGap)
 
                 if let rejection {
                     note(rejection, tone: Palette.gaugeBad)
@@ -57,7 +59,7 @@ struct BattleLobbyScreen: View {
                 }
 
                 roster
-                    .padding(.vertical, Spacing.tileGap)
+                    .padding(.vertical, Spacing.gap)
 
                 settings
 
@@ -90,7 +92,7 @@ struct BattleLobbyScreen: View {
                 }
 
                 TileWordButton(text: "LEAVE", action: onLeave)
-                    .padding(.top, Spacing.tileGap)
+                    .padding(.top, Spacing.section)
             }
             Spacer()
         }

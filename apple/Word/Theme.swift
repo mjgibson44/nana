@@ -113,8 +113,13 @@ struct SeatColors: Equatable {
 enum Spacing {
     /// Around the outside of every screen.
     static let margin: CGFloat = 16
-    /// Between rows and sections.
+    /// Between rows and the blocks they make up.
     static let gap: CGFloat = 16
+    /// Between one section of a screen and the next: the home screen's groups
+    /// of doors, the setup screen's two questions, the entry screen's two
+    /// ways in. Wider than `gap`, so a screen made of tile rows reads as a
+    /// few things rather than one long list.
+    static let section: CGFloat = 28
     /// Between tiles in a row.
     static let tileGap: CGFloat = 4
     /// The pile is eight tiles wide — fewer, bigger tiles than the original
@@ -131,6 +136,10 @@ enum Spacing {
     static let pileRows = 3
     /// Tile size on screens that aren't fitted to the width (home, results).
     static let tile: CGFloat = 32
+    /// A screen's own name, a step up from the rows under it — TIMETILES,
+    /// SOLO, LOBBY. `TileTitle` drops back to `tile` on a screen too narrow
+    /// to hold the longer titles at this size.
+    static let titleTile: CGFloat = 36
     static let tileRadius: CGFloat = 3
     /// Buttons are a little shorter than a tile is tall.
     static let buttonHeight: CGFloat = 36

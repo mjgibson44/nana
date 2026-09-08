@@ -55,10 +55,8 @@ struct RootView: View {
             switch route {
             case .home:
                 HomeScreen(
-                    hasSavedGame: savedGame != nil,
                     dailyPlayed: dailyPlayed,
                     dailyStreak: progression.dailyStreak,
-                    onResume: resumeSavedGame,
                     onSolo: { route = .soloSetup },
                     onDaily: startDaily,
                     onBattle: { chooseBattle(mode: .battle) },
@@ -68,6 +66,8 @@ struct RootView: View {
                 SoloSetupScreen(
                     pace: settings.pace,
                     modifier: settings.modifier,
+                    hasSavedGame: hasSavedSoloGame,
+                    onResume: resumeSavedGame,
                     onPlay: startSolo(pace:modifier:),
                     onClose: { route = .home })
 
@@ -472,6 +472,14 @@ struct RootView: View {
         }
         persistGame()
         route = .home
+    }
+
+    /// A half-played game the SOLO door offers to carry on. A saved Daily is
+    /// not one: that day comes back through `startDaily`, which knows whether
+    /// the board on it is still today's.
+    private var hasSavedSoloGame: Bool {
+        guard let savedGame else { return false }
+        return savedGame.gameMode != .daily
     }
 
     private func resumeSavedGame() {

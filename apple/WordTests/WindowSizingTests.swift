@@ -44,7 +44,7 @@ final class WindowSizingTests: XCTestCase {
 
     func testTheHomeScreenFitsInASmallWindow() {
         let size = minimumSize(
-            of: HomeScreen(hasSavedGame: true, onResume: {}, onSolo: {}, onBattle: {}))
+            of: HomeScreen(onSolo: {}, onBattle: {}))
         XCTAssertLessThanOrEqual(size.height, maxHeight)
         XCTAssertLessThanOrEqual(size.width, maxWidth)
     }
