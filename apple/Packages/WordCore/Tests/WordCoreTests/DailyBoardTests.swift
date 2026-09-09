@@ -179,7 +179,7 @@ struct DailyBoardPar {
 
 @Suite("DailyBoard: progress and scoring")
 struct DailyBoardScoring {
-    @Test("finished only once every target is covered")
+    @Test("the rings are a tier, complete only once every one is covered")
     func finishedOnlyWhenAllCovered() {
         let targets = [keyOf(1, 1), keyOf(5, 5), keyOf(9, 9)]
         var board = TileMap()
@@ -187,13 +187,13 @@ struct DailyBoardScoring {
         let partial = dailyProgress(board: board, targets: targets, validation: nil, tilesLeft: 4)
         #expect(partial.reached == 1)
         #expect(partial.covered == [true, false, false])
-        #expect(!partial.done)
+        #expect(!partial.ringsDone)
 
         board[keyOf(5, 5)] = "b"
         board[keyOf(9, 9)] = "c"
         let full = dailyProgress(board: board, targets: targets, validation: nil, tilesLeft: 4)
         #expect(full.reached == 3)
-        #expect(full.done)
+        #expect(full.ringsDone)
         // Tiles still in hand: reached, but not the clean sweep.
         #expect(!full.allTilesPlaced)
     }
@@ -213,35 +213,85 @@ struct DailyBoardScoring {
 
     @Test("reads strokes against par like golf")
     func readsUnderPar() {
-        let under = DailyResult(strokes: 5, par: 7, points: 90, reached: 3, allTilesPlaced: true)
+        let under = result(strokes: 5, par: 7, points: 90, dealt: 20, tilesLeft: 0)
         #expect(under.underPar == 2)
-        let over = DailyResult(strokes: 9, par: 7, points: 90, reached: 3, allTilesPlaced: false)
+        let over = result(strokes: 9, par: 7, points: 90, dealt: 20, tilesLeft: 2)
         #expect(over.underPar == -2)
     }
 
-    @Test("packs strokes ahead of points, with points as the tiebreak")
-    func packsStrokesFirst() {
-        let quick = DailyResult(strokes: 5, par: 7, points: 10, reached: 3, allTilesPlaced: false)
-        let slowButRich = DailyResult(strokes: 6, par: 7, points: 90_000, reached: 3, allTilesPlaced: true)
-        // Fewer words beats more points, however many more.
-        #expect(dailyLeaderboardScore(quick) > dailyLeaderboardScore(slowButRich))
-
-        let sameStrokesMorePoints = DailyResult(
-            strokes: 5, par: 7, points: 11, reached: 3, allTilesPlaced: false)
-        #expect(dailyLeaderboardScore(sameStrokesMorePoints) > dailyLeaderboardScore(quick))
+    @Test("every ring pays, and the par bonus waits for the last one")
+    func ringsPayAndParWaits() {
+        // Par used to be free money for a player who laid one word and
+        // stopped. It is gated on the rings now, which is what stops "quit
+        // early, bank the strokes" from being a strategy.
+        let none = dailyScore(points: 100, strokes: 1, par: 7, reached: 0, tilesPlaced: 0)
+        #expect(none == 100)
+        let all = dailyScore(points: 100, strokes: 1, par: 7, reached: 3, tilesPlaced: 0)
+        #expect(all == 100 + 3 * DAILY_TARGET_POINTS + 6 * DAILY_PAR_BONUS)
+        // Two rings is two rings' worth, and no par bonus at all.
+        let some = dailyScore(points: 100, strokes: 1, par: 7, reached: 2, tilesPlaced: 0)
+        #expect(some == 100 + 2 * DAILY_TARGET_POINTS)
     }
 
-    @Test("clamps nonsense rather than letting it bleed into the stroke digits")
-    func clampsNonsense() {
-        let absurd = DailyResult(
-            strokes: -4, par: 7, points: DAILY_POINT_CAP * 3, reached: 3,
-            allTilesPlaced: true)
-        let best = DailyResult(strokes: 0, par: 7, points: DAILY_POINT_CAP - 1, reached: 3,
-                               allTilesPlaced: true)
-        #expect(dailyLeaderboardScore(absurd) == dailyLeaderboardScore(best))
+    @Test("every tile played pays, so the number only ever climbs")
+    func tilesPlayedPay() {
+        let few = dailyScore(points: 200, strokes: 6, par: 7, reached: 3, tilesPlaced: 15)
+        let all = dailyScore(points: 200, strokes: 6, par: 7, reached: 3, tilesPlaced: 20)
+        #expect(all - few == 5 * DAILY_TILE_POINTS)
+        // Charging for the leftover instead would rank identically — everyone
+        // is dealt the same tiles on a given day — but would read zero for the
+        // first third of the day, which looks broken rather than strict.
+        #expect(dailyScore(points: 0, strokes: 0, par: 7, reached: 0, tilesPlaced: 0) == 0)
+    }
 
-        let hopeless = DailyResult(strokes: DAILY_STROKE_CAP + 50, par: 7, points: 0,
-                                   reached: 3, allTilesPlaced: false)
-        #expect(dailyLeaderboardScore(hopeless) == 0)
+    @Test("going over par costs nothing beyond the bonus you did not earn")
+    func overParIsNotPunished() {
+        // The mode's whole correction was to stop charging people for playing
+        // more of it, so par is a prize rather than a tax.
+        let atPar = dailyScore(points: 100, strokes: 7, par: 7, reached: 3, tilesPlaced: 20)
+        let wayOver = dailyScore(points: 100, strokes: 20, par: 7, reached: 3, tilesPlaced: 20)
+        #expect(atPar == wayOver)
+    }
+
+    @Test("stopping with tiles in hand never beats playing them")
+    func playingOnBeatsStopping() {
+        // The trap a voluntary ending sets, and the arithmetic that disarms
+        // it: under the old strokes-first packing, quitting on three rings
+        // and four words was the optimal line. Here, an ordinary word — three
+        // tiles, a modest score — is worth more than the stroke it costs.
+        let stopNow = dailyScore(points: 200, strokes: 5, par: 8, reached: 3, tilesPlaced: 11)
+        let playOneMore = dailyScore(points: 212, strokes: 6, par: 8, reached: 3, tilesPlaced: 14)
+        #expect(playOneMore > stopNow)
+
+        // …and emptying the pile from there is worth far more again.
+        let finishIt = dailyScore(
+            points: 260 + ALL_TILES_BONUS, strokes: 8, par: 8, reached: 3, tilesPlaced: 20)
+        #expect(finishIt > playOneMore)
+    }
+
+    @Test("the leaderboard ranks exactly the number the player was shown")
+    func leaderboardRanksTheShownNumber() {
+        let day = result(strokes: 6, par: 7, points: 180, dealt: 20, tilesLeft: 0)
+        #expect(dailyLeaderboardScore(day) == day.score)
+
+        // A better board wins; a shorter one that left the pile full does not.
+        let quitEarly = result(strokes: 4, par: 7, points: 60, dealt: 20, tilesLeft: 11)
+        #expect(day.score > quitEarly.score)
+    }
+
+    @Test("a day that did nothing at all still sorts")
+    func neverNegative() {
+        let hopeless = result(
+            strokes: 0, par: 7, points: 0, dealt: 24, tilesLeft: 24, reached: 0)
+        #expect(hopeless.score == 0)
+    }
+
+    private func result(
+        strokes: Int, par: Int, points: Int, dealt: Int, tilesLeft: Int, reached: Int = 3
+    ) -> DailyResult {
+        DailyResult(
+            strokes: strokes, par: par, points: points, reached: reached,
+            tilesPlaced: dealt - tilesLeft, tilesLeft: tilesLeft,
+            allTilesPlaced: tilesLeft == 0)
     }
 }

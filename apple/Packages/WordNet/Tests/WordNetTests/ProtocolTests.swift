@@ -96,7 +96,7 @@ struct WireProtocolTests {
         #expect(state.players.map(\.id) == ["a"])
     }
 
-    @Test func versionIsElevenForBattlesRoomWideSettings() {
+    @Test func versionIsTwelveForTheCollapsedModifier() {
         // v5 was the web's; v6 added the host announcement (plan §7.2); v7
         // Occupy; v8 put the countdown in the snapshot; v9 unbounded the
         // Occupy board, made it ten minutes, and put the zones in the
@@ -105,8 +105,11 @@ struct WireProtocolTests {
         // zone would decode as a 2× patch that no longer exists, which is
         // what the gate is for; v11 gave Battle a board view and a modifier,
         // and a v10 client would silently play a different game from the
-        // room it is sitting in.
-        #expect(PROTOCOL_VERSION == 11)
+        // room it is sitting in; v12 collapsed that modifier to a switch, so
+        // "gold" and "salvage" left the wire and "prizes" arrived — a value
+        // an older client cannot decode at all, which is the gate's whole
+        // job.
+        #expect(PROTOCOL_VERSION == 12)
     }
 
     @Test func aSnapshotFromBeforeTheSettingsDecodesAsARoomWithoutThem() throws {
@@ -132,11 +135,11 @@ struct WireProtocolTests {
     @Test func theRoomsSettingsSurviveTheWire() throws {
         let state = BattleState(
             phase: .playing, players: [], game: 3, winnerId: nil,
-            boardView: .shared, modifier: .gold)
+            boardView: .shared, modifier: .prizes)
         let back = try JSONDecoder().decode(
             BattleState.self, from: JSONEncoder().encode(state))
         #expect(back.boardView == .shared)
-        #expect(back.modifier == .gold)
+        #expect(back.modifier == .prizes)
         #expect(back == state)
     }
 }

@@ -329,23 +329,40 @@ private func pickTargets(_ rest: [CellKey], seedCells: [CellKey]) -> [CellKey]? 
 
 /// How a day's puzzle stands right now.
 ///
-/// The Daily cannot be lost, only left unfinished: there is no clock and no
-/// pile limit, so `done` is the only verdict and it only ever goes one way.
-/// That is deliberate for a one-attempt-a-day mode — the tension belongs in
-/// your number against par, not in a loss you can't play again.
+/// The Daily cannot be lost, and since the rework it cannot be *stranded*
+/// either. Two things used to make that untrue in practice:
+///
+///  - **Covering the last ring ended the day.** So the rings were a floor
+///    that stopped the game, and the better you read the board the less of it
+///    you got to play: three rings inside four words, fifteen tiles still in
+///    hand, over. The "every tile" tier was unreachable by construction,
+///    since it needed one final word that covered the last ring *and* emptied
+///    the pile in the same stroke.
+///  - **Nothing could be taken back.** A fixed deal, a spatial requirement
+///    and irreversible moves is the standard recipe for a puzzle you kill on
+///    move three and discover on move eleven — and permanence was inherited
+///    from Solo and Battle, where it protects a clock this mode hasn't got.
+///
+/// So `ringsDone` is a *tier*, not an ending (`dailyScore` pays for it), the
+/// day ends when the pile is empty or the player says so, and a word can be
+/// lifted back off. What is left is a score to push, which is the tension a
+/// one-attempt-a-day puzzle should have.
 public struct DailyProgress: Equatable {
     /// Targets covered by a tile, in the board's target order.
     public var covered: [Bool]
     public var reached: Int
-    /// Every target covered — the puzzle is finished.
-    public var done: Bool
-    /// Every dealt tile placed on a fully valid, connected board as well.
+    /// Every ring covered — the first tier, and the gate on the par bonus.
+    /// Not the end of the day.
+    public var ringsDone: Bool
+    /// Every dealt tile placed on a fully valid, connected board as well —
+    /// the second tier, and the natural end of the day, since a player with
+    /// nothing left in the pile has nothing left to play.
     public var allTilesPlaced: Bool
 
-    public init(covered: [Bool], reached: Int, done: Bool, allTilesPlaced: Bool) {
+    public init(covered: [Bool], reached: Int, ringsDone: Bool, allTilesPlaced: Bool) {
         self.covered = covered
         self.reached = reached
-        self.done = done
+        self.ringsDone = ringsDone
         self.allTilesPlaced = allTilesPlaced
     }
 }
@@ -361,39 +378,85 @@ public func dailyProgress(
     return DailyProgress(
         covered: covered,
         reached: reached,
-        done: reached == targets.count,
+        ringsDone: reached == targets.count,
         allTilesPlaced: tilesLeft == 0 && (validation?.ok ?? false)
     )
 }
 
 /// What a finished daily is worth.
 ///
-/// Two numbers, because the mode is about two things at once: **strokes** —
-/// words played, low is good — and the points the board is worth. They pull
-/// against each other productively. `wordScore` is triangular and every run
-/// pays, so points want a densely crossed board with many runs; par wants few
-/// words. The move that serves both is one word that lands across three
-/// others: four new runs for one stroke.
+/// Three things at once, and they pull against each other on purpose:
 ///
-/// There is no "taken back" to record. The app's words are permanent in every
-/// mode, so a stroke is a word played and that is the end of it — the question
-/// of whether an undo should refund one never comes up. What softens that is
-/// staging: tiles sit ghosted on the board and can be moved or cleared freely
-/// until the ✓, so the thinking happens before the stroke is spent.
+///  - **Points.** `wordScore` is triangular and every run pays, so points
+///    want a densely crossed board with many runs.
+///  - **Strokes**, against par — words standing on the board you finished
+///    with, low being good. Par wants few words.
+///  - **Tiles placed**, which pay. Leaving the pile half full is the one
+///    thing that is simply bad at every skill level.
+///
+/// The move that serves all three is one word laid across three others: four
+/// new runs, several tiles spent, one stroke.
+///
+/// ## Why strokes stopped being the sort key
+///
+/// They used to be: the leaderboard packed `(cap − strokes, points)` and
+/// ranked on the pair. That was defensible while the day *ended* at the third
+/// ring, and became indefensible the moment finishing turned voluntary —
+/// under a strokes-first sort, the optimal line is to reach three rings in
+/// four words, stop, and bank an enormous stroke bonus. The shortness the
+/// rework set out to fix would have come back as the correct strategy.
+///
+/// So there is one number, `score`, and it is arranged so that playing on is
+/// almost always worth it and never catastrophic:
+///
+///  - every ring covered pays `DAILY_TARGET_POINTS`;
+///  - being under par pays `DAILY_PAR_BONUS` a stroke, but only once every
+///    ring is covered — otherwise a player who laid one word and quit would
+///    bank five strokes under par for a board that did nothing;
+///  - every tile out of the pile and onto the board pays `DAILY_TILE_POINTS`.
+///
+/// Going *over* par costs nothing beyond the bonus you didn't earn, and
+/// nothing here is ever subtracted. Par is a prize, not a punishment: the
+/// mode's whole correction was to stop charging people for playing more of
+/// it. **Paying for tiles placed rather than charging for tiles left** is the
+/// same ranking by a constant — everyone on a given day is dealt the same
+/// number of tiles — and it is a far better number to watch, because it only
+/// ever climbs. A score that read zero until the pile was half gone would
+/// look broken rather than strict.
+///
+/// The one place it stays a real decision is the margin — a two-tile word
+/// worth six points pays twenty for its tiles and costs thirty of par bonus,
+/// so a player under par has to think about whether the dinky word is worth
+/// the stroke. That is "fewest words, most points" doing exactly what the
+/// design always claimed it did.
 public struct DailyResult: Equatable {
+    /// Words standing on the final board. Words *taken back* are not counted:
+    /// the score is a property of the artifact rather than of the journey,
+    /// which is what makes exploring free.
     public var strokes: Int
     public var par: Int
     /// Strokes under par — negative is over, like golf.
     public var underPar: Int
+    /// What the board itself came to: every run, plus the all-tiles bonus.
     public var points: Int
     public var reached: Int
+    /// Tiles of the day's deal that made it onto the board — what pays.
+    public var tilesPlaced: Int
+    /// …and what is still in hand, which is what the card reads out.
+    public var tilesLeft: Int
     public var allTilesPlaced: Bool
+    /// The single number the day is ranked on, and the one the player is
+    /// shown, so the leaderboard can never be measuring something other than
+    /// the thing on screen.
+    public var score: Int
 
     public init(
         strokes: Int,
         par: Int,
         points: Int,
         reached: Int,
+        tilesPlaced: Int,
+        tilesLeft: Int,
         allTilesPlaced: Bool
     ) {
         self.strokes = strokes
@@ -401,31 +464,57 @@ public struct DailyResult: Equatable {
         self.underPar = par - strokes
         self.points = points
         self.reached = reached
+        self.tilesPlaced = tilesPlaced
+        self.tilesLeft = tilesLeft
         self.allTilesPlaced = allTilesPlaced
+        self.score = dailyScore(
+            points: points, strokes: strokes, par: par, reached: reached,
+            tilesPlaced: tilesPlaced)
     }
 }
 
-/// The most strokes a daily score can express. Well past any plausible board —
-/// par runs to eight and a deal is two dozen tiles — so the encoding below
-/// never has to clamp a real game.
-public let DAILY_STROKE_CAP = 200
-
-/// Points a daily can carry into the leaderboard before the encoding would
-/// collide with the next stroke. Two dozen tiles cannot approach it.
-public let DAILY_POINT_CAP = 100_000
-
-/// A Game Center recurring leaderboard takes one integer, and this score is
-/// two-dimensional — so pack it, strokes first, points as the tiebreak.
+/// What each ring is worth once it is covered.
 ///
-/// Strokes lead because that is what the mode is about; points settle two
-/// players who got there in the same number of words, and the player with the
-/// better-crossed board wins that. Both are clamped so a nonsense game can
-/// never bleed into the stroke digits.
+/// Roughly a good word, so reaching one is always worth the trip — and,
+/// with three of them, enough that a board which ignored the rings entirely
+/// cannot out-score one that made the round trip.
+public let DAILY_TARGET_POINTS = 40
+
+/// What each stroke under par pays, once every ring is covered.
 ///
-/// **This encoding is permanent.** A leaderboard's scores cannot be
-/// reinterpreted once submitted, so changing it means a new leaderboard.
+/// Thirty is deliberately a little less than an ordinary word plus the
+/// leftover it relieves, so "play another word" is the default answer and
+/// "was that word worth it?" is a real question only at the margin.
+public let DAILY_PAR_BONUS = 30
+
+/// What each tile off the pile and onto the board is worth.
+///
+/// Ten a tile: a dozen tiles unplayed is a hundred and twenty points forgone,
+/// which is more than the par bonus a short game could possibly earn. That is
+/// the arithmetic that stops "finish early and bank it" from being a
+/// strategy, and it is the reason the leftover is priced at all.
+public let DAILY_TILE_POINTS = 10
+
+/// The day's one number. Every term is a payment, so it only ever climbs as
+/// the day is played — which is what makes it worth showing live.
+public func dailyScore(
+    points: Int, strokes: Int, par: Int, reached: Int, tilesPlaced: Int
+) -> Int {
+    let rings = DAILY_TARGET_POINTS * max(0, reached)
+    let ringsDone = reached >= DailyBoardRules.targets
+    let underPar = max(0, par - strokes)
+    let parBonus = ringsDone ? DAILY_PAR_BONUS * underPar : 0
+    let tiles = DAILY_TILE_POINTS * max(0, tilesPlaced)
+    return max(0, points + rings + parBonus + tiles)
+}
+
+/// A Game Center recurring leaderboard takes one integer, and now so does
+/// this: `DailyResult.score`, exactly as shown on screen.
+///
+/// **This is a different quantity from the one the old board ranked** — that
+/// one packed strokes ahead of points, which the rework made perverse (see
+/// `DailyResult`). A leaderboard's scores cannot be reinterpreted after the
+/// fact, so `LeaderboardID.daily` moved to a new board with it.
 public func dailyLeaderboardScore(_ result: DailyResult) -> Int {
-    let strokes = min(max(result.strokes, 0), DAILY_STROKE_CAP)
-    let points = min(max(result.points, 0), DAILY_POINT_CAP - 1)
-    return (DAILY_STROKE_CAP - strokes) * DAILY_POINT_CAP + points
+    result.score
 }

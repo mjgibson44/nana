@@ -55,9 +55,9 @@ private final class BlockedStore: KeyValueStore {
     @Test("writes the web's shape, with the modifier the web has no notion of")
     func writesTheWebsShapePlusTheModifier() {
         let store = MemoryStore()
-        saveSoloSetup(SoloSetup(pace: .fast, modifier: .gold), to: store)
+        saveSoloSetup(SoloSetup(pace: .fast, modifier: .prizes), to: store)
         #expect(
-            store.values["nana.setup.solo.v1"] == "{\"pace\":\"fast\",\"modifier\":\"gold\"}")
+            store.values["nana.setup.solo.v1"] == "{\"pace\":\"fast\",\"modifier\":\"prizes\"}")
     }
 
     @Test("a setup the web wrote still reads, modifier and all")

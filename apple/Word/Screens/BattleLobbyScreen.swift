@@ -150,14 +150,11 @@ struct BattleLobbyScreen: View {
         switch modifier {
         case .none:
             return board + "No squares to chase — just the drip and the pile."
-        case .gold:
+        case .prizes:
             return board
-                + "Gold squares appear on every board at once, worth up to "
-                + "\(GOLD_TOP_POINTS) to whoever lands on one first."
-        case .salvage:
-            return board
-                + "Gold squares appear on every board at once, clearing up to "
-                + "\(SALVAGE_TOP_TILES) tiles off the pile of whoever lands on one."
+                + "Squares light up on every board at once: gold pays up to "
+                + "\(GOLD_TOP_POINTS) points, blue clears up to \(SALVAGE_TOP_TILES) "
+                + "tiles off your pile. Both fall in value while you think."
         }
     }
 

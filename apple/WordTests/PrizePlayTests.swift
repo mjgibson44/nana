@@ -47,7 +47,7 @@ final class PrizePlayTests: XCTestCase {
     }
 
     func testABattleClearsAnyPrizesTheLastSoloGameLit() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: 30)
         XCTAssertFalse(model.prizes.isEmpty)
 
@@ -57,7 +57,7 @@ final class PrizePlayTests: XCTestCase {
     }
 
     func testTheDailyIsNeverModified() async throws {
-        let (model, _) = try await playingModel(modifier: .gold)
+        let (model, _) = try await playingModel(modifier: .prizes)
         try model.newDaily(dailyDeal(day: 20_500))
         XCTAssertEqual(model.modifier, .none)
         XCTAssertTrue(model.prizes.isEmpty)
@@ -69,14 +69,14 @@ final class PrizePlayTests: XCTestCase {
         // The opening phase is two minutes long at this pace, so nothing has
         // dripped yet — a prize that needed a round boundary would still be
         // waiting.
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: PRIZE_FIRST_SPAWN_SECONDS + 1)
         XCTAssertEqual(model.dripsElapsed, 0, "no round has ended")
         XCTAssertEqual(model.prizes.prizes.count, 1)
     }
 
     func testASquareSitsWithinReachOfTheBoardAndOnEmptyGround() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: 60)
         XCTAssertFalse(model.prizes.isEmpty)
         for prize in model.prizes.prizes {
@@ -91,13 +91,13 @@ final class PrizePlayTests: XCTestCase {
     }
 
     func testNeverMoreThanTheCeilingHowLongTheGameRuns() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: 240)
         XCTAssertLessThanOrEqual(model.prizes.prizes.count, PRIZE_MAX_LIVE)
     }
 
     func testASquareRunsOutAndCostsNothing() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: PRIZE_FIRST_SPAWN_SECONDS + 1)
         let lit = try XCTUnwrap(model.prizes.prizes.first?.key)
         let tiles = model.board.count
@@ -117,7 +117,7 @@ final class PrizePlayTests: XCTestCase {
     func testAHeldClockIsNotChargedToASquaresTwentySeconds() async throws {
         // The one bug this shape of clock exists to prevent: a pause, or a
         // card the player is reading, must not spend a prize's life.
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: PRIZE_FIRST_SPAWN_SECONDS + 1)
         let before = try XCTUnwrap(model.prizes.prizes.first)
 
@@ -132,7 +132,7 @@ final class PrizePlayTests: XCTestCase {
     }
 
     func testAnHourInAPocketExpiresEverythingRatherThanFloodingTheBoard() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: 60)
         XCTAssertFalse(model.prizes.isEmpty)
 
@@ -143,10 +143,24 @@ final class PrizePlayTests: XCTestCase {
 
     // MARK: Claiming
 
+    /// A square of a known kind, lit on an empty cell beside the board, so a
+    /// test can say what it is claiming rather than take what the seed dealt.
+    /// Both kinds are lit at random now, so a test that wanted a specific one
+    /// would otherwise be a test of the RNG.
+    private func light(
+        _ kind: PrizeKind, on model: GameModel, secondsLeft: Double = PRIZE_SECONDS
+    ) throws -> Prize {
+        let anchor = try XCTUnwrap(model.board.keys.first)
+        let cell = parseKey(anchor)
+        let key = keyOf(cell.row - 1, cell.col)
+        let prize = Prize(key: key, kind: kind, secondsLeft: secondsLeft)
+        model.setPrizes(PrizeField(prizes: [prize]))
+        return prize
+    }
+
     func testGoldPaysWhatTheSquareSaidAndTheSquareIsGone() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
-        tick(model, from: start, seconds: PRIZE_FIRST_SPAWN_SECONDS + 1)
-        let prize = try XCTUnwrap(model.prizes.prizes.first)
+        let (model, _) = try await playingModel(modifier: .prizes)
+        let prize = try light(.points, on: model)
         let due = prizeValue(.points, prize)
         let before = model.bankedBonus
 
@@ -162,26 +176,19 @@ final class PrizePlayTests: XCTestCase {
     }
 
     func testGoldPaysLessTheLongerItIsLeft() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
-        let lit = start.addingTimeInterval(PRIZE_FIRST_SPAWN_SECONDS + 1)
-        tick(model, from: start, seconds: PRIZE_FIRST_SPAWN_SECONDS + 1)
-        let prize = try XCTUnwrap(model.prizes.prizes.first)
-        let atOnce = prizeValue(.points, prize)
-
-        tick(model, from: lit, seconds: PRIZE_SECONDS / 2)
-        let later = try XCTUnwrap(model.prizes.prize(at: prize.key))
-        XCTAssertLessThan(prizeValue(.points, later), atOnce)
+        let (model, _) = try await playingModel(modifier: .prizes)
+        let stale = try light(.points, on: model, secondsLeft: PRIZE_SECONDS / 2)
+        XCTAssertLessThan(prizeValue(.points, stale), GOLD_TOP_POINTS)
 
         let before = model.bankedBonus
-        model.claimPrizes(covering: [prize.key])
-        XCTAssertEqual(model.bankedBonus - before, prizeValue(.points, later))
+        model.claimPrizes(covering: [stale.key])
+        XCTAssertEqual(model.bankedBonus - before, prizeValue(.points, stale))
         XCTAssertGreaterThanOrEqual(model.bankedBonus - before, GOLD_FLOOR_POINTS)
     }
 
     func testSalvageTakesTilesOffThePileRatherThanScoring() async throws {
-        let (model, start) = try await playingModel(modifier: .salvage, seed: "salvage")
-        tick(model, from: start, seconds: PRIZE_FIRST_SPAWN_SECONDS + 1)
-        let prize = try XCTUnwrap(model.prizes.prizes.first)
+        let (model, _) = try await playingModel(modifier: .prizes, seed: "salvage")
+        let prize = try light(.relief, on: model)
         let due = prizeValue(.relief, prize)
         let hand = model.rack.count
         let score = model.bankedBonus
@@ -194,11 +201,29 @@ final class PrizePlayTests: XCTestCase {
         XCTAssertEqual(model.prizesClaimed, 1)
     }
 
+    func testOneWordCanClaimBothKindsAtOnce() async throws {
+        // The reason the two stopped being separate modifiers: they share a
+        // board now, so a word that crosses one of each has to be paid in
+        // both currencies rather than one of them.
+        let (model, _) = try await playingModel(modifier: .prizes)
+        let anchor = parseKey(try XCTUnwrap(model.board.keys.first))
+        let gold = Prize(key: keyOf(anchor.row - 1, anchor.col), kind: .points)
+        let blue = Prize(key: keyOf(anchor.row - 2, anchor.col), kind: .relief)
+        model.setPrizes(PrizeField(prizes: [gold, blue]))
+        let score = model.bankedBonus
+        let hand = model.rack.count
+
+        model.claimPrizes(covering: [gold.key, blue.key])
+
+        XCTAssertEqual(model.bankedBonus, score + prizeValue(.points, gold))
+        XCTAssertEqual(model.rack.count, hand - prizeValue(.relief, blue))
+        XCTAssertEqual(model.prizesClaimed, 2)
+        XCTAssertTrue(model.prizes.isEmpty)
+    }
+
     func testSalvageNeverTakesMoreTilesThanThereAre() async throws {
-        let (model, start) = try await playingModel(modifier: .salvage, seed: "salvage")
-        tick(model, from: start, seconds: PRIZE_FIRST_SPAWN_SECONDS + 1)
-        let prize = try XCTUnwrap(model.prizes.prizes.first)
-        model.setPrizes(PrizeField(prizes: [prize]))
+        let (model, _) = try await playingModel(modifier: .prizes, seed: "salvage")
+        let prize = try light(.relief, on: model)
         model.setPile(["a", "b"])
 
         model.claimPrizes(covering: [prize.key])
@@ -206,9 +231,8 @@ final class PrizePlayTests: XCTestCase {
     }
 
     func testAWordThatLandsBesideASquareClaimsNothing() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
-        tick(model, from: start, seconds: PRIZE_FIRST_SPAWN_SECONDS + 1)
-        let prize = try XCTUnwrap(model.prizes.prizes.first)
+        let (model, _) = try await playingModel(modifier: .prizes)
+        let prize = try light(.points, on: model)
         let cell = parseKey(prize.key)
         let before = model.bankedBonus
 
@@ -232,8 +256,9 @@ final class PrizePlayTests: XCTestCase {
     // MARK: The pile is the pile
 
     func testTheGaugeMeansTheSameThingUnderEveryModifier() {
-        // Wildfire needed a bigger pile because it fed one. Nothing does now:
-        // gold never touches the pile and salvage only ever takes off it.
+        // Wildfire needed a bigger pile because it fed one. Neither kind of
+        // square does: gold never touches the pile and salvage only ever
+        // takes off it.
         for modifier in SoloModifier.allCases {
             let model = GameModel()
             model.newGame(seed: "gauge", pace: .regular, modifier: modifier, now: .now)
@@ -246,13 +271,13 @@ final class PrizePlayTests: XCTestCase {
     // MARK: Surviving process death
 
     func testASavedGameComesBackWithItsSquaresAndTheirClocks() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: 30)
         let prizes = model.prizes
         XCTAssertFalse(prizes.isEmpty)
 
         let saved = try XCTUnwrap(model.savedGame())
-        XCTAssertEqual(saved.soloModifier, .gold)
+        XCTAssertEqual(saved.soloModifier, .prizes)
 
         let store = MemoryStore()
         saved.save(to: store)
@@ -260,13 +285,13 @@ final class PrizePlayTests: XCTestCase {
 
         let restored = GameModel()
         restored.restore(back)
-        XCTAssertEqual(restored.modifier, .gold)
+        XCTAssertEqual(restored.modifier, .prizes)
         XCTAssertEqual(restored.prizes, prizes, "the same squares, with the seconds they had")
         XCTAssertEqual(restored.prizes.spawns, prizes.spawns, "and the same place in the stream")
     }
 
     func testARestoredSquareDoesNotAgeWhileTheResumeCardIsUp() async throws {
-        let (model, start) = try await playingModel(modifier: .gold)
+        let (model, start) = try await playingModel(modifier: .prizes)
         tick(model, from: start, seconds: 30)
         let saved = try XCTUnwrap(model.savedGame(at: start.addingTimeInterval(30)))
 

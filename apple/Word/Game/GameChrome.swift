@@ -290,6 +290,12 @@ struct PileGaugeView: View {
     var count: Int
     var limit: Int = PILE_LIMIT
     var tone: PileTone
+    /// What the bar is measuring, for anyone reading it by ear. The Daily
+    /// fills it with tiles *placed* rather than tiles held — there the pile
+    /// only ever shrinks and an empty one is the finish line, so a bar that
+    /// emptied as you played would be a progress bar running backwards.
+    var label: String = "Pile"
+    var unit: String = "tiles"
 
     var body: some View {
         let fraction = min(1, max(0, Double(count) / Double(max(1, limit))))
@@ -304,8 +310,8 @@ struct PileGaugeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
         .animation(.easeOut(duration: 0.25), value: count)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Pile")
-        .accessibilityValue("\(count) of \(limit) tiles")
+        .accessibilityLabel(label)
+        .accessibilityValue("\(count) of \(limit) \(unit)")
     }
 
     private var fill: Color { RivalGaugesView.fill(tone) }

@@ -55,38 +55,45 @@ final class ScreenSnapshotTests: XCTestCase {
         try render(
             SoloSetupScreen(pace: .fast, onPlay: { _, _ in }, onClose: {}), name: "solo-setup-fast")
         try render(
-            SoloSetupScreen(pace: .regular, modifier: .gold, onPlay: { _, _ in }, onClose: {}),
-            name: "solo-setup-gold")
-        try render(
-            SoloSetupScreen(pace: .regular, modifier: .salvage, onPlay: { _, _ in }, onClose: {}),
-            name: "solo-setup-salvage")
+            SoloSetupScreen(pace: .regular, modifier: .prizes, onPlay: { _, _ in }, onClose: {}),
+            name: "solo-setup-prizes")
     }
 
-    /// The Daily: the word already down, the rings to reach, and the header
-    /// counting targets and strokes where a clock would be.
+    /// The Daily: the word already down, the rings to reach, the eraser
+    /// beside the word actions, and the header counting rings, strokes and
+    /// what is left in the pile where a clock would be.
     func testTheDailyRenders() async throws {
         let model = GameModel()
         try model.newDaily(dailyDeal(day: 20_500))
         await model.loadDictionary()
         model.dismissSplash()
         try render(GameScreen(model: model), name: "daily")
+        try TestPlays.attachWord(on: model)
+        try render(GameScreen(model: model), name: "daily-played")
     }
 
-    /// And a board with gold on it: two squares lit, one worth its full
+    /// And a board with prizes on it: two squares lit, one worth its full
     /// price and one nearly out of time, so the picture carries both ends of
-    /// the decay at once.
-    func testAGoldBoardRenders() async throws {
+    /// the decay — and one square of each kind, so it carries both payouts.
+    func testAPrizeBoardRenders() async throws {
         let model = GameModel()
-        model.newGame(seed: "snapshot", pace: .regular, modifier: .gold)
+        model.newGame(seed: "snapshot", pace: .regular, modifier: .prizes)
         await model.loadDictionary()
         try TestPlays.placeOpener(on: model)
         let opener = parseKey(model.board.keys[0])
+        // One of each kind, and both ends of the decay: gold at full price,
+        // blue nearly out of time. The two have to be tellable apart at this
+        // size, which is the whole reason for the picture.
         model.setPrizes(
             PrizeField(prizes: [
-                Prize(key: keyOf(opener.row - 1, opener.col), secondsLeft: PRIZE_SECONDS),
-                Prize(key: keyOf(opener.row + 1, opener.col), secondsLeft: 1),
+                Prize(key: keyOf(opener.row - 1, opener.col), kind: .points,
+                      secondsLeft: PRIZE_SECONDS),
+                Prize(key: keyOf(opener.row + 1, opener.col), kind: .relief,
+                      secondsLeft: PRIZE_SECONDS / 2),
+                Prize(key: keyOf(opener.row + 1, opener.col + 2), kind: .points,
+                      secondsLeft: 1),
             ]))
-        try render(GameScreen(model: model), name: "gold")
+        try render(GameScreen(model: model), name: "prizes")
     }
 
     func testTheGameMenuRenders() throws {
@@ -215,7 +222,7 @@ final class ScreenSnapshotTests: XCTestCase {
                 BattlePlayer(id: "a", name: "Ada", host: true),
                 BattlePlayer(id: "b", name: "Grace"),
             ],
-            game: 0, winnerId: nil, modifier: .gold)
+            game: 0, winnerId: nil, modifier: .prizes)
         try render(
             BattleLobbyScreen(
                 state: state, selfID: "a", isHost: true, canStart: true,

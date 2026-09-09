@@ -463,3 +463,51 @@ think about it. That is a decision on every tick rather than a deadline on one.
 **What it cost.** Prizes cannot ride the drip's round boundary the way fire did, so they
 carry a real clock and the UI heartbeat drives them. That is the one place this design is
 more expensive than the one it replaced, and the reasoning is in `Prizes.swift`.
+
+
+---
+
+## Postscript — the Daily reworked, September 2026
+
+*Added 2026-09-08. The construction above is unchanged — same hidden crossword, same seed
+word, same three rings, same derived par. What changed is what you do with them, and why
+is set out at length in `daily-depth.md`.*
+
+The Daily shipped as designed, was played, and came back with two complaints: solving it
+quickly ended it too soon, and you could fail it. Both were true, and both were the same
+class of mistake the Wildfire postscript above already names — *the good idea survived,
+the sign was wrong* — this time in two places at once.
+
+**The rings ended the game, and the rings are the minimum bar.** So playing well bought
+you *less* game: three rings inside four words and the day was over with fifteen tiles in
+hand. Worse, the second tier was unreachable by construction — `allTilesPlaced` was read
+at the instant of the last ring, so the ⭐ needed one final word that covered the last ring
+*and* emptied the pile. The mode's stated ambition was a coincidence.
+
+**Permanence made the day strandable.** The design above worried at this question and the
+"as built" section settled it by inheritance, flagging the risk in its own last line: *a
+wrong early word can put a target out of reach with no way back — which contradicts the
+design's "the daily cannot be failed".* It did. Not through bad letters, either: a ring
+takes any tile, so the failure was arithmetic — spend twenty tiles building dense on one
+side and the far ring is eight cells away with six tiles left. The killing move is word
+three and you find out on word eleven.
+
+The fix, in the order it was built:
+
+1. **The scoring first**, because everything else is wrong without it. One number
+   (`dailyScore`): points, plus a ring bonus, plus a par bonus gated on all three rings,
+   plus ten a tile for every tile off the pile. Strokes stopped being the sort key —
+   under the old `(cap − strokes, points)` packing, a voluntary ending would have made
+   "three rings in four words, then stop" the *optimal* line, and the shortness would
+   have come back as correct strategy. `LeaderboardID.daily` moved to `.v2` with it.
+2. **Rings pay, they don't stop the game.** The day ends on an empty pile or on FINISH
+   DAY. The ⭐ became reachable; the back half of the deal became worth playing.
+3. **The eraser.** `undoLastWord`, a stack, the Daily only — the take-back the design
+   above recommended before app-wide permanence overruled it. Permanence protects a
+   clock; this mode hasn't got one. Strokes are now words *standing*, so the score is a
+   property of the artifact rather than of the route.
+
+What was deliberately not built, and is written up in `daily-depth.md`: progressively
+revealed rings, gold squares on the day's board, and the visible-queue deal. Each is a
+change to how the mode *feels* rather than a fix to how it fails, and they deserve a week
+of the fixed version being played before any of them lands.

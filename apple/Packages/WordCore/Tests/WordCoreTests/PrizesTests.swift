@@ -92,14 +92,19 @@ struct PrizeValueTests {
         #expect(GOLD_TOP_POINTS > wordScore("letters"))
     }
 
-    @Test("a round's claims add up")
+    @Test("a round's claims add up, in both currencies at once")
     func aRoundsClaimsAddUp() {
         let claimed = [
-            Prize(key: keyOf(1, 1), secondsLeft: PRIZE_SECONDS),
-            Prize(key: keyOf(2, 2), secondsLeft: 0),
+            Prize(key: keyOf(1, 1), kind: .points, secondsLeft: PRIZE_SECONDS),
+            Prize(key: keyOf(2, 2), kind: .points, secondsLeft: 0),
+            Prize(key: keyOf(3, 3), kind: .relief, secondsLeft: PRIZE_SECONDS),
         ]
-        #expect(prizeClaimValue(.points, claimed) == GOLD_TOP_POINTS + GOLD_FLOOR_POINTS)
-        #expect(prizeClaimValue(.relief, []) == 0)
+        let payout = prizePayout(claimed)
+        // One word can cross a gold square and a blue one, so a claim pays
+        // out both rather than picking a side.
+        #expect(payout.points == GOLD_TOP_POINTS + GOLD_FLOOR_POINTS)
+        #expect(payout.tiles == SALVAGE_TOP_TILES)
+        #expect(prizePayout([]) == (points: 0, tiles: 0))
     }
 }
 
@@ -148,6 +153,42 @@ struct PrizeSpawnTests {
             }
             #expect(near, "\(key) is out of reach of the board")
         }
+    }
+
+    @Test("each square draws its own kind as it appears")
+    func eachSquareDrawsItsOwnKind() {
+        let board = catBoard()
+        // Two draws off the one stream, position first: the second value is
+        // what decides the currency, so a low one is salvage and a high one
+        // is gold.
+        let blue = prizeAdvance(
+            dueField(), board: board, delta: 1, rng: scriptedRng([0, 0.1]))
+        #expect(blue.field.prizes.first?.kind == .relief)
+        let gold = prizeAdvance(
+            dueField(), board: board, delta: 1, rng: scriptedRng([0, 0.9]))
+        #expect(gold.field.prizes.first?.kind == .points)
+        // …and the position is the same either way, which is what makes the
+        // kind an extra draw rather than a different board.
+        #expect(blue.lit == gold.lit)
+    }
+
+    @Test("both kinds turn up over a long game")
+    func bothKindsTurnUp() {
+        // The modifier is a switch, so a run has to offer both sides of the
+        // decision it exists to create — points when you can afford to go and
+        // get them, room in the pile when you can't.
+        let board = catBoard()
+        var kinds: Set<PrizeKind> = []
+        var field = PrizeField()
+        for spawn in 0..<40 {
+            field.untilNextSpawn = 0.01
+            let round = prizeAdvance(
+                field, board: board, delta: PRIZE_SECONDS + 1,
+                rng: seededRng("spawn/\(spawn)"))
+            field = round.field
+            kinds.formUnion(field.prizes.map(\.kind))
+        }
+        #expect(kinds == [.points, .relief])
     }
 
     @Test("never on a cell already lit")
@@ -327,8 +368,8 @@ struct PrizeClaimTests {
         let key = keyOf(4, 6)
         let fresh = PrizeField(prizes: [Prize(key: key, secondsLeft: PRIZE_SECONDS)])
         let stale = PrizeField(prizes: [Prize(key: key, secondsLeft: 0.5)])
-        let early = prizeClaimValue(.points, prizeClaim(fresh, covering: [key]).claimed)
-        let late = prizeClaimValue(.points, prizeClaim(stale, covering: [key]).claimed)
+        let early = prizePayout(prizeClaim(fresh, covering: [key]).claimed).points
+        let late = prizePayout(prizeClaim(stale, covering: [key]).claimed).points
         #expect(early == GOLD_TOP_POINTS)
         #expect(late < early)
         #expect(late >= GOLD_FLOOR_POINTS)
@@ -339,17 +380,18 @@ struct PrizeClaimTests {
 struct PrizeModifierTests {
     @Test("a clear board offers nothing")
     func aClearBoardOffersNothing() {
-        #expect(SoloModifier.none.prize == nil)
+        #expect(SoloModifier.none.hasPrizes == false)
     }
 
-    @Test("each modifier buys exactly one thing")
-    func eachModifierBuysOneThing() {
-        #expect(SoloModifier.gold.prize == .points)
-        #expect(SoloModifier.salvage.prize == .relief)
-        // Every modifier but `none` lights squares — otherwise the setup row
-        // would offer something the board never does.
+    @Test("the setting is a switch, not a choice of payout")
+    func theSettingIsASwitch() {
+        // Which kind a square is is the board's business now, decided as each
+        // one appears — so the setup row has exactly two answers and neither
+        // of them names a currency.
+        #expect(SoloModifier.prizes.hasPrizes)
+        #expect(SoloModifier.allCases.count == 2)
         for modifier in SoloModifier.allCases where modifier != .none {
-            #expect(modifier.prize != nil, "\(modifier) lights nothing")
+            #expect(modifier.hasPrizes, "\(modifier) lights nothing")
         }
     }
 

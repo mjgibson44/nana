@@ -48,21 +48,22 @@ public enum SoloPace: String, CaseIterable, Sendable {
 /// a room-wide rule has to reach every player over the wire.
 public enum SoloModifier: String, CaseIterable, Codable, Sendable {
     case none
-    /// Gold cells worth points, most the moment they appear.
-    case gold
-    /// Gold cells worth tiles off your pile, most the moment they appear.
-    case salvage
+    /// Prize squares, of both kinds: gold ones pay points, blue ones clear
+    /// tiles off your pile, and which is which is decided as each square
+    /// appears (`Prizes.swift`).
+    case prizes
 
-    /// What claiming one of this modifier's cells buys, or nil when the
-    /// board isn't offering anything. The only thing that differs between
-    /// them, which is why it is one property rather than a branch per site.
-    public var prize: PrizeKind? {
-        switch self {
-        case .none: nil
-        case .gold: .points
-        case .salvage: .relief
-        }
-    }
+    /// Whether the board lights squares at all. It used to be *which* kind of
+    /// square it lit — `.gold` and `.salvage` were separate modifiers — and
+    /// that was a question asked at the wrong moment: before the game, once,
+    /// when the answer ("points, or room in the pile?") is a thing you know
+    /// only while playing. Now both appear and the board asks it live, so
+    /// this is a switch rather than a choice.
+    ///
+    /// Old setups naming a retired case are not migrated: `loadSoloSetup`
+    /// filters through `MODIFIER_OPTIONS`, so a stored `"gold"` reads as the
+    /// default exactly the way a stored `"wildfire"` did.
+    public var hasPrizes: Bool { self != .none }
 }
 
 public struct ModeInfo {
@@ -126,16 +127,15 @@ public let PACE_OPTIONS: [(pace: SoloPace, name: String)] = [
     (pace: .fast, name: "Fast"),
 ]
 
-/// The Board setting's tabs. Like the pace, this row is a switch and nothing
-/// more — what a modifier actually offers belongs on its own card, not on a
-/// sheet being skimmed on the way past.
+/// The Board setting's tabs — now a two-way switch, and literally so: the
+/// board is offering something or it isn't. What the squares actually do
+/// belongs on their own card, not on a sheet being skimmed on the way past.
 ///
 /// Names are kept to eight characters because they are set in tiles, and a
 /// row of nine won't fit the narrowest phone.
 public let MODIFIER_OPTIONS: [(modifier: SoloModifier, name: String)] = [
     (modifier: .none, name: "Clear"),
-    (modifier: .gold, name: "Gold"),
-    (modifier: .salvage, name: "Salvage"),
+    (modifier: .prizes, name: "Prizes"),
 ]
 
 /// What the splash cards call each modifier. `none` adds nothing to the
@@ -143,41 +143,29 @@ public let MODIFIER_OPTIONS: [(modifier: SoloModifier, name: String)] = [
 /// announcing the absence of a thing the player has never heard of.
 public let MODIFIER_NAMES: [SoloModifier: String] = [
     .none: "",
-    .gold: "Gold Rush",
-    .salvage: "Salvage",
+    .prizes: "Prizes",
 ]
 
-/// Gold Rush's explainer, raised the first time it's picked on the setup
-/// sheet. It leads with the decay, because that is the whole mechanic: a
-/// gold cell is not points waiting for you, it is a bid to change what you
-/// were about to play.
-public let GOLD_RUSH_INFO = ModeInfo(
-    name: "Gold Rush",
+/// The prize squares' explainer, raised the first time they're switched on.
+/// It leads with the decay, because that is the whole mechanic: a lit square
+/// is not points waiting for you, it is a bid to change what you were about
+/// to play. The two kinds come second — they share every rule but the payout,
+/// so they are one line each rather than a card each.
+public let PRIZES_INFO = ModeInfo(
+    name: "Prizes",
     tagline: "Solo, with somewhere worth going.",
     details: [
-        "Gold squares appear near your board and last \(Int(PRIZE_SECONDS)) seconds",
+        "Squares light up near your board and last \(Int(PRIZE_SECONDS)) seconds",
         "Land a tile on one to claim it — on the square itself, not beside it",
-        "Worth \(GOLD_TOP_POINTS) the moment it appears, less every second you wait",
-    ]
-)
-
-/// Salvage's explainer. Same sentence structure as Gold Rush's on purpose:
-/// it is the same mechanic, and the only line that differs is the one saying
-/// what a claim buys.
-public let SALVAGE_INFO = ModeInfo(
-    name: "Salvage",
-    tagline: "Solo, with a way out of a full pile.",
-    details: [
-        "Gold squares appear near your board and last \(Int(PRIZE_SECONDS)) seconds",
-        "Land a tile on one to claim it — on the square itself, not beside it",
-        "Clears \(SALVAGE_TOP_TILES) tiles off your pile at once, fewer the longer you wait",
+        "Gold pays up to \(GOLD_TOP_POINTS) points; blue clears up to "
+            + "\(SALVAGE_TOP_TILES) tiles off your pile",
+        "Both are worth most the moment they appear, less every second you wait",
     ]
 )
 
 /// Which explainer each modifier raises, if any.
 public let MODIFIER_INFO: [SoloModifier: ModeInfo] = [
-    .gold: GOLD_RUSH_INFO,
-    .salvage: SALVAGE_INFO,
+    .prizes: PRIZES_INFO
 ]
 
 /// Battle's home-screen card. The rules in one breath: permanent words,
@@ -225,9 +213,10 @@ public let DAILY_DEAL_INFO = ModeInfo(
     name: "Daily Deal",
     tagline: "One board a day. Same start for everyone.",
     details: [
-        "A word is already down — reach all \(DailyBoardRules.targets) targets from it",
-        "Fewest words wins; every board comes with a par to beat",
-        "One go per day, no clock; place every tile for a \(ALL_TILES_BONUS)-point bonus",
+        "A word is already down — reach all \(DailyBoardRules.targets) rings from it",
+        "Then keep going: every tile you place is worth more than a ring",
+        "Take back any word you regret — only the board you finish with counts",
+        "No clock, one go a day; finish when the pile is empty or you say so",
     ]
 )
 

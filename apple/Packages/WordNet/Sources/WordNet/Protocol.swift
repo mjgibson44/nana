@@ -4,7 +4,7 @@ import WordCore
 /// The wire protocol, ported from `src/net/battleSession.ts` (spec:
 /// `docs/apple-port-notes/protocol.md` §1).
 ///
-/// **Version 11.** Six steps up from the web's 5:
+/// **Version 12.** Seven steps up from the web's 5:
 ///
 ///  - v6 added `host`. On the web the join code *is* the host's address, so a
 ///    client always knows whom to `hello`. A GKMatch formed from a party code
@@ -32,11 +32,17 @@ import WordCore
 ///    already reads rather than messages of their own — and both default on
 ///    an older snapshot to what a room without them was: separate boards,
 ///    nothing on them.
+///  - v12 collapsed `BattleState.modifier` from three values to two. Prize
+///    squares stopped being a choice between gold and salvage and became a
+///    switch that lights both, so `"gold"` and `"salvage"` are gone from the
+///    wire and `"prizes"` is on it. An older client handed the new value
+///    cannot decode the snapshot at all — the raw value is unknown to its
+///    enum — which is precisely what the gate is for.
 ///
 /// The version gate is load-bearing rather than ceremonial: there has been no
 /// Game Center sandbox since 2016 (TN2417), so a prerelease build can and will
 /// meet a released one.
-public let PROTOCOL_VERSION = 11
+public let PROTOCOL_VERSION = 12
 
 /// Who a message is from or to. Maps to `GKPlayer.gamePlayerID` — the stable
 /// per-game identity that replaces the web's sessionStorage `playerKey`.

@@ -50,8 +50,9 @@ struct SplashView: View {
         switch splash {
         case .start:
             if let day {
-                "\(day.seedWord.uppercased()) is already down. "
-                    + "Reach all \(day.targets.count) rings — par \(day.par) words."
+                "\(day.seedWord.uppercased()) is already down. Reach all "
+                    + "\(day.targets.count) rings, then play out the pile — "
+                    + "par \(day.par) words, and you can take any of them back."
             } else {
                 "\(SOLO_START_TILES) tiles · "
                     + "\(formatSeconds(Double(endlessInitialSeconds(pace)))) until more arrive"

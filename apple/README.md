@@ -98,7 +98,8 @@ launch environment opens straight onto a game so a simulator can be screenshotte
 | `Packages/WordCore` | The game core in pure Swift — **bit-exact with the web game** via golden fixtures generated from the TypeScript core (`npm run gen:fixtures`), so the same seed deals the same letters on both platforms. |
 | `Packages/WordBoard` | The board's interaction brain, kept pure so it tests without a simulator (plan §11): the **gesture disambiguation state machine** (6pt slop, 350ms double-press, 300ms hold — to drag, or to aim a gapped word through a placed letter — locked-board semantics, staged tiles that lift on any board, pointer-id filtering) and the **viewport math** (zoom clamps, pinch anchoring, shrink-only auto-fit, growth compensation, scroll-to-pan). |
 | `Packages/WordNet` | The **battle wire protocol** over an injectable transport — roster and seat capacity, seat grace and re-entry, attack clamping/splitting, the referee, the v6 host-election handshake, the v7 Occupy board and its placement round trip (v9: unbounded, with zones; v10: each
-player's own words, and zones that open, close and pay out), and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
+player's own words, and zones that open, close and pay out; v11: a room's board view and
+modifier; v12: that modifier collapsed to a switch), and the version gate. Tests run over an in-memory mesh, so only the GKMatch adapter will need devices (plan §7.5). |
 | `Word/` (app) | SwiftUI: a custom pan/zoom board (owning its offset is what lets zoom and its scroll correction land in one frame), a Canvas cell lattice with views only for placed cells, one gesture pipeline for board taps and pans, the word-building loop, the paced Solo session, the battle session and its results, the tile-lettered home and battle screens, synthesized audio + haptics, and save/restore across process death. `Board/BoardInputBridge.swift` is the one place that reaches past SwiftUI into UIKit/AppKit, for the three things SwiftUI won't report: the live pinch midpoint, the pointer's actual device kind, and Mac scroll wheels. |
 
 ```bash
@@ -142,20 +143,48 @@ build, and par is achievable because that crossword achieves it — and beatable
 the letters come from several ordinary overlapping words and there are normally tighter
 arrangements. Par is derived, not tuned, so it is honest on every deal.
 
-- **Scored on words, low being good.** Which fights the points scoring productively:
-  `wordScore` is triangular and every run pays, so points want a densely crossed board
-  with many runs while par wants few words. The move that serves both is one word laid
-  across three others — four new runs for one stroke. The leaderboard is ranked on the
-  packed pair (`dailyLeaderboardScore`), strokes first and points as the tiebreak.
-- **No undo, and none needed to explain.** Words are permanent here as everywhere else,
-  so a stroke is a word played. Staging is what softens it: tiles sit ghosted on the
-  board and can be moved or cleared freely until the ✓.
-- **It cannot be lost.** No clock, and the pile explicitly cannot bury it — the whole
-  deal arrives at once and fills most of the pile, and nothing more is coming. The
-  tension is your number against par, not a loss you get no second go at.
+**The rings are a tier, not an ending, and a word can be taken back.** Both are
+corrections to the first cut, which shipped, was played, and had its signs the wrong way
+round in two places. *Covering the last ring used to end the day* — but the rings are the
+mode's **minimum** bar, so ending on them meant reading the board well bought you less of
+it: three rings inside four words and it was over with fifteen tiles in hand, the
+every-tile tier unreachable unless the same word happened to empty the pile in the same
+stroke. And *nothing could be taken back* — a fixed deal, three cells to reach and
+irreversible moves is the standard recipe for a puzzle you kill on move three and discover
+on move eleven. Permanence protects a clock, and this mode hasn't got one; it was
+inherited rather than earned, so the Daily — and only the Daily — has an eraser.
+
+- **The day ends when the pile is empty, or when you say so.** An empty pile is a
+  finished board and nothing is arriving, so it finishes itself; otherwise FINISH DAY sits
+  in the game menu behind a confirm, the one irreversible button in a mode whose point is
+  that nothing else is. The gauge under the header is turned around to match: in the Daily
+  it fills with tiles *placed*, green all the way, because a bar that emptied as you
+  played would be a progress bar running backwards.
+- **The eraser is a stack.** `undoLastWord` lifts the most recent word only, tiles back to
+  the pile and the stroke off the count, which is what lets it skip the connectivity
+  question entirely: taking words off in reverse order can never orphan a board or break a
+  crossing, so every position it can reach is one the player already stood in. Strokes are
+  therefore *words standing on the final board* — the score is a property of the artifact
+  rather than of the route, which is what makes trying something out free.
+- **One number, and it is the one on screen** (`dailyScore`): the board's points, plus
+  `DAILY_TARGET_POINTS` (40) a ring, plus `DAILY_PAR_BONUS` (30) a stroke under par once
+  every ring is covered, plus `DAILY_TILE_POINTS` (10) for every tile off the pile. Every
+  term is a payment, so the number only ever climbs — and paying for tiles placed is the
+  same ranking as charging for tiles left (everyone gets the same deal), but a far better
+  thing to watch. Strokes stopped being the *sort key* for a reason: under the old
+  strokes-first packing, a voluntary ending made "three rings in four words, then stop"
+  the optimal line, which would have brought the shortness back as correct strategy. Par
+  is a prize now, not a tax — going over it costs only the bonus you didn't earn.
+- **It still cannot be lost, and now it cannot be stranded either.** No clock, no burial
+  (the whole deal arrives at once and fills most of the pile), and no wrong word that can
+  put a ring out of reach for good.
 - **One go a day, and a day is picked back up rather than dealt again.** The puzzle
   isn't stored in the save blob — it is a pure function of the day's seed, so it is
-  rebuilt and the saved board, pile and strokes are laid back over it.
+  rebuilt and the saved board, pile and *stack of words* are laid back over it. The
+  eraser survives being put down: a day picked up after lunch can still take back the word
+  it went to lunch regretting.
+- **A day opens on the whole of itself** — the seed word and all three rings in view,
+  since a ring off the edge of the opening view is an instruction the player can't see.
 
 `DailyDeal.swift` next door owns the calendar rather than the puzzle: which day is live,
 when it rolls over, the salted seed (§8.4), and the streak. The recurring leaderboard is
@@ -217,10 +246,19 @@ actually play:
 
 ### Solo modifiers: prize cells
 
-A second row on the Solo setup screen — **Clear**, **Gold**, **Salvage** — rather than a
-door of its own, because each is the same game offering you something different. The
-rules are pure Swift in `WordCore/Prizes.swift`, and the two live modifiers are one
-mechanic with two payouts (`SoloModifier.prize`), not two mechanics.
+A second row on the Solo setup screen — **Clear** or **Prizes** — rather than a door of
+its own, because it is the same game offering you something different. The rules are pure
+Swift in `WordCore/Prizes.swift`.
+
+**It is a switch, not a choice of payout.** The row used to read Clear / Gold / Salvage,
+and picking between the last two was a question asked at the wrong moment: *would you
+rather have points or room in the pile?* is something you know while playing, not
+beforehand — and whichever way you answered, every square on the board then said the same
+thing. Now both kinds appear, each square drawing its own as it lights
+(`PRIZE_RELIEF_SHARE`, an even split), so the question is asked live, on the board, by a
+gold square and a blue one lit at once with a pile that has an opinion about which you go
+for. One mechanic with two payouts, as it always was — the difference is that the board
+picks now, and it picks both.
 
 **These replaced Wildfire**, which is retired. Fire's good idea was that the board should
 give you somewhere to *go* — Solo's freedom is calm, and calm is also why a long run has
@@ -245,13 +283,18 @@ for as long as you could afford to. A prize inverts the sign and keeps the geome
   square is not points waiting for you, it is a bid to change what you were about to play
   *right now*, and the longer you think the less it is worth.
 
-| | pays | top | floor |
-|---|---|---|---|
-| **Gold Rush** (`.points`) | points, into the banked bonus | `GOLD_TOP_POINTS` (100) | `GOLD_FLOOR_POINTS` (10) |
-| **Salvage** (`.relief`) | tiles off your pile | `SALVAGE_TOP_TILES` (10) | `SALVAGE_FLOOR_TILES` (1) |
+| | pays | top | floor | on the board |
+|---|---|---|---|---|
+| **Gold** (`.points`) | points, into the banked bonus | `GOLD_TOP_POINTS` (100) | `GOLD_FLOOR_POINTS` (10) | amber, solid edge, big number |
+| **Salvage** (`.relief`) | tiles off your pile | `SALVAGE_TOP_TILES` (10) | `SALVAGE_FLOOR_TILES` (1) | blue, dashed edge, `4▾` |
 
 The top price for gold is above what any word pays, on purpose: a square worth less than
 the word already in your hand changes no decisions.
+
+**The two have to differ in more than hue**, now that they share a board: colour, edge
+style and the shape of the number all disagree, so the squares are tellable apart at a
+squint, on a small phone, and by an eye that doesn't see hue. One word can cross one of
+each, and a claim pays out in both currencies (`prizePayout`).
 
 **Prizes run on wall time, not the drip's rounds.** Wildfire could ride the round boundary
 because it *was* the round; twenty seconds rounded to the nearest fifteen would put every
@@ -274,20 +317,21 @@ seconds they had left, and goes on lighting the ones it would have lit.
 
 Two rules a room agrees on before it deals, both the host's to pick and everyone's to
 play by. They ride the host's snapshot (`BattleState.boardView`, `BattleState.modifier`,
-protocol v11) rather than each player's own settings, because a room where two people
+protocol v12) rather than each player's own settings, because a room where two people
 are playing different games is not a room — a client's stored setup is never consulted,
 and the lobby shows every player the rule they will actually play under. The host edits
 it in the lobby and only in the lobby: a rule changed mid-game would leave each board on
 a different one for the length of a broadcast.
 
-- **Squares** — the same prize cells Solo's setup sheet offers, applied to every board in
-  the room. On separate boards **the timing is shared and the square is local**, and that
-  needs no wire at all: every player's clock starts at the same deal and counts the same
-  seconds, so a gold square appears on every screen at the same moment and is worth the
-  same to whoever reaches it first. Where it *sits* is necessarily each board's own
-  business, since they are different boards. Gold's points feed `bankedBonus`, which is
-  the score already reported to the room; Salvage clears the pile Battle eliminates you
-  for overflowing. A spectator's board is never lit — they have nothing to claim with.
+- **Squares** — the same prize cells Solo's setup sheet offers, and the same two-way
+  switch, applied to every board in the room. On separate boards **the timing is shared
+  and the square is local**, and that needs no wire at all: every player's clock starts at
+  the same deal and counts the same seconds, so squares appear on every screen at the same
+  moment and are worth the same to whoever reaches one first. Where each one *sits* — and
+  which kind it is — is necessarily each board's own business, since they are different
+  boards. Gold's points feed `bankedBonus`, which is the score already reported to the
+  room; salvage clears the pile Battle eliminates you for overflowing. A spectator's board
+  is never lit — they have nothing to claim with.
 - **Board** — `separate` (Battle as it has always played) or `shared`, which is the one
   idea worth keeping out of Occupy now that its door is closed: everyone building on the
   same squares, where a rival's word is a wall.
@@ -628,6 +672,12 @@ daily rule — and its start instant has to agree with `DailyRules.resetHourUTC`
 in different time zones submit *different puzzles* into the same occurrence. The script
 anchors it on the next reset hour for that reason; App Store Connect won't accept a start
 date in the past, so it can't simply be a fixed constant.
+
+It is also on `daily.deal.v2` since the Daily's rework, for the same reason the two Solo
+boards carry a suffix: scores are bare integers with no record of the rules that made
+them, and both the rules and the quantity changed — the day no longer ends at the third
+ring, and what is posted is the score shown on screen rather than a strokes-first packed
+pair. The old `daily.deal` board stays in App Store Connect, unused.
 
 Two quirks the API doesn't document well, both discovered the hard way: `recurrenceDuration`
 rejects `P1D` and wants a duration with time components (`PT24H`), and `recurrenceRule` is

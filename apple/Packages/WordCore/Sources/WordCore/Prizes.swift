@@ -38,21 +38,30 @@
 ///    were going to play *right now*, and the longer you think the less it is
 ///    worth. That is the whole mechanic; everything else is bookkeeping.
 ///
-/// ## Two payouts, one rule
+/// ## Two payouts on one board
 ///
-/// `PrizeKind` is what a claim buys, and it is the only difference between
-/// the modifiers on the setup sheet:
+/// `PrizeKind` is what a claim buys, and every square decides its own as it
+/// appears:
 ///
-///  - **Gold Rush** (`.points`) pays points — `GOLD_TOP_POINTS` down to
-///    `GOLD_FLOOR_POINTS`. A scoring modifier: it changes what a good run is
+///  - **Gold** (`.points`) pays points — `GOLD_TOP_POINTS` down to
+///    `GOLD_FLOOR_POINTS`. A scoring square: it changes what a good run is
 ///    worth without changing whether you survive it.
 ///  - **Salvage** (`.relief`) pays tiles off your pile — `SALVAGE_TOP_TILES`
-///    down to `SALVAGE_FLOOR_TILES`. A survival modifier: it changes how long
+///    down to `SALVAGE_FLOOR_TILES`. A survival square: it changes how long
 ///    you last without changing what a word is worth.
 ///
 /// Same spawn rule, same clock, same claim, same decay — so the two are one
-/// mechanic the player learns once, and the sheet is choosing what the board
-/// is offering rather than choosing a different game.
+/// mechanic the player learns once. **They used to be two modifiers**, chosen
+/// on the way in, and the choice was the wrong shape: it asked a question
+/// ("would you rather have points or room?") before the game that answers it
+/// had started, and whichever way you answered, every square on the board
+/// then said the same thing. Mixing them puts the question where it belongs —
+/// on the board, live, with a gold square and a blue one lit at once and a
+/// pile that has an opinion about which you go for. So the setup rows are now
+/// a switch: squares, or no squares.
+///
+/// Which kind a square is comes out of the same seeded draw that placed it
+/// (`PRIZE_RELIEF_SHARE`), so it is as deterministic as everything else here.
 ///
 /// ## One clock, and it is not the drip's
 ///
@@ -89,12 +98,19 @@ public enum PrizeKind: String, Equatable, Codable, Sendable {
 /// no way for the two to disagree.
 public struct Prize: Equatable, Codable, Sendable {
     public var key: CellKey
+    /// What this one pays. Decided when it appears and never changes, so the
+    /// square the player is looking at is the square they will claim.
+    public var kind: PrizeKind
     public var secondsLeft: Double
 
-    public init(key: CellKey, secondsLeft: Double = PRIZE_SECONDS) {
+    public init(key: CellKey, kind: PrizeKind = .points, secondsLeft: Double = PRIZE_SECONDS) {
         self.key = key
+        self.kind = kind
         self.secondsLeft = secondsLeft
     }
+
+    /// What claiming it right now would pay, in its own currency.
+    public var value: Int { prizeValue(kind, secondsLeft: secondsLeft) }
 }
 
 /// Every prize on the board, and the clock that puts the next one there.
@@ -166,6 +182,17 @@ public let PRIZE_MAX_LIVE = 2
 ///
 /// The most likely thing on this page to want tuning after a playtest.
 public let PRIZE_REACH = 2
+
+/// How often a square is a salvage one rather than a gold one.
+///
+/// An even split, because the interesting board is the one holding one of
+/// each: gold is worth more the *better* you are doing (points you can afford
+/// to go and get), salvage is worth more the *worse* you are doing (room you
+/// need), so a fifty-fifty board asks a different question depending on how
+/// the game is going without the game having to notice. Weighting it either
+/// way would be answering that question on the player's behalf, which is the
+/// mistake the two separate modifiers made.
+public let PRIZE_RELIEF_SHARE = 0.5
 
 /// Gold Rush's payout, full price down to floor.
 ///
@@ -291,7 +318,11 @@ public func prizeAdvance(
             if !candidates.isEmpty {
                 let index = min(Int(rng() * Double(candidates.count)), candidates.count - 1)
                 let key = candidates[index]
-                next.prizes.append(Prize(key: key))
+                // Where first, then what — two draws off the one stream, in
+                // that order, because the position is the part a replayed or
+                // restored game has to land on identically.
+                let kind: PrizeKind = rng() < PRIZE_RELIEF_SHARE ? .relief : .points
+                next.prizes.append(Prize(key: key, kind: kind))
                 next.spawns += 1
                 lit.append(key)
             }
@@ -318,7 +349,14 @@ public func prizeClaim(
     return (next, claimed)
 }
 
-/// What a round's claims are worth, all together.
-public func prizeClaimValue(_ kind: PrizeKind, _ claimed: [Prize]) -> Int {
-    claimed.reduce(0) { $0 + prizeValue(kind, $1) }
+/// What a round's claims are worth, all together — in both currencies,
+/// because one word can land on a gold square and a blue one at the same
+/// time and the caller has to pay out both.
+public func prizePayout(_ claimed: [Prize]) -> (points: Int, tiles: Int) {
+    claimed.reduce(into: (points: 0, tiles: 0)) { total, prize in
+        switch prize.kind {
+        case .points: total.points += prize.value
+        case .relief: total.tiles += prize.value
+        }
+    }
 }

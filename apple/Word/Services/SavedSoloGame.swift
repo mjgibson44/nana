@@ -17,8 +17,11 @@ struct SavedSoloGame: Codable, Equatable {
     /// v3 dropped the Daily Deal's fields along with the mode; v4 added the
     /// hazard and the fire it lit; v5 brought the Daily back, as the day it
     /// was and the strokes spent on it; v6 retired Wildfire and put the
-    /// prize field where the fire was.
-    static let version = 6
+    /// prize field where the fire was; v7 replaced the Daily's stroke count
+    /// with the stack of words behind it — the day can take a word back now,
+    /// so a blob has to carry what would come back — and gave every prize a
+    /// kind of its own.
+    static let version = 7
     static let key = "nana.solo.save.v1"
 
     var version: Int = Self.version
@@ -49,13 +52,20 @@ struct SavedSoloGame: Codable, Equatable {
     /// How many clock deals have happened — the deal stream's position, so a
     /// resumed game keeps dealing the same letters it would have.
     var dealSerial: Int
-    /// The Daily: which day's puzzle, and how many words it has cost so far.
+    /// The Daily: which day's puzzle, and the words played on it so far.
     /// The puzzle itself isn't stored — it is a pure function of the day's
     /// seed, so it is rebuilt rather than carried.
     var dailyDay: Int? = nil
-    var strokes: Int = 0
+    /// Every word standing on the day's board, oldest first, each with what
+    /// it would give back. The stack is the undo (`GameModel.undoLastWord`),
+    /// and it is also the stroke count: one number derived from one list
+    /// beats two fields that can disagree about the same day.
+    var landings: [DailyLanding] = []
     /// When it was put away.
     var savedAt: Double
+
+    /// Words played on the day so far — the Daily's score, low being good.
+    var strokes: Int { landings.count }
 
     var soloPace: SoloPace { SoloPace(rawValue: pace) ?? .regular }
     var soloModifier: SoloModifier { SoloModifier(rawValue: modifier) ?? .none }

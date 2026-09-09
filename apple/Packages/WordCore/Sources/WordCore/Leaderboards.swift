@@ -42,7 +42,13 @@ public enum LeaderboardID: String, CaseIterable, Codable, Sendable {
     /// **Recurring**: 24h duration, 24h restart — Apple's documented
     /// daily-puzzle shape. The occurrence a score belongs to is decided by
     /// when the game *started*, not when it finished (see `DailyResult`).
-    case daily = "daily.deal"
+    ///
+    /// On `.v2` because the Daily's rework changed both the rules and the
+    /// quantity: the day no longer ends at the third ring, words can be taken
+    /// back, and what is posted is `DailyResult.score` rather than the old
+    /// strokes-first packed pair. Nothing about the two is comparable, and a
+    /// leaderboard cannot reinterpret what it already holds.
+    case daily = "daily.deal.v2"
     /// Classic, all-time. Game Center never sums anything for you, so this is
     /// submitted as the running total from `MergedProgress.battleWins`.
     case battleWins = "battle.wins"
@@ -183,11 +189,10 @@ public func submissions(
         // submitted: a recurring leaderboard would happily file it against
         // the *new* day's board (plan §8.2).
         guard let daily, dailyWithinDay else { return [] }
-        // The board is ranked on the thing the mode is about — words played,
-        // fewest first — with points settling a tie, so what goes up is the
-        // packed pair rather than the points the player was shown
-        // (`dailyLeaderboardScore`). A day that somehow reports no result
-        // falls back to its points, which sorts sanely against nothing else.
+        // What goes up is exactly what the player was shown: one number that
+        // already has the rings, the par bonus and the tiles left in it
+        // (`dailyScore`). A day that somehow reports no result falls back to
+        // its points, which sorts sanely against nothing else.
         let posted = dailyResult.map(dailyLeaderboardScore) ?? score
         return [PendingScore(board: .daily, score: posted, day: daily.day, at: at)]
 

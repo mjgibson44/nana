@@ -49,9 +49,12 @@ struct BoardScene {
     /// still shows its ring and the board reads as a scorecard.
     var targets: Set<Cell> = []
 
-    /// One gold square: where it is, and what claiming it right now pays.
+    /// One lit square: where it is, what it pays, and in which currency —
+    /// gold squares and salvage squares share a board, so the kind has to
+    /// travel with the mark.
     struct PrizeMark: Equatable {
         var cell: Cell
+        var kind: PrizeKind
         var value: Int
     }
 }
@@ -83,7 +86,8 @@ struct BoardContentView: View {
                 // Keyed by cell so the lattice pass below is a dictionary
                 // lookup per square rather than a scan of the prize list.
                 let gold = Dictionary(
-                    scene.prizes.map { ($0.cell, $0.value) }, uniquingKeysWith: { first, _ in first })
+                    scene.prizes.map { ($0.cell, ($0.kind, $0.value)) },
+                    uniquingKeysWith: { first, _ in first })
                 let targets = scene.targets
                 for row in 0..<metrics.rows {
                     for col in 0..<metrics.cols {
@@ -91,13 +95,13 @@ struct BoardContentView: View {
                             x: Double(col) * step, y: Double(row) * step,
                             width: cell, height: cell)
                         let here = Cell(row: bounds.minRow + row, col: bounds.minCol + col)
-                        // A gold square is the brightest empty cell on
+                        // A lit square is the brightest empty cell on
                         // screen, because it is the one asking to be played
                         // on before its twenty seconds are up.
-                        let worth = gold.isEmpty ? nil : gold[here]
+                        let prize = gold.isEmpty ? nil : gold[here]
                         let fill: Color
-                        if worth != nil {
-                            fill = Palette.prizeCell
+                        if let prize {
+                            fill = prize.0 == .points ? Palette.prizeCell : Palette.reliefCell
                         } else if !openCells.isEmpty, openCells.contains(here) {
                             fill = Palette.zoneCell
                         } else if !settledCells.isEmpty, settledCells.contains(here) {
@@ -108,21 +112,33 @@ struct BoardContentView: View {
                         context.fill(
                             Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
                             with: .color(fill))
-                        if let worth {
+                        if let (kind, worth) = prize {
+                            let points = kind == .points
+                            let edge = points ? Palette.prizeEdge : Palette.reliefEdge
+                            let width = Self.zoneEdgeWidth(for: cell)
                             context.stroke(
                                 Path(
                                     roundedRect: rect, cornerRadius: radius,
                                     style: .continuous),
-                                with: .color(Palette.prizeEdge),
-                                lineWidth: Self.zoneEdgeWidth(for: cell))
+                                with: .color(edge),
+                                // Solid for points, dashed for tiles: the two
+                                // kinds have to differ in more than hue, and
+                                // a dashed edge survives a squint, a small
+                                // phone and a colourblind eye alike.
+                                style: StrokeStyle(
+                                    lineWidth: width,
+                                    dash: points ? [] : [width * 2, width * 1.5]))
                             // What it pays *now*, on the square itself. The
                             // number falling as you watch is the mechanic, so
                             // showing anything else — a countdown, a static
-                            // price — would be showing the wrong thing.
+                            // price — would be showing the wrong thing. A
+                            // salvage square says what the number *is*, since
+                            // "4" next to a gold "80" would otherwise read as
+                            // a very bad deal rather than four tiles.
                             context.draw(
-                                Text("\(worth)")
-                                    .font(.system(size: cell * 0.36, weight: .bold))
-                                    .foregroundStyle(Palette.prizeEdge),
+                                Text(points ? "\(worth)" : "\(worth)▾")
+                                    .font(.system(size: cell * (points ? 0.36 : 0.3), weight: .bold))
+                                    .foregroundStyle(edge),
                                 at: CGPoint(x: rect.midX, y: rect.midY))
                         }
                         if !targets.isEmpty, targets.contains(here) {

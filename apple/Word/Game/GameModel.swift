@@ -32,6 +32,30 @@ struct GameToast: Equatable {
     var serial: Int
 }
 
+/// One word landed in the Daily, and everything undoing it needs.
+///
+/// The Daily is the only mode with an undo, and it exists because permanence
+/// there was inherited rather than earned: a clock is what permanence
+/// protects, and this mode hasn't got one. Without it a fixed deal plus three
+/// cells to reach plus irreversible moves is a puzzle a player can strand on
+/// move three and only discover on move eleven — the one failure a
+/// one-attempt-a-day mode must not have.
+///
+/// Codable because a day is put down and picked up: the stack has to survive
+/// process death with the board it belongs to, or coming back tomorrow would
+/// quietly take the eraser away.
+struct DailyLanding: Codable, Equatable {
+    /// What it read, for the toast that says what just came back off.
+    var word: String
+    /// The cells it put tiles on — never any it merely crossed.
+    var keys: [CellKey]
+    /// Those tiles' letters, in the same order, to hand back to the pile.
+    var letters: [String]
+    /// The longest run it made, so the game's "longest word" can follow the
+    /// board rather than the history.
+    var longest: Int
+}
+
 /// Keyboard vocabulary kept independent of SwiftUI's `KeyPress`, so the
 /// hardware-keyboard behavior is unit-testable.
 enum GameCommand: Equatable {
@@ -255,15 +279,32 @@ final class GameModel {
     /// Which day it is — the streak key, and the leaderboard occurrence the
     /// result belongs to.
     private(set) var dailyDeal: DailyDeal?
-    /// Words played. The Daily's score, low being good.
+    /// Words standing on the day's board — the Daily's stroke count, low
+    /// being good.
     ///
-    /// Every word counts, and none is ever refunded: words are permanent here
-    /// as everywhere else, so a stroke is a word played and that is the end of
-    /// it. The thinking happens before it is spent — tiles staged on the board
-    /// can be moved or cleared freely until the ✓.
+    /// It is `landings.count`, not "words ever played": the Daily is the one
+    /// mode where a word can be lifted back off, and a taken-back word is not
+    /// a stroke spent. The score is a property of the board you finish with
+    /// rather than of the route you took there, which is what makes trying
+    /// something out free (`undoLastWord`).
     private(set) var strokes = 0
 
-    /// Put gold squares on the board directly.
+    /// The Daily's undo stack: every word landed today, newest last, with
+    /// what it put down and what it cost the pile.
+    ///
+    /// Only the last one can be lifted, and that is the whole reason this is
+    /// a stack rather than a set of removable words: taking words off in
+    /// reverse order can never orphan the board or break a crossing, so undo
+    /// needs no connectivity check and can never leave a position the rules
+    /// wouldn't have allowed.
+    private(set) var landings: [DailyLanding] = []
+
+    /// Whether the day's rings have already been cheered, so covering the
+    /// last one says so exactly once. It is a tier now, not an ending, and a
+    /// tier that congratulated you on every subsequent word would be noise.
+    private var ringsAnnounced = false
+
+    /// Put prize squares on the board directly.
     ///
     /// The game never calls this — prizes are the clock's to light and the
     /// player's to claim. It exists so a test can start from a board that
@@ -388,6 +429,17 @@ final class GameModel {
         occupy?.view?.centre ?? Self.startCell
     }
 
+    /// The middle of the day: the box holding the seed word and every ring.
+    ///
+    /// A Daily opens on this rather than on the start square, because the
+    /// puzzle is a *place* — the rings are only meaningful relative to the
+    /// word already down, and a ring off the edge of the opening view is an
+    /// instruction the player can't see.
+    var dayCentre: Cell {
+        guard let box = tileBounds else { return Self.startCell }
+        return Cell(row: (box.minRow + box.maxRow) / 2, col: (box.minCol + box.maxCol) / 2)
+    }
+
     /// Where the opener would start from, heading across: the start square.
     /// In Occupy that's nil until the deal has named this player's seat.
     var openerAnchor: Cell? {
@@ -510,12 +562,23 @@ final class GameModel {
     }
 
     /// Word points stay live; only the 25-point board-clear awards are banked.
+    ///
+    /// The Daily scores its board outright — every run, plus `ALL_TILES_BONUS`
+    /// for a pile emptied — because there is no board clear there to bank and
+    /// the day's card promises that bonus by name.
     var runningScore: Int {
-        bankedBonus + boardScore.words
+        if mode == .daily { return boardScore.total }
+        return bankedBonus + boardScore.words
             + (boardScore.bonusEarned ? ENDLESS_CONNECT_BONUS : 0)
     }
 
-    var score: Int { isComplete ? finalScore : liveScore }
+    /// The number in the header, and in the Daily the number on the
+    /// leaderboard: one quantity, so what is ranked can never drift from what
+    /// was shown (`DailyResult.score`).
+    var score: Int {
+        if let dailyResult { return dailyResult.score }
+        return isComplete ? finalScore : liveScore
+    }
 
     /// What the game is worth right now: the words down, or in Occupy the
     /// value of the tiles this seat holds.
@@ -621,15 +684,24 @@ final class GameModel {
     var isDaily: Bool { mode == .daily }
 
     var pileTone: PileTone {
-        // A full pile is the normal state of an Occupy hand, not a warning.
-        if mode == .occupy { return .ok }
+        // A full pile is the normal state of an Occupy hand, not a warning —
+        // and of a Daily's opening hand, which arrives holding the whole
+        // puzzle and cannot bury anybody.
+        if mode == .occupy || mode == .daily { return .ok }
         if rack.count >= pileUrgent { return .urgent }
         if rack.count >= pileWarn { return .warn }
         return .ok
     }
 
+    /// The Solo board-clear offer: empty the pile on a valid board and the
+    /// game pays a bonus and deals you five more tiles.
+    ///
+    /// Never in the Daily. There, an empty pile is the *end* — the day's
+    /// whole deal is what there is, and dealing five more would be inventing
+    /// letters the puzzle was never cut from. (`recordStroke` finishes the
+    /// day instead, and `DailyResult` pays the all-tiles bonus.)
     var boardClearReady: Bool {
-        !isComplete && boardScore.bonusEarned
+        mode != .daily && !isComplete && boardScore.bonusEarned
     }
 
     /// Seconds until the next batch lands, whichever clock is running.
@@ -1019,6 +1091,8 @@ final class GameModel {
         recoveredFromOverLimit = false
         prizesClaimed = 0
         lastPrizeTick = nil
+        landings = []
+        ringsAnnounced = false
     }
 
     func dismissSplash(at now: Date = .now) {
@@ -1089,7 +1163,7 @@ final class GameModel {
     /// game ends only when the pile is actually full. Digging back out
     /// re-arms it, and is the comeback the badge is for.
     private func soundPileAlarm() {
-        guard !isComplete, mode != .occupy else {
+        guard !isComplete, mode != .occupy, mode != .daily else {
             inTheRed = false
             return
         }
@@ -1137,7 +1211,7 @@ final class GameModel {
     /// this is deliberately not seeded off a shared stream position. A
     /// spectator's board is skipped: they have nothing to claim with.
     private func advancePrizes(at now: Date) {
-        guard mode == .endless || mode == .battle, modifier.prize != nil,
+        guard mode == .endless || mode == .battle, modifier.hasPrizes,
             !isComplete, !spectating, !solo.clockHeld
         else {
             lastPrizeTick = nil
@@ -1206,11 +1280,16 @@ final class GameModel {
     /// before that.
     var dailyResult: DailyResult? {
         guard let day, let progress = dailyProgress else { return nil }
+        let left = isComplete ? finalTilesLeft : rack.count
         return DailyResult(
             strokes: strokes,
             par: day.par,
             points: isComplete ? finalScore : runningScore,
             reached: progress.reached,
+            // What the deal handed over, less what is still in hand. Nothing
+            // ever adds to a Daily's pile, so this cannot go negative.
+            tilesPlaced: max(0, day.letters.count - left),
+            tilesLeft: left,
             allTilesPlaced: progress.allTilesPlaced)
     }
 
@@ -1783,7 +1862,12 @@ final class GameModel {
         cues?.play(.commit)
         claimPrizes(covering: result.steps.map(\.key))
         soundPileAlarm()
-        spendStroke()
+        recordStroke(
+            DailyLanding(
+                word: newRuns.max { $0.word.count < $1.word.count }?.word ?? "",
+                keys: result.steps.map(\.key),
+                letters: result.steps.map(\.letter),
+                longest: newRuns.map(\.word.count).max() ?? 0))
 
         // Battle: the word that just landed hits the field. Only the growth
         // counts — a word extended or bridged from words already down is
@@ -1812,22 +1896,102 @@ final class GameModel {
         return true
     }
 
-    /// A word landed, so a stroke is spent — and if that word covered the last
-    /// target, the day is done.
+    /// A word landed in the Daily: a stroke, and a line on the stack that can
+    /// take it back.
     ///
-    /// Checked after the board and the pile have both settled, so the result
-    /// knows whether every tile went down as well as whether every target was
-    /// reached. The Daily has no other ending: no clock to run out and no pile
-    /// to drown in, so the only way it finishes is by being finished.
-    private func spendStroke() {
+    /// Run after the board and the pile have both settled, so what it reads
+    /// is the position the player is actually looking at.
+    ///
+    /// **Covering the last ring no longer ends the day.** It used to, and
+    /// that was the mode's central mistake: the rings are its *minimum* bar,
+    /// so ending on them meant the better you read the board the less of it
+    /// you got — three rings in four words and the day was over with fifteen
+    /// tiles in hand, the every-tile tier unreachable unless the same word
+    /// happened to empty the pile. Now the rings are a tier that pays
+    /// (`dailyScore`) and the day runs until there is nothing left to play:
+    /// an empty pile, or the player saying so (`finishDay`).
+    private func recordStroke(_ landing: DailyLanding) {
         guard mode == .daily else { return }
-        strokes += 1
-        guard dailyProgress?.done == true else { return }
+        landings.append(landing)
+        strokes = landings.count
+        announceRings()
+        finishIfPileEmpty()
+    }
+
+    /// The first tier, called out once, the moment the last ring is covered.
+    private func announceRings() {
+        guard mode == .daily, !ringsAnnounced, dailyProgress?.ringsDone == true else { return }
+        ringsAnnounced = true
+        cues?.play(.win)
+        rejectToast("All \(day?.targets.count ?? 0) rings! Now empty the pile.")
+    }
+
+    /// The day's natural ending: a pile with nothing in it. Every landing
+    /// keeps the board legal, so an empty pile is always a finished board —
+    /// and a player holding no tiles has no move left to make.
+    private func finishIfPileEmpty() {
+        guard mode == .daily, !isComplete, rack.isEmpty else { return }
         finishGame(reason: .solved)
     }
 
-    /// A word that lands a tile on a gold square claims it, for whatever it
-    /// is worth at the moment it lands.
+    /// The other ending: the player is happy with the board and stops.
+    ///
+    /// A day is never *lost*, so this is the only thing standing between a
+    /// player and their score — and because the score pays for every tile
+    /// that made it onto the board (`DAILY_TILE_POINTS`), stopping early
+    /// forfeits something rather than banking something. It is a decision
+    /// with a price, not a way to game the ranking.
+    func finishDay() {
+        guard mode == .daily, !isComplete else { return }
+        finishGame(reason: .solved)
+    }
+
+    /// Whether the last word can be lifted back off the board.
+    ///
+    /// The Daily only. Everywhere else a clock is running and taking a word
+    /// back would be rewinding it; here there is no clock, and permanence was
+    /// inherited rather than justified — it turned a fixed deal and a spatial
+    /// requirement into a puzzle you could kill on move three and only
+    /// discover on move eleven.
+    var canUndo: Bool {
+        mode == .daily && !isComplete && !hasStaged && !landings.isEmpty
+    }
+
+    /// Take the last word back: its tiles off the board and into the pile,
+    /// its stroke off the count.
+    ///
+    /// Reverse order only, which is what keeps it honest — every position
+    /// this can reach is a position the player already stood in, so no undo
+    /// can produce a board the rules would have refused.
+    @discardableResult
+    func undoLastWord() -> Bool {
+        guard canUndo else {
+            if hasStaged { rejectToast("Confirm or clear the tiles on the board first.") }
+            return false
+        }
+        let landing = landings.removeLast()
+        var next = board
+        for key in landing.keys { next[key] = nil }
+        setBoard(next)
+        rack.append(contentsOf: landing.letters)
+        strokes = landings.count
+        // The record follows the board rather than the history: the longest
+        // word is the longest one still standing, and a day that has just
+        // lost its third ring can be cheered for reaching it again.
+        longestWordPlaced = landings.map(\.longest).max() ?? 0
+        ringsAnnounced = dailyProgress?.ringsDone == true
+        picks = []
+        staged = []
+        clearAim()
+        cues?.play(.commit)
+        rejectToast("Took back \(landing.word.uppercased())")
+        return true
+    }
+
+    /// A word that lands a tile on a lit square claims it, for whatever it is
+    /// worth at the moment it lands — points from a gold one, tiles off the
+    /// pile from a blue one, and both at once from a word that crosses one of
+    /// each.
     ///
     /// Exactly on the square, unlike Wildfire's dousing: a fire had to be
     /// answerable with the letters you happened to hold or it was a coin
@@ -1839,25 +2003,25 @@ final class GameModel {
     /// pays a hundred to the word that goes straight for it and ten to the
     /// one that gets round to it.
     func claimPrizes(covering cells: [CellKey]) {
-        guard let kind = modifier.prize, !prizes.isEmpty else { return }
+        guard modifier.hasPrizes, !prizes.isEmpty else { return }
         let (next, claimed) = prizeClaim(prizes, covering: cells)
         guard !claimed.isEmpty else { return }
         prizes = next
         prizesClaimed += claimed.count
-        let value = prizeClaimValue(kind, claimed)
-        let many = claimed.count > 1 ? "\(claimed.count) gold! " : "Gold! "
-        switch kind {
-        case .points:
-            bankedBonus += value
-            rejectToast("\(many)+\(value)")
-        case .relief:
-            // Never more than there is: a claim on a nearly empty pile clears
-            // what's there and says so, rather than promising ten and taking
-            // three without explaining itself.
-            let taken = min(value, rack.count)
-            rack.removeLast(taken)
-            rejectToast("\(many)−\(taken) tile\(taken == 1 ? "" : "s") off the pile")
-        }
+        // Both currencies at once: one word can cross a gold square and a
+        // blue one, and now that both are lit on the same board it will.
+        let payout = prizePayout(claimed)
+        bankedBonus += payout.points
+        // Never more tiles than there are: a claim on a nearly empty pile
+        // clears what's there and says so, rather than promising ten and
+        // taking three without explaining itself.
+        let taken = min(payout.tiles, rack.count)
+        rack.removeLast(taken)
+        var parts: [String] = []
+        if payout.points > 0 { parts.append("+\(payout.points)") }
+        if taken > 0 { parts.append("−\(taken) tile\(taken == 1 ? "" : "s")") }
+        let many = claimed.count > 1 ? "\(claimed.count) squares! " : "Claimed! "
+        rejectToast(many + parts.joined(separator: " · "))
     }
 
     /// Occupy's landing: the word goes on this screen's board at once and
@@ -2086,7 +2250,7 @@ final class GameModel {
             remainingSeconds: solo.remaining(at: now),
             dealSerial: dealSerial,
             dailyDay: dailyDeal?.day,
-            strokes: strokes,
+            landings: landings,
             savedAt: now.timeIntervalSince1970)
     }
 
@@ -2146,7 +2310,13 @@ final class GameModel {
         rack = saved.rack
         resetPlayState()
         bankedBonus = saved.bankedBonus
-        strokes = saved.strokes
+        // The stack comes back with the board, so a day picked up after lunch
+        // can still take back the word it went to lunch regretting. Strokes
+        // follow it rather than being carried separately — the two can't
+        // disagree if only one of them is the truth.
+        landings = saved.landings
+        strokes = landings.count
+        ringsAnnounced = dailyProgress?.ringsDone == true
     }
 
     // MARK: Board mutation
@@ -2165,6 +2335,20 @@ final class GameModel {
     private func refreshBoardCaches() {
         bounds = boardBounds(board)
         tileBounds = tileBox(of: board)
+        // The Daily's rings are part of the day's shape, not decoration on
+        // it: auto-fit sizes to this box, and a ring outside it is a place
+        // the player has been asked to reach and cannot see. Mattered less
+        // when covering the third one ended the game; matters now that the
+        // rings are a tier you play past.
+        if mode == .daily, let day, var box = tileBounds {
+            for key in day.targets {
+                let cell = parseKey(key)
+                box = Bounds(
+                    minRow: min(box.minRow, cell.row), minCol: min(box.minCol, cell.col),
+                    maxRow: max(box.maxRow, cell.row), maxCol: max(box.maxCol, cell.col))
+            }
+            tileBounds = box
+        }
         validation = dictionary.map { validateBoard(board, dictionary: $0) }
 
         var byCell: [CellKey: [WordRun]] = [:]
