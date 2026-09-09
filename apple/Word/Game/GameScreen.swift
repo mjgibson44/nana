@@ -31,6 +31,10 @@ struct GameScreen: View {
     @State private var clockNow = Date.now
     /// The tile-lettered menu, in place of the platform's.
     @State private var menuOpen = false
+    /// Whether the Daily's FINISH DAY row has been tapped once and is asking
+    /// whether that was meant. Cleared whenever the menu closes, so it never
+    /// comes back already armed.
+    @State private var finishArmed = false
     /// The column's inner width, which sizes the tiles: eight of them and
     /// the shuffle button across, always.
     @State private var columnWidth: CGFloat = 358
@@ -62,7 +66,7 @@ struct GameScreen: View {
                                 holdings: zoneHoldings(zone.counts))
                         }
                     } else {
-                        PileGaugeView(count: model.pileCount, limit: model.pileLimit, tone: model.pileTone)
+                        pileGauge
                         if !rivals.isEmpty {
                             RivalGaugesView(rivals: rivals)
                         }
@@ -195,6 +199,14 @@ struct GameScreen: View {
             // a long opener.
             if model.isOccupy {
                 camera.newGame(bounds: model.bounds, anchor: model.boardCentre, opening: .centred)
+            } else if model.isDaily {
+                // A day opens on the whole of itself — the word already down
+                // and all three rings — because a ring you can't see is an
+                // instruction you can't follow. Auto-fit is shrink-only, so
+                // this is the one place it has to be asked at the start
+                // rather than waiting for the board to grow into it.
+                camera.newGame(bounds: model.bounds, anchor: model.dayCentre, opening: .centred)
+                camera.autoFit(box: model.tileBounds)
             } else {
                 camera.newGame(bounds: model.bounds, anchor: model.startCell, opening: .opener)
             }
@@ -207,6 +219,23 @@ struct GameScreen: View {
     }
 
     // MARK: Header
+
+    /// The bar under the header. In every mode but one it is the pile filling
+    /// toward the limit that ends the game — and in the Daily it is turned
+    /// around: nothing can bury you there, the deal only ever shrinks, and
+    /// what the day is now about is getting all of it down. So the same bar
+    /// fills with tiles *placed*, green all the way, and reaching the end of
+    /// it is the second tier rather than the end of you.
+    @ViewBuilder
+    private var pileGauge: some View {
+        if model.isDaily, let dealt = model.day?.letters.count {
+            PileGaugeView(
+                count: dealt - model.pileCount, limit: dealt, tone: .ok,
+                label: "Tiles placed", unit: "tiles")
+        } else {
+            PileGaugeView(count: model.pileCount, limit: model.pileLimit, tone: model.pileTone)
+        }
+    }
 
     private var header: some View {
         let pause: (() -> Void)? = model.canPause ? { pauseGame() } : nil
@@ -222,17 +251,26 @@ struct GameScreen: View {
     }
 
     /// How the day went, in the sentence a player would say themselves.
-    /// Strokes against par leads, because that is the number worth comparing;
-    /// the clean sweep is the flourish under it.
+    ///
+    /// Rings first, because they are the tier everybody is chasing and the
+    /// gate on the par bonus; then the words against par; then what the pile
+    /// had left, since that is the only thing here that costs. A perfect day
+    /// ends "3/3 rings · 6 words, level par. Every tile placed."
     static func dailyNote(_ result: DailyResult) -> String {
+        let rings = "\(result.reached)/\(DailyBoardRules.targets) rings"
         let words = "\(result.strokes) word\(result.strokes == 1 ? "" : "s")"
         let against: String =
             switch result.underPar {
-            case 0: "\(words) — level par."
-            case 1...: "\(words) — \(result.underPar) under par."
-            default: "\(words) — \(-result.underPar) over par (\(result.par))."
+            case 0: "\(words), level par."
+            case 1...: "\(words), \(result.underPar) under par."
+            default: "\(words), \(-result.underPar) over par (\(result.par))."
             }
-        return result.allTilesPlaced ? "\(against) Every tile placed." : against
+        let tail =
+            result.allTilesPlaced
+            ? "Every tile placed."
+            : "\(result.tilesLeft) tile\(result.tilesLeft == 1 ? "" : "s") left "
+                + "(\(result.tilesLeft * DAILY_TILE_POINTS) points unplayed)."
+        return "\(rings) · \(against) \(tail)"
     }
 
     /// The Daily's line: targets reached, and words spent against par. Both
@@ -241,11 +279,15 @@ struct GameScreen: View {
     private var headerNote: HeaderNote? {
         guard let day = model.day, let progress = model.dailyProgress else { return nil }
         let reached = "\(progress.reached)/\(day.targets.count)"
+        // The pile is the other half of the day now — an empty one ends it,
+        // and every tile left in it costs at the end — so it reads beside the
+        // rings rather than only on the gauge.
         return HeaderNote(
-            text: "\(reached) · \(model.strokes)/\(day.par) words",
-            spoken: "\(progress.reached) of \(day.targets.count) targets reached, "
-                + "\(model.strokes) word\(model.strokes == 1 ? "" : "s") played, par \(day.par)",
-            done: progress.done)
+            text: "\(reached) · \(model.strokes)/\(day.par) words · \(model.rack.count) left",
+            spoken: "\(progress.reached) of \(day.targets.count) rings reached, "
+                + "\(model.strokes) word\(model.strokes == 1 ? "" : "s") played, par \(day.par), "
+                + "\(model.rack.count) tile\(model.rack.count == 1 ? "" : "s") left",
+            done: progress.ringsDone)
     }
 
     /// Occupy's clock: the match clock, or the stall countdown once it's close.
@@ -338,6 +380,23 @@ struct GameScreen: View {
                 })
         }
         if model.isDaily {
+            // The day ends when the pile is empty or when you say so, and
+            // this is saying so. Two taps, the second one asking, because it
+            // is the one irreversible button in a mode whose whole point is
+            // that nothing else is.
+            if !model.isComplete {
+                items.append(
+                    GameMenuView.Item(
+                        title: finishArmed ? "SURE? FINISH" : "FINISH DAY", accent: finishArmed
+                    ) {
+                        guard finishArmed else {
+                            finishArmed = true
+                            return
+                        }
+                        closeMenu()
+                        model.finishDay()
+                    })
+            }
             // One go a day: there is no new game to start, and no speed to
             // start it at.
             items.append(
@@ -383,6 +442,7 @@ struct GameScreen: View {
     private func openMenu() {
         // The board must not be mid-gesture behind a modal.
         settleGestures()
+        finishArmed = false
         menuOpen = true
     }
 
@@ -398,6 +458,7 @@ struct GameScreen: View {
 
     private func closeMenu() {
         menuOpen = false
+        finishArmed = false
         focusGame()
     }
 
@@ -476,9 +537,7 @@ struct GameScreen: View {
             zones: model.occupyZones,
             zoneSecondsLeft: zoneStatus?.secondsLeft,
             prizes: model.prizes.prizes.map {
-                BoardScene.PrizeMark(
-                    cell: parseKey($0.key),
-                    value: prizeValue(model.modifier.prize ?? .points, $0))
+                BoardScene.PrizeMark(cell: parseKey($0.key), kind: $0.kind, value: $0.value)
             },
             targets: Set(model.day?.targets.map(parseKey) ?? []))
     }
@@ -679,6 +738,20 @@ struct GameScreen: View {
             ) {
                 _ = model.handle(.backspace)
                 focusGame()
+            }
+            if model.isDaily {
+                // The Daily's eraser, and the only mode that has one: a word
+                // comes back off the board and its tiles back to the pile.
+                // It sits with the other word actions rather than in the menu
+                // because taking a word back is part of playing here, not an
+                // admission of something having gone wrong.
+                ActionButton(
+                    systemImage: "arrow.uturn.backward", label: "Take back the last word",
+                    disabled: !model.canUndo
+                ) {
+                    model.undoLastWord()
+                    focusGame()
+                }
             }
         }
     }

@@ -101,22 +101,25 @@ struct SoloSetupScreen: View {
             + "then +\(tiles) every \(seconds)."
     }
 
-    /// What a modifier offers, in the one sentence that matters — which for
-    /// both of them is the decay, because that is what makes a gold square a
-    /// decision rather than a chore. The rest is on `MODIFIER_INFO`.
+    /// What the squares offer, in the one sentence that matters — which is
+    /// the decay, because that is what makes a lit square a decision rather
+    /// than a chore. The rest is on `MODIFIER_INFO`.
+    ///
+    /// One sentence covers both kinds because they *are* one mechanic: this
+    /// row used to be a three-way choice between nothing, gold and salvage,
+    /// which asked before the game which of two payouts you would want during
+    /// it. Now both appear and the board asks it live, so the row is a
+    /// switch.
     private var modifierNote: String {
         let life = Int(PRIZE_SECONDS)
         switch selectedModifier {
         case .none:
             return "Nothing but the pile and the clock."
-        case .gold:
-            return "Gold squares appear near your board for \(life)s. "
-                + "Land a tile on one for \(GOLD_TOP_POINTS) points — "
-                + "less every second you leave it."
-        case .salvage:
-            return "Gold squares appear near your board for \(life)s. "
-                + "Land a tile on one to clear \(SALVAGE_TOP_TILES) tiles off your pile — "
-                + "fewer every second you leave it."
+        case .prizes:
+            return "Squares light up near your board for \(life)s — "
+                + "gold pays up to \(GOLD_TOP_POINTS) points, blue clears up to "
+                + "\(SALVAGE_TOP_TILES) tiles off your pile. "
+                + "Both are worth less every second you leave them."
         }
     }
 
@@ -153,7 +156,7 @@ struct SoloSetupScreen: View {
 
 #Preview {
     SoloSetupScreen(
-        pace: .regular, modifier: .gold, hasSavedGame: true,
+        pace: .regular, modifier: .prizes, hasSavedGame: true,
         onResume: {}, onPlay: { _, _ in }, onClose: {})
         .preferredColorScheme(.dark)
 }

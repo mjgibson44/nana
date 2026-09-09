@@ -67,30 +67,30 @@ final class BattleSetupTests: XCTestCase {
     // MARK: The room agrees
 
     func testARoomOpensOnItsHostsSetupAndTheClientIsToldOnTheSnapshot() {
-        let table = table(setup: BattleSetup(modifier: .gold))
+        let table = table(setup: BattleSetup(modifier: .prizes))
 
-        XCTAssertEqual(table.host.state?.modifier, .gold)
+        XCTAssertEqual(table.host.state?.modifier, .prizes)
         XCTAssertEqual(
-            table.client.state?.modifier, .gold,
+            table.client.state?.modifier, .prizes,
             "a client plays by the room's rule, not its own settings")
-        XCTAssertEqual(table.client.modifier, .gold)
+        XCTAssertEqual(table.client.modifier, .prizes)
     }
 
     func testAClientsOwnSetupIsNeverConsulted() {
-        // The client here would open a room on Salvage if it hosted one. It
-        // isn't hosting one.
+        // The client here would open a room with squares on if it hosted
+        // one. It isn't hosting one.
         let mesh = MemoryMesh()
         let hostTransport = mesh.add("host")
         let clientTransport = mesh.add("client")
         let host = BattleSession(
             role: .host, transport: hostTransport, model: GameModel(),
-            setup: BattleSetup(modifier: .gold))
+            setup: BattleSetup(modifier: .prizes))
         let client = BattleSession(
             role: .client, transport: clientTransport, model: GameModel(),
-            setup: BattleSetup(modifier: .salvage))
+            setup: BattleSetup(modifier: .prizes))
         mesh.connect("host")
         mesh.connect("client")
-        XCTAssertEqual(client.modifier, .gold)
+        XCTAssertEqual(client.modifier, .prizes)
         XCTAssertNotNil(host.state)
     }
 
@@ -101,14 +101,14 @@ final class BattleSetupTests: XCTestCase {
         let table = table()
         XCTAssertEqual(table.client.state?.modifier, SoloModifier.none)
 
-        table.host.setModifier(.salvage)
-        XCTAssertEqual(table.host.state?.modifier, .salvage)
-        XCTAssertEqual(table.client.state?.modifier, .salvage, "on the snapshot, at once")
+        table.host.setModifier(.prizes)
+        XCTAssertEqual(table.host.state?.modifier, .prizes)
+        XCTAssertEqual(table.client.state?.modifier, .prizes, "on the snapshot, at once")
     }
 
     func testAClientCannotChangeTheRoom() {
         let table = table()
-        table.client.setModifier(.gold)
+        table.client.setModifier(.prizes)
         XCTAssertEqual(
             table.host.state?.modifier, SoloModifier.none, "only the referee sets the rules")
         XCTAssertEqual(
@@ -120,7 +120,7 @@ final class BattleSetupTests: XCTestCase {
         // different one for the length of a broadcast.
         let table = table()
         table.host.start()
-        table.host.setModifier(.gold)
+        table.host.setModifier(.prizes)
         XCTAssertEqual(table.host.state?.modifier, SoloModifier.none)
         XCTAssertEqual(table.hostModel.modifier, SoloModifier.none)
     }
@@ -128,10 +128,10 @@ final class BattleSetupTests: XCTestCase {
     // MARK: Dealing under a modifier
 
     func testBothBoardsDealUnderTheRoomsModifier() {
-        let table = table(setup: BattleSetup(modifier: .gold))
+        let table = table(setup: BattleSetup(modifier: .prizes))
         table.host.start()
-        XCTAssertEqual(table.hostModel.modifier, .gold)
-        XCTAssertEqual(table.clientModel.modifier, .gold)
+        XCTAssertEqual(table.hostModel.modifier, .prizes)
+        XCTAssertEqual(table.clientModel.modifier, .prizes)
         XCTAssertTrue(table.hostModel.prizes.isEmpty, "nothing is lit at the whistle")
     }
 
@@ -148,7 +148,7 @@ final class BattleSetupTests: XCTestCase {
     func testASquareLightsOnEveryBoardAtTheSameMomentAndIsWorthTheSame() async throws {
         // The whole synchronisation, and it needs no wire: every board's
         // clock starts at the same deal and counts the same seconds.
-        let table = table(setup: BattleSetup(modifier: .gold))
+        let table = table(setup: BattleSetup(modifier: .prizes))
         table.host.start()
         await table.hostModel.loadDictionary()
         await table.clientModel.loadDictionary()
@@ -176,7 +176,7 @@ final class BattleSetupTests: XCTestCase {
         // Separate boards are separate boards: the *timing* is shared, the
         // square is necessarily local, and it has to be somewhere its owner
         // can actually build.
-        let table = table(setup: BattleSetup(modifier: .gold))
+        let table = table(setup: BattleSetup(modifier: .prizes))
         table.host.start()
         await table.hostModel.loadDictionary()
         try TestPlays.placeOpener(on: table.hostModel)
@@ -195,13 +195,18 @@ final class BattleSetupTests: XCTestCase {
     }
 
     func testGoldClaimedInABattleCountsTowardTheScoreThatIsReported() async throws {
-        let table = table(setup: BattleSetup(modifier: .gold))
+        let table = table(setup: BattleSetup(modifier: .prizes))
         table.host.start()
         await table.hostModel.loadDictionary()
         try TestPlays.placeOpener(on: table.hostModel)
         advance(table, by: PRIZE_FIRST_SPAWN_SECONDS + 1)
 
-        let prize = try XCTUnwrap(table.hostModel.prizes.prizes.first)
+        // Lit for real by the clock, then pinned to the kind under test —
+        // both kinds appear at random now, so taking whatever turned up would
+        // make this a test of the draw.
+        let lit = try XCTUnwrap(table.hostModel.prizes.prizes.first)
+        let prize = Prize(key: lit.key, kind: .points, secondsLeft: lit.secondsLeft)
+        table.hostModel.setPrizes(PrizeField(prizes: [prize]))
         let due = prizeValue(.points, prize)
         let before = table.hostModel.score
         table.hostModel.claimPrizes(covering: [prize.key])
@@ -213,13 +218,15 @@ final class BattleSetupTests: XCTestCase {
     }
 
     func testSalvageClearsTilesInABattleToo() async throws {
-        let table = table(setup: BattleSetup(modifier: .salvage))
+        let table = table(setup: BattleSetup(modifier: .prizes))
         table.host.start()
         await table.hostModel.loadDictionary()
         try TestPlays.placeOpener(on: table.hostModel)
         advance(table, by: PRIZE_FIRST_SPAWN_SECONDS + 1)
 
-        let prize = try XCTUnwrap(table.hostModel.prizes.prizes.first)
+        let lit = try XCTUnwrap(table.hostModel.prizes.prizes.first)
+        let prize = Prize(key: lit.key, kind: .relief, secondsLeft: lit.secondsLeft)
+        table.hostModel.setPrizes(PrizeField(prizes: [prize]))
         let due = prizeValue(.relief, prize)
         let hand = table.hostModel.rack.count
         table.hostModel.claimPrizes(covering: [prize.key])
@@ -239,7 +246,7 @@ final class BattleSetupTests: XCTestCase {
         // pile and late ones are not. If that turns out to make the modifier
         // feel weak in the opening, the number to move is
         // `SALVAGE_TOP_TILES`, not the clamp.
-        let table = table(setup: BattleSetup(modifier: .salvage))
+        let table = table(setup: BattleSetup(modifier: .prizes))
         table.host.start()
         XCTAssertLessThan(BATTLE_OPENING_TILES, SALVAGE_TOP_TILES + MIN_WORD_LENGTH)
     }
@@ -248,7 +255,7 @@ final class BattleSetupTests: XCTestCase {
         // Someone watching this game out has nothing to claim with.
         let model = GameModel()
         model.newBattle(
-            seed: "watching", selfID: "me", spectating: true, modifier: .gold, now: .now)
+            seed: "watching", selfID: "me", spectating: true, modifier: .prizes, now: .now)
         var now = Date.now
         for _ in 0..<200 {
             now = now.addingTimeInterval(0.25)
@@ -289,10 +296,10 @@ final class BattleSetupTests: XCTestCase {
 
     func testTheDoorRemembersWhatWasSetUpLast() {
         let store = MemoryStore()
-        saveBattleSetup(BattleSetup(boardView: .shared, modifier: .salvage), to: store)
+        saveBattleSetup(BattleSetup(boardView: .shared, modifier: .prizes), to: store)
         XCTAssertEqual(
             loadBattleSetup(from: store),
-            BattleSetup(boardView: .shared, modifier: .salvage))
+            BattleSetup(boardView: .shared, modifier: .prizes))
     }
 
     func testAnUnsetDoorOpensOnSeparateAndClear() {

@@ -34,7 +34,7 @@ struct LeaderboardBoardTests {
     func idsAreStable() {
         #expect(LeaderboardID.soloRegular.rawValue == "solo.regular.v2")
         #expect(LeaderboardID.soloFast.rawValue == "solo.fast.v2")
-        #expect(LeaderboardID.daily.rawValue == "daily.deal")
+        #expect(LeaderboardID.daily.rawValue == "daily.deal.v2")
         #expect(LeaderboardID.battleWins.rawValue == "battle.wins")
     }
 
@@ -45,7 +45,10 @@ struct LeaderboardBoardTests {
         // to be left where they are rather than reinterpreted. Submitting to
         // `solo.fast` again would file post-change runs against pre-change
         // ones, which is the bug this suffix exists to prevent.
-        let retired: Set<String> = ["solo.regular", "solo.fast"]
+        // The Daily is on the same footing since its rework: the day no
+        // longer ends at the third ring, words can be taken back, and the
+        // number posted is a different quantity entirely.
+        let retired: Set<String> = ["solo.regular", "solo.fast", "daily.deal"]
         #expect(Set(LeaderboardID.allCases.map(\.rawValue)).isDisjoint(with: retired))
     }
 }
@@ -75,17 +78,20 @@ struct LeaderboardSubmissionTests {
         #expect(posts[0].day == deal.day)
     }
 
-    @Test("a daily posts its packed strokes-and-points, not its points")
+    @Test("a daily posts the number it showed the player")
     func aDailyPostsItsPackedScore() {
         let deal = dailyDeal(day: 20_500)
         let result = DailyResult(
-            strokes: 5, par: 7, points: 200, reached: 3, allTilesPlaced: true)
+            strokes: 5, par: 7, points: 200, reached: 3, tilesPlaced: 20, tilesLeft: 0,
+            allTilesPlaced: true)
         let posts = submissions(
             mode: .daily, pace: .regular, score: 200, daily: deal, dailyResult: result,
             dailyWithinDay: true, battleWins: 0, at: 1)
         #expect(posts.count == 1)
-        #expect(posts[0].score == dailyLeaderboardScore(result))
-        #expect(posts[0].score != 200, "the board is ranked on words, not points")
+        #expect(posts[0].score == result.score)
+        #expect(
+            posts[0].score != 200,
+            "the rings and the par bonus are part of the day, not decoration")
 
         // And a day that somehow reports no result still posts something
         // sortable rather than nothing.

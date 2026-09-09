@@ -4,9 +4,10 @@ import XCTest
 @testable import Word
 
 /// The Daily, played through the real model: that everyone opens the same
-/// position, that a word costs a stroke, that reaching every ring ends it,
-/// that the pile can't end it, and that a day put down is picked back up
-/// rather than dealt again.
+/// position, that a word costs a stroke and can be taken back, that reaching
+/// every ring is a tier rather than the end, that the day finishes on an
+/// empty pile or on the player's say-so, and that a day put down is picked
+/// back up rather than dealt again.
 ///
 /// The puzzle's own rules — how the board is built, what par means, how the
 /// score packs — are argued out in `WordCoreTests/DailyBoardTests`. This is
@@ -105,14 +106,127 @@ final class DailyPlayTests: XCTestCase {
         XCTAssertEqual(model.strokes, 0)
     }
 
+    func testATakenBackWordCostsNothing() async throws {
+        let model = try await dailyModel()
+        let board = model.board
+        let rack = model.rack
+        try TestPlays.attachWord(on: model)
+        XCTAssertEqual(model.strokes, 1)
+        XCTAssertTrue(model.canUndo)
+
+        XCTAssertTrue(model.undoLastWord())
+
+        // The whole point of the eraser: the position is exactly the one the
+        // player was looking at before, and the stroke is not spent. The
+        // score is a property of the board you finish with, not of the route.
+        XCTAssertEqual(model.strokes, 0)
+        XCTAssertEqual(model.board, board)
+        XCTAssertEqual(model.rack.sorted(), rack.sorted())
+        XCTAssertFalse(model.canUndo, "nothing left to take back")
+        XCTAssertEqual(model.dailyResult?.strokes, 0)
+    }
+
+    func testWordsComeBackOffInReverseOrder() async throws {
+        let model = try await dailyModel()
+        try TestPlays.attachWord(on: model)
+        let afterFirst = model.board
+        guard (try? TestPlays.attachWord(on: model)) != nil else {
+            throw XCTSkip("this deal can't attach a second word")
+        }
+        XCTAssertEqual(model.strokes, 2)
+
+        XCTAssertTrue(model.undoLastWord())
+        XCTAssertEqual(model.strokes, 1)
+        XCTAssertEqual(model.board, afterFirst, "the last word, not any word")
+    }
+
+    func testOnlyTheDailyHasAnEraser() async throws {
+        let solo = GameModel()
+        solo.newGame(seed: "solo", pace: .regular)
+        await solo.loadDictionary()
+        try TestPlays.placeOpener(on: solo)
+        // Permanence protects a clock, and Solo has one. This mode doesn't.
+        XCTAssertFalse(solo.canUndo)
+        XCTAssertFalse(solo.undoLastWord())
+        XCTAssertTrue(solo.landings.isEmpty)
+    }
+
     // MARK: Reaching the rings
 
-    func testTheDayIsUnfinishedUntilEveryTargetIsCovered() async throws {
+    func testTheRingsAreATierRatherThanTheEnd() async throws {
         let model = try await dailyModel()
         let progress = try XCTUnwrap(model.dailyProgress)
-        XCTAssertEqual(progress.reached, 0, "no target starts covered")
-        XCTAssertFalse(progress.done)
+        XCTAssertEqual(progress.reached, 0, "no ring starts covered")
+        XCTAssertFalse(progress.ringsDone)
         XCTAssertFalse(model.isComplete)
+    }
+
+    func testCoveringEveryRingDoesNotEndTheDay() async throws {
+        // The mode's central correction. Covering the last ring used to
+        // finish the game on the spot, which meant reading the board well
+        // bought you *less* of it — and made the every-tile tier reachable
+        // only by the word that happened to empty the pile in the same
+        // stroke. Now it is a tier that pays, and the day plays on.
+        let model = try await dailyModel()
+        let built = try XCTUnwrap(model.day)
+        var saved = try XCTUnwrap(model.savedGame())
+        saved.board = built.solution
+        saved.rack = ["a", "b", "c"]
+
+        let restored = GameModel()
+        restored.restore(saved)
+        await restored.loadDictionary()
+
+        XCTAssertEqual(restored.dailyProgress?.ringsDone, true)
+        XCTAssertFalse(restored.isComplete, "rings reached, tiles still in hand")
+        XCTAssertEqual(restored.dailyResult?.reached, built.targets.count)
+    }
+
+    func testAnEmptyPileEndsTheDay() async throws {
+        // The natural ending: nothing left in hand is nothing left to play.
+        // Nothing is arriving either, so there is no reason to sit on a
+        // finished board waiting to be told.
+        let model = try await dailyModel()
+        let cues = RecordingCues()
+        model.cues = cues
+        try TestPlays.emptyThePileWithOneWord(on: model)
+
+        XCTAssertTrue(model.rack.isEmpty)
+        XCTAssertTrue(model.isComplete)
+        XCTAssertEqual(cues.played.last, .win)
+        let result = try XCTUnwrap(model.dailyResult)
+        XCTAssertEqual(result.tilesLeft, 0)
+        XCTAssertTrue(result.allTilesPlaced, "the second tier, and now a reachable one")
+        // The all-tiles bonus is in the points, as the day's card promises.
+        XCTAssertGreaterThanOrEqual(result.points, ALL_TILES_BONUS)
+    }
+
+    func testTheDayNeverDealsItselfMoreTilesForClearingTheBoard() async throws {
+        // Solo pays a board clear with 25 points and five more tiles. The
+        // Daily's deal is the whole puzzle, so five more would be letters it
+        // was never cut from — and the day is over by then anyway.
+        let model = try await dailyModel()
+        try TestPlays.emptyThePileWithOneWord(on: model)
+        XCTAssertFalse(model.boardClearReady)
+        XCTAssertTrue(model.rack.isEmpty)
+    }
+
+    func testFinishingIsThePlayersToCall() async throws {
+        let model = try await dailyModel()
+        let cues = RecordingCues()
+        model.cues = cues
+        try TestPlays.attachWord(on: model)
+        XCTAssertFalse(model.isComplete, "tiles left, and no clock to run out")
+
+        model.finishDay()
+
+        XCTAssertTrue(model.isComplete)
+        XCTAssertEqual(cues.played.last, .win, "a day is finished, never lost")
+        // Stopping with tiles in hand is a decision with a price rather than
+        // a way to game the ranking.
+        let result = try XCTUnwrap(model.dailyResult)
+        XCTAssertGreaterThan(result.tilesLeft, 0)
+        XCTAssertFalse(model.canUndo, "a finished day is finished")
     }
 
     func testTheHiddenCrosswordCoversEveryTarget() async throws {
@@ -133,18 +247,18 @@ final class DailyPlayTests: XCTestCase {
 
         let progress = try XCTUnwrap(restored.dailyProgress)
         XCTAssertEqual(progress.reached, built.targets.count)
-        XCTAssertTrue(progress.done)
+        XCTAssertTrue(progress.ringsDone)
         XCTAssertTrue(progress.allTilesPlaced, "and every tile is down")
     }
 
-    func testSolvingEndsTheDayAsAWin() async throws {
+    func testFinishingIsAWinWhateverTheBoardCameTo() async throws {
         let model = try await dailyModel()
         let cues = RecordingCues()
         model.cues = cues
         model.finishGame(reason: .solved)
 
         XCTAssertTrue(model.isComplete)
-        XCTAssertEqual(cues.played, [.win], "the one ending here that isn't a loss")
+        XCTAssertEqual(cues.played, [.win], "there is no losing ending here")
     }
 
     // MARK: What a finished day reports
@@ -159,12 +273,20 @@ final class DailyPlayTests: XCTestCase {
         XCTAssertEqual(outcome.daily, day)
         let result = try XCTUnwrap(outcome.dailyResult)
         XCTAssertEqual(result.strokes, 1)
-        // The board is ranked on words, not points — so what is posted is the
-        // packed pair, and fewer words beats more points.
-        let quicker = DailyResult(
-            strokes: result.strokes, par: result.par, points: result.points + 100,
-            reached: result.reached, allTilesPlaced: result.allTilesPlaced)
-        XCTAssertGreaterThan(dailyLeaderboardScore(quicker), dailyLeaderboardScore(result))
+        // One number, and it is the one on screen: what goes to the board can
+        // never be measuring something other than what the player was shown.
+        XCTAssertEqual(dailyLeaderboardScore(result), result.score)
+        XCTAssertEqual(model.score, result.score)
+        // A tile left in the pile costs, which is the arithmetic that stops
+        // stopping early from being the winning line. (Read off a board worth
+        // enough to be above the floor: one word into a full pile, the day is
+        // worth nothing at all, which is itself the point.)
+        XCTAssertGreaterThan(result.tilesPlaced, 0, "a word's worth of tiles is off the pile")
+        let tidier = DailyResult(
+            strokes: result.strokes, par: result.par, points: result.points,
+            reached: result.reached, tilesPlaced: result.tilesPlaced + 1,
+            tilesLeft: result.tilesLeft - 1, allTilesPlaced: false)
+        XCTAssertEqual(tidier.score - result.score, DAILY_TILE_POINTS)
     }
 
     // MARK: Coming back to it
@@ -179,6 +301,7 @@ final class DailyPlayTests: XCTestCase {
         XCTAssertEqual(saved.gameMode, .daily)
         XCTAssertEqual(saved.dailyDay, day.day)
         XCTAssertEqual(saved.strokes, 1)
+        XCTAssertEqual(saved.landings.count, 1)
 
         let store = MemoryStore()
         saved.save(to: store)
@@ -190,6 +313,13 @@ final class DailyPlayTests: XCTestCase {
         XCTAssertEqual(restored.board, board)
         XCTAssertEqual(restored.rack, rack)
         XCTAssertEqual(restored.strokes, 1)
+        // The eraser comes back with the board: a day picked up after lunch
+        // can still take back the word it went to lunch regretting.
+        XCTAssertTrue(restored.canUndo)
+        XCTAssertTrue(restored.undoLastWord())
+        XCTAssertEqual(restored.strokes, 0)
+        XCTAssertEqual(restored.board, model.day?.board)
+        restored.restore(back)
         XCTAssertEqual(restored.day?.targets, model.day?.targets)
         XCTAssertEqual(restored.dailyDeal, day)
         // Straight back to the board: the opening card holds a clock, and

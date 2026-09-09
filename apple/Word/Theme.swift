@@ -80,6 +80,16 @@ enum Palette {
     static let prizeCell = Color(hex: 0x5C4708)
     static let prizeEdge = Color(hex: 0xF2C94C)
 
+    /// …and a salvage square, which pays tiles off the pile rather than
+    /// points. Both kinds are lit at once now, so they have to be told apart
+    /// at a glance and at a squint: this one is the cool blue against gold's
+    /// warm yellow, its edge is dashed rather than solid, and the number on
+    /// it is small (ten at most) where gold's is large. Colour alone would be
+    /// the wrong answer — a board that reads only in hue reads for nobody who
+    /// doesn't see hue.
+    static let reliefCell = Color(hex: 0x123049)
+    static let reliefEdge = Color(hex: 0x8EC5FF)
+
     /// The Daily's targets. The board's own accent, because reaching one is
     /// the good thing that can happen here — the opposite of a fire.
     static let targetEdge = Color(hex: 0xB6DA97)

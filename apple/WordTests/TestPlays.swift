@@ -80,6 +80,50 @@ enum TestPlays {
         throw XCTSkip("no word in this rack attaches to the board")
     }
 
+    /// Deal the pile down to exactly one word's worth of tiles and play it,
+    /// so the landing empties the hand.
+    ///
+    /// The Daily ends on an empty pile, and a real deal never runs out on
+    /// cue — so the pile is set to precisely what the word about to land
+    /// needs. Everything else about the landing is the ordinary road:
+    /// borrowed letter, gap tile, `commitThroughLetter`.
+    @discardableResult
+    static func emptyThePileWithOneWord(on model: GameModel) throws -> String {
+        guard let dictionary = model.dictionary else {
+            throw XCTSkip("load the dictionary first")
+        }
+        for key in model.board.keys {
+            let borrowed = model.board[key]!
+            for length in [3, 4] {
+                for gapAt in 0..<length {
+                    for combo in permutations(of: Array(model.rack.indices), choose: length - 1) {
+                        let hand = combo.map { model.rack[$0] }
+                        var letters = hand
+                        letters.insert(borrowed, at: gapAt)
+                        let word = letters.joined()
+                        guard dictionary.contains(word) else { continue }
+
+                        let full = model.rack
+                        model.setPile(hand)
+                        var next = 0
+                        for position in 0..<length {
+                            if position == gapAt {
+                                model.addGap()
+                            } else {
+                                model.togglePick(next)
+                                next += 1
+                            }
+                        }
+                        if model.commitThroughLetter(key) { return word }
+                        model.clearWord()
+                        model.setPile(full)
+                    }
+                }
+            }
+        }
+        throw XCTSkip("no word in this rack attaches to the board")
+    }
+
     /// Ordered picks of `k` from `items`, capped so a big rack can't blow up
     /// a test's runtime.
     static func permutations(of items: [Int], choose k: Int, cap: Int = 6_000) -> [[Int]] {
