@@ -240,10 +240,11 @@ final class Matchmaking: NSObject {
     /// Raise Game Center's own matchmaker, invite-only. Returns once the
     /// player has a match, or throws if they backed out. The room is sized
     /// for the game being played — eight for a Battle, four for Occupy.
-    func findMatchByInvite(mode: GameMode = .battle) async throws -> GKMatch {
+    func findMatchByInvite(mode: GameMode = .battle, seatLimit: Int? = nil) async throws -> GKMatch {
         let request = GKMatchRequest()
         request.minPlayers = mode == .occupy ? OCCUPY_MIN_PLAYERS : BATTLE_MIN_PLAYERS
-        request.maxPlayers = mode == .occupy ? OCCUPY_MAX_PLAYERS : BATTLE_MAX_PLAYERS
+        let cap = mode == .occupy ? OCCUPY_MAX_PLAYERS : BATTLE_MAX_PLAYERS
+        request.maxPlayers = min(cap, seatLimit ?? cap)
         request.inviteMessage =
             mode == .occupy ? "Come play Occupy in Time Tiles." : "Come play a battle of Time Tiles."
 

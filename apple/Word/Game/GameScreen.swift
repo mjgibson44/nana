@@ -21,6 +21,11 @@ struct GameScreen: View {
     var onLeave: () -> Void = {}
     /// Deal a fresh solo game. The router owns it so the pace gets remembered.
     var onNewGame: ((SoloPace, SoloModifier) -> Void)?
+    /// Out of the tutorial, finished or skipped: on to whatever the player
+    /// was heading for when it started.
+    var onTutorialDone: () -> Void = {}
+    /// What the tutorial's finish card offers, named for where it goes next.
+    var tutorialPlayLabel = "Play"
 
     @State private var camera = BoardCamera()
     @State private var machine = GestureMachine()
@@ -65,6 +70,10 @@ struct GameScreen: View {
                                 secondsToNext: zone.secondsToNext,
                                 holdings: zoneHoldings(zone.counts))
                         }
+                    } else if let tutorialBanner {
+                        // In the tutorial nothing can bury you, so where the
+                        // pile's warning would be is the next thing to do.
+                        tutorialBanner
                     } else {
                         pileGauge
                         if !rivals.isEmpty {
@@ -123,6 +132,11 @@ struct GameScreen: View {
                     focusGame()
                 }
                 .transition(.opacity)
+            }
+
+            if model.tutorialFinished {
+                TutorialFinishView(playLabel: tutorialPlayLabel, onPlay: onTutorialDone)
+                    .transition(.opacity)
             }
 
             if menuOpen {
@@ -235,6 +249,16 @@ struct GameScreen: View {
         } else {
             PileGaugeView(count: model.pileCount, limit: model.pileLimit, tone: model.pileTone)
         }
+    }
+
+    /// The tutorial's instructions for the step in hand, or nil outside it.
+    private var tutorialBanner: TutorialBannerView? {
+        guard let step = model.tutorialCurrent else { return nil }
+        let content = TutorialBannerView.content(
+            for: step, at: model.tutorialStep, rowReady: model.tutorialRowReady)
+        return TutorialBannerView(
+            step: model.tutorialStep, total: TUTORIAL_STEPS,
+            title: content.title, instruction: content.instruction)
     }
 
     private var header: some View {
@@ -399,6 +423,17 @@ struct GameScreen: View {
             }
             // One go a day: there is no new game to start, and no speed to
             // start it at.
+            items.append(
+                GameMenuView.Item(title: "HOME") {
+                    closeMenu()
+                    onLeave()
+                })
+        } else if model.isTutorial {
+            items.append(
+                GameMenuView.Item(title: "SKIP") {
+                    closeMenu()
+                    onTutorialDone()
+                })
             items.append(
                 GameMenuView.Item(title: "HOME") {
                     closeMenu()
@@ -727,7 +762,12 @@ struct GameScreen: View {
                     focusGame()
                 }
             } else {
-                ActionButton(systemImage: "square.dashed", label: "Add a gap") {
+                // Lit in the tutorial when a gap is the next thing the word
+                // wants: the one button the lesson is about.
+                ActionButton(
+                    systemImage: "square.dashed", label: "Add a gap",
+                    accent: model.tutorialWantsGap
+                ) {
                     model.addGap()
                     focusGame()
                 }

@@ -150,6 +150,17 @@ enum Spacing {
     /// SOLO, LOBBY. `TileTitle` drops back to `tile` on a screen too narrow
     /// to hold the longer titles at this size.
     static let titleTile: CGFloat = 36
+    /// The name at the top of a menu screen (`ScreenHeader`): TIMETILES,
+    /// SOLO, DUEL, BATTLE. Bigger again, so each screen opens on what it is.
+    static let headerTile: CGFloat = 44
+    /// The room left under a `ScreenHeader` before the screen's rows start.
+    static let headerGap: CGFloat = 48
+    /// The plain buttons on menu screens (`MenuButton`).
+    static let menuButtonWidth: CGFloat = 240
+    static let menuButtonHeight: CGFloat = 50
+    static let menuButtonRadius: CGFloat = 12
+    /// Between menu buttons in one group.
+    static let menuButtonGap: CGFloat = 10
     static let tileRadius: CGFloat = 3
     /// Buttons are a little shorter than a tile is tall.
     static let buttonHeight: CGFloat = 36

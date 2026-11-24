@@ -70,6 +70,14 @@ final class AppSettings {
         battle = loadBattleSetup(from: store)
     }
 
+    // MARK: The tutorial
+
+    /// Whether this device has been through the tutorial — finished,
+    /// skipped, or left. It fronts the first door a player opens, once.
+    var hasSeenTutorial: Bool { WordCore.hasSeenTutorial(in: store) }
+
+    func markTutorialSeen() { WordCore.markTutorialSeen(in: store) }
+
     // MARK: Stats (stats.ts)
 
     func stats() -> Stats { loadStats(from: store) }

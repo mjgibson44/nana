@@ -44,7 +44,8 @@ final class Lobby {
         hostID: PlayerID = "host", seed: String = "seedseedseed",
         autoStart: AutoStartRule? = nil,
         graceSeconds: TimeInterval = RECONNECT_GRACE_SECONDS,
-        admitsMidGame: Bool = true
+        admitsMidGame: Bool = true,
+        seatLimit: Int? = nil
     ) {
         hostTransport = mesh.add(hostID)
         host = HostSession(
@@ -54,7 +55,8 @@ final class Lobby {
             clock: { [simulated] in simulated.now },
             autoStart: autoStart,
             graceSeconds: graceSeconds,
-            admitsMidGame: admitsMidGame)
+            admitsMidGame: admitsMidGame,
+            seatLimit: seatLimit)
         host.events.onAttack = { [weak self] count in self?.hostAttacks.append(count) }
         host.events.onStart = { [weak self] seed in self?.hostSeeds.append(seed) }
         mesh.connect(hostID)
@@ -135,6 +137,18 @@ struct RosterTests {
         #expect(lobby.host.state.players.count == BATTLE_MAX_PLAYERS)
         #expect(lobby.rejections["late"]?.count == 1)
         #expect(ninth.isRejected)
+    }
+
+    /// A duel's room seats two: the host and one opponent.
+    @Test func aDuelTurnsAwayTheThirdPlayer() {
+        let lobby = Lobby(seatLimit: 2)
+        lobby.addClient("ann")
+        #expect(lobby.host.state.players.count == 2)
+
+        let third = lobby.addClient("bea")
+        #expect(lobby.host.state.players.count == 2)
+        #expect(lobby.rejections["bea"]?.count == 1)
+        #expect(third.isRejected)
     }
 
     @Test func aVersionMismatchIsRefusedLoudly() throws {

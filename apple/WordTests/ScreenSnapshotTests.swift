@@ -49,14 +49,9 @@ final class ScreenSnapshotTests: XCTestCase {
 
     func testSoloSetupRenders() throws {
         try render(
-            SoloSetupScreen(
-                pace: .regular, hasSavedGame: true, onResume: {}, onPlay: { _, _ in },
-                onClose: {}), name: "solo-setup")
+            SoloSetupScreen(pace: .regular, onPlay: { _ in }, onClose: {}), name: "solo-setup")
         try render(
-            SoloSetupScreen(pace: .fast, onPlay: { _, _ in }, onClose: {}), name: "solo-setup-fast")
-        try render(
-            SoloSetupScreen(pace: .regular, modifier: .prizes, onPlay: { _, _ in }, onClose: {}),
-            name: "solo-setup-prizes")
+            SoloSetupScreen(pace: .fast, onPlay: { _ in }, onClose: {}), name: "solo-setup-fast")
     }
 
     /// The Daily: the word already down, the rings to reach, the eraser
@@ -108,12 +103,7 @@ final class ScreenSnapshotTests: XCTestCase {
     }
 
     func testHomeScreenRenders() throws {
-        try render(
-            HomeScreen(dailyStreak: 4, onSolo: {}, onBattle: {}, onOccupy: {}),
-            name: "home")
-        try render(
-            HomeScreen(onSolo: {}, onBattle: {}, onOccupy: {}),
-            name: "home-fresh")
+        try render(HomeScreen(onSolo: {}, onDuel: {}, onBattle: {}), name: "home")
     }
 
     // MARK: Occupy
@@ -204,36 +194,7 @@ final class ScreenSnapshotTests: XCTestCase {
                 mode: .occupy, state: state, selfID: "a", isHost: true, canStart: true,
                 isReconnecting: false, rejection: nil, onStart: {}, onLeave: {}),
             name: "occupy-lobby")
-        try render(
-            BattleEntryScreen(
-                mode: .occupy, supportsPartyCodes: true, partyCode: nil, searching: nil,
-                searchStatus: nil, isBusy: false, error: nil,
-                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
-                onCancelSearch: {}, onClose: {}),
-            name: "occupy-entry")
-    }
 
-    /// The Battle lobby's room settings: the host's, tappable, and the same
-    /// rows read-only on a client's screen.
-    func testTheBattleLobbysRoomSettingsRender() throws {
-        let state = BattleState(
-            phase: .lobby,
-            players: [
-                BattlePlayer(id: "a", name: "Ada", host: true),
-                BattlePlayer(id: "b", name: "Grace"),
-            ],
-            game: 0, winnerId: nil, modifier: .prizes)
-        try render(
-            BattleLobbyScreen(
-                state: state, selfID: "a", isHost: true, canStart: true,
-                isReconnecting: false, rejection: nil, onStart: {}, onLeave: {},
-                onBoardView: { _ in }, onModifier: { _ in }),
-            name: "battle-lobby-host")
-        try render(
-            BattleLobbyScreen(
-                state: state, selfID: "b", isHost: false, canStart: false,
-                isReconnecting: false, rejection: nil, onStart: {}, onLeave: {}),
-            name: "battle-lobby-client")
     }
 
     func testOccupyResultsRender() throws {
@@ -345,6 +306,17 @@ final class ScreenSnapshotTests: XCTestCase {
                 isReconnecting: false, rejection: nil, onStart: {}, onLeave: {}),
             name: "battle-lobby-host")
 
+        let duel = BattleState(
+            phase: .lobby,
+            players: [BattlePlayer(id: "a", name: "Ada", host: true)],
+            game: 0,
+            winnerId: nil)
+        try render(
+            BattleLobbyScreen(
+                room: .duel, state: duel, selfID: "a", isHost: true, canStart: false,
+                isReconnecting: false, rejection: nil, onStart: {}, onLeave: {}),
+            name: "duel-lobby-host")
+
         // A match of strangers: no START for anyone, the door's rule instead,
         // and then the countdown.
         let party = BattleState(
@@ -372,36 +344,59 @@ final class ScreenSnapshotTests: XCTestCase {
             name: "battle-lobby-countdown")
     }
 
+    /// The tutorial at every stage a player sees: each step before and after
+    /// the word row is right, the gap button lit, and the finish card.
+    func testTheTutorialRenders() async throws {
+        let model = GameModel()
+        model.newTutorial()
+        await model.loadDictionary()
+        try render(GameScreen(model: model), name: "tutorial-1-spell")
+        TutorialPlayTests.build(tutorialScript[0].pattern, on: model)
+        try render(GameScreen(model: model), name: "tutorial-1-place")
+        model.confirm()
+        model.clearToast(serial: model.toast?.serial ?? 0)
+        try render(GameScreen(model: model), name: "tutorial-2-spell")
+        TutorialPlayTests.build([tutorialScript[1].pattern[0]], on: model)
+        try render(GameScreen(model: model), name: "tutorial-2-gap")
+        TutorialPlayTests.build(Array(tutorialScript[1].pattern.dropFirst()), on: model)
+        try render(GameScreen(model: model), name: "tutorial-2-place")
+        TutorialPlayTests.landThroughBoard(tutorialScript[1], on: model)
+        model.clearToast(serial: model.toast?.serial ?? 0)
+        try render(GameScreen(model: model), name: "tutorial-3-spell")
+        TutorialPlayTests.build(tutorialScript[2].pattern, on: model)
+        try render(GameScreen(model: model), name: "tutorial-3-place")
+        TutorialPlayTests.landThroughBoard(tutorialScript[2], on: model)
+        XCTAssertTrue(model.tutorialFinished)
+        try render(
+            GameScreen(model: model, tutorialPlayLabel: "Play solo"), name: "tutorial-done")
+    }
+
     func testBattleEntryRenders() throws {
+        for room in [RoomKind.duel, .battle] {
+            let name = room.rawValue
+            try render(
+                BattleEntryScreen(
+                    room: room, supportsPartyCodes: true, partyCode: nil,
+                    isBusy: false, error: nil, onHost: {}, onJoin: { _ in }, onClose: {}),
+                name: "\(name)-entry")
+            try render(
+                BattleEntryScreen(
+                    room: room, supportsPartyCodes: true, partyCode: nil,
+                    isBusy: false, error: nil, onHost: {}, onJoin: { _ in }, onClose: {},
+                    enteringCode: true, typedCode: "ABC-DEF"),
+                name: "\(name)-entry-join")
+            try render(
+                BattleEntryScreen(
+                    room: room, supportsPartyCodes: true, partyCode: "ABC-DEF",
+                    isBusy: true, error: nil, onHost: {}, onJoin: { _ in }, onClose: {}),
+                name: "\(name)-entry-hosting")
+        }
         try render(
             BattleEntryScreen(
-                supportsPartyCodes: true, partyCode: "ABC-DEF", searching: nil,
-                searchStatus: nil, isBusy: true, error: nil,
-                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
-                onCancelSearch: {}, onClose: {}),
-            name: "battle-entry-hosting")
-        try render(
-            BattleEntryScreen(
-                supportsPartyCodes: true, partyCode: nil, searching: nil,
-                searchStatus: nil, isBusy: false, error: nil,
-                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
-                onCancelSearch: {}, onClose: {}),
-            name: "battle-entry")
-        try render(
-            BattleEntryScreen(
-                supportsPartyCodes: false, partyCode: nil, searching: nil,
-                searchStatus: nil, isBusy: false,
-                error: "Game Center couldn’t open matchmaking.",
-                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
-                onCancelSearch: {}, onClose: {}),
+                room: .battle, supportsPartyCodes: false, partyCode: nil,
+                isBusy: false, error: "Game Center couldn’t open matchmaking.",
+                onHost: {}, onJoin: { _ in }, onClose: {}),
             name: "battle-entry-invites")
-        try render(
-            BattleEntryScreen(
-                supportsPartyCodes: true, partyCode: nil, searching: .party,
-                searchStatus: "Connecting 2 of 3…", isBusy: true, error: nil,
-                onHost: {}, onJoin: { _ in }, onInvite: {}, onDuel: {}, onParty: {},
-                onCancelSearch: {}, onClose: {}),
-            name: "battle-entry-searching")
     }
 
     func testOverlaysRender() throws {

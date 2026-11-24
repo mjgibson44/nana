@@ -8,8 +8,8 @@ enum Route: Equatable {
     case home
     /// Picking a Solo game's speed, on the way in.
     case soloSetup
-    /// Getting into a battle (or an Occupy game): finding strangers, opening
-    /// a room, or joining one.
+    /// Getting into a duel or a battle (or an Occupy game): opening a room,
+    /// or joining one by its code.
     case battleEntry
     /// In a battle's lobby, waiting for the host — or the countdown — to start it.
     case battleLobby
@@ -31,62 +31,58 @@ struct RootView: View {
     @State private var battle: BattleSession?
     /// Which game the room being opened, joined or searched for plays.
     @State private var battleMode: GameMode = .battle
+    /// Which door it was: a duel's room seats two, a battle's the mode's cap.
+    @State private var battleRoom: RoomKind = .battle
     @State private var battleBusy = false
     @State private var battleError: String?
     @State private var partyCode: String?
     @State private var battleDoorNotice = false
-    /// Why the Daily door didn't open, when it didn't.
-    @State private var dailyNotice: String?
-    @State private var savedGame: SavedSoloGame?
     /// The stand-in rival of a `WORD_AUTOSTART=occupy` game.
     @State private var localRival: BattleSession?
-    /// The random match being looked for, while one is.
-    @State private var searching: RandomMatchKind?
-    @State private var searchStatus: String?
     /// The road into a battle that's underway, so backing out can cancel it —
     /// and a match that lands for an abandoned attempt is recognised as such.
     @State private var setupTask: Task<Void, Never>?
     @State private var setupGeneration = 0
+    /// Where a first-time player was heading when the tutorial stepped in —
+    /// they carry on there once it's done. Nil for a tutorial opened from
+    /// HOW TO PLAY, which comes back home.
+    @State private var tutorialThen: Door?
 
-    @Environment(\.scenePhase) private var scenePhase
+    /// The three ways in from home.
+    enum Door: Equatable {
+        case solo
+        case room(RoomKind)
+    }
 
     var body: some View {
         ZStack {
             switch route {
             case .home:
                 HomeScreen(
-                    dailyPlayed: dailyPlayed,
-                    dailyStreak: progression.dailyStreak,
-                    onSolo: { route = .soloSetup },
-                    onDaily: startDaily,
-                    onBattle: { chooseBattle(mode: .battle) },
-                    onOccupy: { chooseBattle(mode: .occupy) })
+                    onSolo: { open(.solo) },
+                    onDuel: { open(.room(.duel)) },
+                    onBattle: { open(.room(.battle)) },
+                    onHowToPlay: { startTutorial(then: nil) })
 
             case .soloSetup:
                 SoloSetupScreen(
                     pace: settings.pace,
-                    modifier: settings.modifier,
-                    hasSavedGame: hasSavedSoloGame,
-                    onResume: resumeSavedGame,
-                    onPlay: startSolo(pace:modifier:),
+                    onPlay: { pace in startSolo(pace: pace, modifier: .none) },
                     onClose: { route = .home })
 
             case .battleEntry:
                 BattleEntryScreen(
-                    mode: battleMode,
+                    room: battleRoom,
                     supportsPartyCodes: Matchmaking.supportsPartyCodes,
                     partyCode: partyCode,
-                    searching: searching,
-                    searchStatus: searchStatus,
                     isBusy: battleBusy,
                     error: battleError,
-                    onHost: hostBattle,
+                    onHost: hostRoom,
                     onJoin: joinBattle(code:),
-                    onInvite: inviteToBattle,
-                    onDuel: { findRandom(.duel) },
-                    onParty: { findRandom(.party) },
-                    onCancelSearch: cancelSearch,
                     onClose: leaveBattle)
+                    // A fresh screen for each door, so a code half-typed
+                    // behind DUEL isn't waiting behind BATTLE.
+                    .id(battleRoom)
 
             case .battleLobby:
                 lobbyScreen
@@ -96,7 +92,9 @@ struct RootView: View {
                     model: model,
                     battle: battle,
                     onLeave: leaveGame,
-                    onNewGame: startSolo(pace:modifier:))
+                    onNewGame: startSolo(pace:modifier:),
+                    onTutorialDone: finishTutorial,
+                    tutorialPlayLabel: tutorialPlayLabel)
             }
 
             // Battle is the one mode that genuinely needs an identity, so it
@@ -106,13 +104,8 @@ struct RootView: View {
                     battleDoorNotice = false
                 }
             }
-
-            if let dailyNotice {
-                NoticeCard(text: dailyNotice) { self.dailyNotice = nil }
-            }
         }
         .task {
-            savedGame = settings.loadSavedGame()
             // Kicked off at launch and never blocking: Solo plays signed out
             // (§7.1), and any score made meanwhile is held by Progression and
             // flushed if this succeeds.
@@ -128,117 +121,84 @@ struct RootView: View {
             // screenshotted without a finger on it. Ignored otherwise.
             switch ProcessInfo.processInfo.environment["WORD_AUTOSTART"] {
             case "solo": startSolo(pace: settings.pace, modifier: settings.modifier)
+            case "tutorial": startTutorial(then: nil)
             case "occupy": startLocalOccupy()
             default: break
             }
         }
-        // The OS can kill a backgrounded app at any moment, so the in-progress
-        // game is written out as it leaves the screen, not on the way down
-        // (plan §6.1).
-        .onChange(of: scenePhase) { _, phase in
-            guard phase != .active else { return }
-            persistGame()
+    }
+
+    // MARK: Doors and the tutorial
+
+    /// A door on the home screen. The first one a new player opens is
+    /// fronted by the tutorial, once; after that every door opens straight.
+    private func open(_ door: Door) {
+        if !settings.hasSeenTutorial {
+            startTutorial(then: door)
+        } else {
+            enter(door)
+        }
+    }
+
+    private func enter(_ door: Door) {
+        switch door {
+        case .solo: route = .soloSetup
+        case let .room(room): chooseBattle(room: room)
+        }
+    }
+
+    private func startTutorial(then door: Door?) {
+        tutorialThen = door
+        model.newTutorial()
+        route = .game
+    }
+
+    /// Finished or skipped: on to the door the player picked, or home.
+    private func finishTutorial() {
+        settings.markTutorialSeen()
+        let door = tutorialThen
+        tutorialThen = nil
+        route = .home
+        if let door { enter(door) }
+    }
+
+    /// The finish card's button names where it leads.
+    private var tutorialPlayLabel: String {
+        switch tutorialThen {
+        case .solo: return "Play solo"
+        case .room(.duel): return "On to duel"
+        case .room(.battle): return "On to battle"
+        case nil: return "Done"
         }
     }
 
     // MARK: Solo
 
-    // MARK: The Daily
-
-    /// Whether today's puzzle has been played. The merged progress is the
-    /// authority rather than anything local, so a day played on the iPad
-    /// counts here too.
-    private var dailyPlayed: Bool {
-        progression.merged.dailyDays.contains(dailyDayNumber(at: .now))
-    }
-
-    /// Today's board. One go a day, so a day already played says so rather
-    /// than dealing a second attempt at the same puzzle — and a day put down
-    /// half-finished is picked back up rather than restarted, which is the
-    /// same rule read the other way.
-    private func startDaily() {
-        let today = dailyDeal(at: .now)
-
-        if let saved = savedGame, saved.gameMode == .daily, saved.dailyDay == today.day {
-            resumeSavedGame()
-            return
-        }
-        guard !dailyPlayed else {
-            dailyNotice =
-                "You've already played today's board. The next one lands "
-                + "\(hoursUntil(today.closesAt)) from now."
-            return
-        }
-        do {
-            try model.newDaily(today)
-        } catch {
-            dailyNotice = "Today's board couldn't be dealt. Try again in a moment."
-            return
-        }
-        savedGame = nil
-        route = .game
-    }
-
-    /// Rounded up, and never "0 hours": a board that lands in forty minutes
-    /// lands in an hour as far as this sentence is concerned.
-    private func hoursUntil(_ date: Date) -> String {
-        let hours = max(1, Int(ceil(date.timeIntervalSinceNow / 3600)))
-        return "\(hours) hour\(hours == 1 ? "" : "s")"
-    }
-
-    /// The room, with its rules editable by whoever referees it. Lifted out
-    /// of the router's `switch` because the body's type-checking budget is
-    /// finite and this screen has the most arguments of any of them.
+    /// The room: who's in it, and the START that only its host has.
     private var lobbyScreen: some View {
-        let isHost = battle?.isHost == true
-        // Bound with explicit types: a ternary between a method reference and
-        // `nil` in an argument position is more than the inferencer will
-        // chew through inside a view this size.
-        var changeBoard: ((BattleBoardView) -> Void)?
-        var changeModifier: ((SoloModifier) -> Void)?
-        if isHost {
-            changeBoard = { view in setRoomBoardView(view) }
-            changeModifier = { modifier in setRoomModifier(modifier) }
-        }
-        return BattleLobbyScreen(
+        BattleLobbyScreen(
             mode: battleMode,
+            room: battleRoom,
             state: battle?.state,
             selfID: battle?.selfID ?? "",
-            isHost: isHost,
+            isHost: battle?.isHost == true,
             canStart: battle?.canStart ?? false,
             isReconnecting: battle?.isReconnecting ?? false,
             rejection: battle?.rejection,
             autoStart: battle?.autoStart,
             countdown: battle?.countdown,
             onStart: { battle?.start() },
-            onLeave: leaveBattle,
-            // Only a host may change the room's rules, and the rows read as
-            // controls or as facts on exactly that basis.
-            onBoardView: changeBoard,
-            onModifier: changeModifier)
-    }
-
-    /// The host set the room's layout, or what is on its squares. Told to
-    /// the room first — the snapshot is the truth every screen reads — and
-    /// remembered on this device, so hosting again opens where you left off.
-    private func setRoomBoardView(_ view: BattleBoardView) {
-        battle?.setBoardView(view)
-        settings.battle.boardView = view
-    }
-
-    private func setRoomModifier(_ modifier: SoloModifier) {
-        battle?.setModifier(modifier)
-        settings.battle.modifier = modifier
+            onLeave: leaveBattle)
     }
 
     private func startSolo(pace: SoloPace, modifier: SoloModifier) {
         // This is the one moment a player says what they want, so it's the
-        // only one worth remembering.
+        // only one worth remembering. The board is always a clear one: the
+        // modifier is accepted for the game screen's NEW GAME and set aside.
         settings.pace = pace
-        settings.modifier = modifier
+        settings.modifier = .none
         settings.save(nil)
-        savedGame = nil
-        model.newGame(pace: pace, modifier: modifier)
+        model.newGame(pace: pace, modifier: .none)
         route = .game
     }
 
@@ -249,16 +209,15 @@ struct RootView: View {
         // work signed out and flush when auth arrives (§7.1).
         progression.record(outcome)
         settings.record(score: outcome.score, words: outcome.words)
-        // A finished game is not a game to come back to.
-        settings.save(nil)
     }
 
     // MARK: Battle and Occupy (plan §7.3)
 
-    private func chooseBattle(mode: GameMode) {
+    private func chooseBattle(room: RoomKind, mode: GameMode = .battle) {
         if gameCenter.battleBlockedReason != nil {
             battleDoorNotice = true
         } else {
+            battleRoom = room
             battleMode = mode
             battleError = nil
             partyCode = nil
@@ -298,6 +257,16 @@ struct RootView: View {
         }
     }
 
+    /// HOST: a party code where the OS has them, Game Center's invite sheet
+    /// where it doesn't.
+    private func hostRoom() {
+        if Matchmaking.supportsPartyCodes {
+            hostBattle()
+        } else {
+            inviteToBattle()
+        }
+    }
+
     /// Open a room and show its code. The party exists before the match does —
     /// players join the party, and it becomes a `GKMatch` when we ask.
     private func hostBattle() {
@@ -306,7 +275,7 @@ struct RootView: View {
             let (activity, code) = try await matchmaking.hostParty()
             partyCode = code
             let match = try await matchmaking.match(for: activity)
-            return (GameKitTransport(match: match), .host, nil)
+            return (GameKitTransport(match: match), .host)
         }
     }
 
@@ -315,7 +284,7 @@ struct RootView: View {
         runBattleSetup {
             let activity = try await matchmaking.joinParty(code: code)
             let match = try await matchmaking.match(for: activity)
-            return (GameKitTransport(match: match), .client, nil)
+            return (GameKitTransport(match: match), .client)
         }
     }
 
@@ -323,63 +292,30 @@ struct RootView: View {
     /// app supports. Whoever sends the invite referees.
     private func inviteToBattle() {
         let mode = battleMode
+        let seats = battleRoom.seatLimit
         runBattleSetup {
-            let match = try await matchmaking.findMatchByInvite(mode: mode)
-            return (GameKitTransport(match: match), .host, nil)
+            let match = try await matchmaking.findMatchByInvite(mode: mode, seatLimit: seats)
+            return (GameKitTransport(match: match), .host)
         }
-    }
-
-    /// Strangers. Nobody opened this room, so everyone enters as a client and
-    /// the sessions elect a referee among themselves; the match then deals
-    /// itself on the kind's rule.
-    private func findRandom(_ kind: RandomMatchKind) {
-        let mode = battleMode
-        searching = kind
-        searchStatus = "Finding players…"
-        runBattleSetup {
-            let transport = try await matchmaking.findRandomMatch(kind, mode: mode) { status in
-                searchStatus = status
-            }
-            return (transport, .client, kind)
-        }
-    }
-
-    /// Back out of a search, staying on the entry screen.
-    private func cancelSearch() {
-        abandonSetup()
-        matchmaking.cancelSearch()
-        searching = nil
-        searchStatus = nil
-        battleBusy = false
-    }
-
-    /// The room emptied out around us and its door is shut: look again for
-    /// the same kind of match rather than leave the player in an empty lobby.
-    private func searchAgain(_ kind: RandomMatchKind) {
-        battle?.leave()
-        battle = nil
-        route = .battleEntry
-        battleError = "Nobody else is here any more."
-        findRandom(kind)
     }
 
     /// The shared shape of every road in: show it's working, form a match,
     /// build the session, land in the lobby. Only the newest attempt gets to
     /// touch the screen — an older one that finishes late is let go.
     private func runBattleSetup(
-        _ form: @escaping () async throws -> (GameKitTransport, BattleSession.Role, RandomMatchKind?)
+        _ form: @escaping () async throws -> (GameKitTransport, BattleSession.Role)
     ) {
         abandonSetup()
         let generation = setupGeneration
         battleBusy = true
         setupTask = Task {
             do {
-                let (transport, role, kind) = try await form()
+                let (transport, role) = try await form()
                 guard generation == setupGeneration else {
                     transport.disconnect()
                     return
                 }
-                startBattle(transport: transport, role: role, kind: kind)
+                startBattle(transport: transport, role: role)
             } catch let failure as Matchmaking.Failure {
                 guard generation == setupGeneration else { return }
                 partyCode = nil
@@ -400,8 +336,6 @@ struct RootView: View {
             }
             guard generation == setupGeneration else { return }
             battleBusy = false
-            searching = nil
-            searchStatus = nil
         }
     }
 
@@ -413,33 +347,18 @@ struct RootView: View {
         battleError = nil
     }
 
-    private func startBattle(
-        transport: GameKitTransport, role: BattleSession.Role, kind: RandomMatchKind?
-    ) {
-        let mode = battleMode
+    private func startBattle(transport: GameKitTransport, role: BattleSession.Role) {
         let session = BattleSession(
             role: role,
-            mode: mode,
+            mode: battleMode,
             transport: transport,
             model: model,
             displayName: { transport.displayName(for: $0) },
-            autoStart: kind?.rule,
-            announceTimeout: kind == nil
-                ? HOST_ANNOUNCE_TIMEOUT_SECONDS : HOST_CLAIM_TIMEOUT_SECONDS,
-            // What this device would open a room with. Only read if we end
-            // up hosting one; a client plays by the host's snapshot.
-            setup: settings.battle)
+            // Always the plain board: one layout, no squares.
+            setup: BattleSetup(),
+            seatLimit: battleRoom.seatLimit)
         session.onGameStart = { route = .game }
         session.onReturnToLobby = { route = .battleLobby }
-        if let kind {
-            // The door closes on every device as the countdown begins; a
-            // party's host holds it open until then.
-            session.onCountdownBegin = { matchmaking.stopFilling(transport) }
-            session.onBecameHost = {
-                if kind == .party { matchmaking.keepFilling(transport, kind: kind, mode: mode) }
-            }
-            session.onAbandoned = { searchAgain(kind) }
-        }
         session.run()
         battle = session
         route = .battleLobby
@@ -455,12 +374,10 @@ struct RootView: View {
         partyCode = nil
         battleError = nil
         battleBusy = false
-        searching = nil
-        searchStatus = nil
         route = .home
     }
 
-    // MARK: Leaving, resuming, persisting
+    // MARK: Leaving
 
     /// Done with a game by any road.
     private func leaveGame() {
@@ -470,29 +387,12 @@ struct RootView: View {
             leaveBattle()
             return
         }
-        persistGame()
+        // Leaving the tutorial early still counts as having seen it: it
+        // won't step in front of a door again.
+        if model.isTutorial {
+            settings.markTutorialSeen()
+            tutorialThen = nil
+        }
         route = .home
-    }
-
-    /// A half-played game the SOLO door offers to carry on. A saved Daily is
-    /// not one: that day comes back through `startDaily`, which knows whether
-    /// the board on it is still today's.
-    private var hasSavedSoloGame: Bool {
-        guard let savedGame else { return false }
-        return savedGame.gameMode != .daily
-    }
-
-    private func resumeSavedGame() {
-        guard let savedGame else { return }
-        model.restore(savedGame)
-        self.savedGame = nil
-        route = .game
-    }
-
-    private func persistGame() {
-        guard route == .game, battle == nil else { return }
-        let snapshot = model.savedGame()
-        settings.save(snapshot)
-        savedGame = snapshot
     }
 }

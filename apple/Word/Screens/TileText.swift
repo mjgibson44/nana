@@ -106,6 +106,202 @@ struct TileTitle: View {
     }
 }
 
+/// The name at the top of a menu screen — TIMETILES, SOLO, DUEL, BATTLE —
+/// set well above the rows under it, one tile word per line, with a wide
+/// gap beneath so the name reads as the screen's and not as its first row.
+/// Each line drops back a size, then to the ordinary tile, on a screen too
+/// narrow to hold it.
+struct ScreenHeader: View {
+    var lines: [String]
+    var style: TileStyle = .accent
+
+    init(_ lines: String..., style: TileStyle = .accent) {
+        self.lines = lines
+        self.style = style
+    }
+
+    var body: some View {
+        VStack(spacing: Spacing.tileGap) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                ViewThatFits(in: .horizontal) {
+                    TileWord(text: line, style: style, size: Spacing.headerTile)
+                    TileWord(text: line, style: style, size: Spacing.titleTile)
+                    TileWord(text: line, style: style, size: Spacing.tile)
+                }
+            }
+        }
+        .padding(.bottom, Spacing.headerGap)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(lines.joined().capitalized)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// How a menu button is dressed.
+enum MenuButtonStyle {
+    /// The one thing the screen is for: PLAY, HOST, JOIN, START.
+    case primary
+    /// Everything else you can press.
+    case secondary
+    /// One of a set of choices, picked.
+    case selected
+    /// One of a set of choices, not picked.
+    case unselected
+
+    var fill: Color {
+        switch self {
+        case .primary: Palette.accentRaised
+        case .selected: Palette.accentBg
+        case .secondary: Palette.surface
+        case .unselected: Palette.slot
+        }
+    }
+
+    var ink: Color {
+        switch self {
+        case .primary, .selected: Palette.accent
+        case .secondary: Palette.ink
+        case .unselected: Palette.inkSoft
+        }
+    }
+
+    var edge: Color {
+        switch self {
+        case .selected: Palette.accent.opacity(0.5)
+        case .unselected: Palette.surface
+        default: .clear
+        }
+    }
+}
+
+/// What a menu button looks like: a word, maybe a symbol in front of it, on
+/// a plain rounded bar. Tiles are kept for the screen's name; the things you
+/// press are these.
+struct MenuButtonLabel: View {
+    var title: String
+    var systemImage: String? = nil
+    var style: MenuButtonStyle = .secondary
+    var width: CGFloat? = Spacing.menuButtonWidth
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .bold))
+            }
+            Text(title.uppercased())
+                .font(.system(size: 16, weight: .bold))
+                .tracking(1.5)
+                .lineLimit(1)
+        }
+        .foregroundStyle(style.ink)
+        .frame(maxWidth: width == nil ? .infinity : nil)
+        .frame(width: width, height: Spacing.menuButtonHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.menuButtonRadius, style: .continuous)
+                .fill(style.fill))
+        .overlay(
+            RoundedRectangle(cornerRadius: Spacing.menuButtonRadius, style: .continuous)
+                .strokeBorder(style.edge, lineWidth: 1))
+        .contentShape(Rectangle())
+    }
+}
+
+struct MenuButton: View {
+    var title: String
+    var systemImage: String? = nil
+    var style: MenuButtonStyle = .secondary
+    var width: CGFloat? = Spacing.menuButtonWidth
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            MenuButtonLabel(title: title, systemImage: systemImage, style: style, width: width)
+        }
+        .buttonStyle(PressedTileStyle())
+        .disabled(disabled)
+        .opacity(disabled ? 0.35 : 1)
+        .accessibilityLabel(title.capitalized)
+    }
+}
+
+/// A two-or-more-way choice as one control: a track with the options in it
+/// and the picked one lit, sliding across as the pick changes.
+struct MenuToggle<Value: Hashable>: View {
+    var options: [(value: Value, title: String)]
+    @Binding var selection: Value
+    var width: CGFloat = Spacing.menuButtonWidth
+
+    @Namespace private var thumb
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(options, id: \.value) { option in
+                let isSelected = option.value == selection
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { selection = option.value }
+                } label: {
+                    Text(option.title.uppercased())
+                        .font(.system(size: 15, weight: .bold))
+                        .tracking(1.5)
+                        .foregroundStyle(isSelected ? Palette.accent : Palette.inkSoft)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background {
+                            if isSelected {
+                                RoundedRectangle(
+                                    cornerRadius: Spacing.menuButtonRadius - 4, style: .continuous
+                                )
+                                .fill(Palette.accentRaised)
+                                .matchedGeometryEffect(id: "thumb", in: thumb)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(option.title)
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(4)
+        .frame(width: width, height: Spacing.menuButtonHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.menuButtonRadius, style: .continuous)
+                .fill(Palette.surface))
+    }
+}
+
+/// BACK, pinned to the bottom of every menu screen so the way out is always
+/// in the same place.
+struct BackBar: View {
+    var text: String = "BACK"
+    var action: () -> Void
+
+    var body: some View {
+        MenuButton(title: text, systemImage: "chevron.left", action: action)
+    }
+}
+
+/// The foot of a menu screen: the screen's main action, when it has one,
+/// right above BACK — both where a thumb already is.
+struct MenuFooter<Primary: View>: View {
+    var onBack: () -> Void
+    @ViewBuilder var primary: Primary
+
+    var body: some View {
+        VStack(spacing: Spacing.menuButtonGap) {
+            primary
+            BackBar(action: onBack)
+        }
+    }
+}
+
+extension MenuFooter where Primary == EmptyView {
+    init(onBack: @escaping () -> Void) {
+        self.init(onBack: onBack) { EmptyView() }
+    }
+}
+
 /// A word in tiles that does something when pressed. The whole row is the
 /// target, blanks included.
 struct TileWordButton: View {
