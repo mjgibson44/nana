@@ -22,8 +22,6 @@ struct GameEndView: View {
     /// Battle: shown in place of the score.
     var placing: String?
     var standings: [Standing] = []
-    /// A line under the actions: what's being waited for.
-    var note: String?
     var restart: (() -> Void)?
     var onSeeGame: () -> Void
     var onLobby: (() -> Void)?
@@ -53,6 +51,8 @@ struct GameEndView: View {
             block
                 .frame(maxWidth: .infinity)
                 .padding(.top, Spacing.gap)
+                // The buttons end the headline; what follows is the record.
+                .padding(.bottom, Spacing.section)
 
             if !standings.isEmpty {
                 section("Standings") {
@@ -150,14 +150,6 @@ struct GameEndView: View {
             }
             if let onLeave {
                 MenuButton(title: leaveLabel, action: onLeave)
-            }
-            if let note {
-                Text(note)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.inkSoft)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-                    .padding(.top, 4)
             }
         }
     }
