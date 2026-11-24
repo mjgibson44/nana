@@ -73,9 +73,16 @@ def call(method, path, body=None):
             raw = response.read()
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as error:
-        detail = json.loads(error.read() or b"{}")
-        for e in detail.get("errors", []):
-            print(f"    ! {e.get('status')} {e.get('title')} — {e.get('detail')}")
+        # To stderr: callers like next-build-number.py hand their stdout to a
+        # shell variable, and Apple's reason is the one line worth seeing.
+        try:
+            detail = json.loads(error.read() or b"{}")
+        except ValueError:
+            detail = {}
+        errors = detail.get("errors") or [{"status": error.code, "title": error.reason}]
+        for e in errors:
+            print(f"    ! {e.get('status')} {e.get('title')} — {e.get('detail')}",
+                  file=sys.stderr)
         return None
 
 
