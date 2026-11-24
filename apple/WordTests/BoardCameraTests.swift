@@ -89,6 +89,21 @@ final class BoardCameraTests: XCTestCase {
         XCTAssertLessThan(camera.zoom, AUTO_ZOOM_MAX)
     }
 
+    /// A word that lands in a column half off the left edge is panned into
+    /// view; a crossword already on screen isn't moved at all.
+    func testALandedWordHalfOffScreenIsPannedIntoView() {
+        let camera = camera()
+        let box = Bounds(minRow: 16, minCol: 16, maxRow: 17, maxCol: 20)
+        let left = camera.metrics.rect(of: Cell(row: 16, col: 16)).minX
+        camera.offset.x = left + camera.metrics.step * 0.6
+        camera.autoFit(box: box)
+        XCTAssertLessThanOrEqual(camera.offset.x, left, "the first column should be back on screen")
+
+        let settled = camera.offset
+        camera.autoFit(box: box)
+        XCTAssertEqual(camera.offset, settled, "nothing to reveal, nothing moves")
+    }
+
     // MARK: The pinch
 
     func testFingersThatTravelWhilePinchingPanTheBoard() {
