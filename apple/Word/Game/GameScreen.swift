@@ -811,7 +811,6 @@ struct GameScreen: View {
             words: model.finalWords,
             placing: model.isBattle || model.isOccupy ? battle?.position.map(ordinal) : nil,
             standings: model.isOccupy ? occupyStandings : battleStandings,
-            note: endNote,
             restart: endRestart,
             onSeeGame: { model.setSummaryPresented(false) },
             onLobby: battle?.isHost == true ? { battle?.toLobby() } : nil,
@@ -827,25 +826,6 @@ struct GameScreen: View {
         // be offering something the door would then refuse.
         if model.isDaily { return nil }
         return { startNewGame(pace: model.pace, modifier: model.modifier) }
-    }
-
-    private var endNote: String? {
-        if let result = model.dailyResult { return Self.dailyNote(result) }
-        guard let battle else { return nil }
-        if battle.isFinished {
-            let how: String? = {
-                guard model.isOccupy, let end = battle.state?.occupy?.end else { return nil }
-                switch end {
-                case .clock: return "Time."
-                case .stall: return "The board was stuck."
-                case .field: return "Everyone else left."
-                }
-            }()
-            let wait = battle.isHost ? nil : "Waiting for the host to restart or reopen the lobby."
-            return [how, wait].compactMap { $0 }.joined(separator: " ").nilIfEmpty
-        }
-        let standing = battle.contestants.filter { $0.outOrder == nil && $0.id != battle.selfID }
-        return "You’re out — \(standing.count) still standing."
     }
 
     /// The field, in the order the results read: whoever is still standing
@@ -944,8 +924,4 @@ struct GameScreen: View {
         return model
     }())
     .preferredColorScheme(.dark)
-}
-
-extension String {
-    fileprivate var nilIfEmpty: String? { isEmpty ? nil : self }
 }

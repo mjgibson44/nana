@@ -207,7 +207,6 @@ final class ScreenSnapshotTests: XCTestCase {
                     .init(id: "a", rank: 1, name: "Ada", isSelf: true, note: "84"),
                     .init(id: "b", rank: 2, name: "Grace", isSelf: false, note: "60"),
                 ],
-                note: "Time.",
                 restart: {}, onSeeGame: {}, onLobby: {}, leaveLabel: "LEAVE", onLeave: {},
                 scrollable: false),
             name: "results-occupy", size: CGSize(width: Self.phone.width, height: 1_100))
@@ -279,7 +278,6 @@ final class ScreenSnapshotTests: XCTestCase {
                     .init(id: "b", rank: nil, name: "Grace", isSelf: false, note: "20 tiles"),
                     .init(id: "c", rank: nil, name: "Me", isSelf: true, note: "out"),
                 ],
-                note: "You’re out — 2 still standing.",
                 onSeeGame: {}, leaveLabel: "LEAVE", onLeave: {}, scrollable: false),
             name: "results-spectating", size: CGSize(width: Self.phone.width, height: 1_100))
     }
