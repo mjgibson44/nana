@@ -43,6 +43,8 @@ final class BattleSession {
     /// The rule a random match deals itself by; nil for a friends' lobby,
     /// where the host presses START.
     let autoStart: AutoStartRule?
+    /// The seat cap a hosted duel asks for; nil for a battle.
+    let seatLimit: Int?
     private(set) var role: Role
     private(set) var state: BattleState?
     private(set) var hostID: PlayerID?
@@ -96,8 +98,12 @@ final class BattleSession {
         clock: @escaping () -> Date = { .now },
         autoStart: AutoStartRule? = nil,
         announceTimeout: TimeInterval = HOST_ANNOUNCE_TIMEOUT_SECONDS,
-        setup: BattleSetup = BattleSetup()
+        setup: BattleSetup = BattleSetup(),
+        /// How many the room seats if this device ends up hosting it — two
+        /// for a duel. Nil leaves the mode's own cap.
+        seatLimit: Int? = nil
     ) {
+        self.seatLimit = seatLimit
         self.role = role
         self.mode = mode
         self.setup = setup
@@ -327,7 +333,8 @@ final class BattleSession {
             // trusted, rather than every word being called fake.
             isWord: { [weak model] word in model?.dictionary?.contains(word) ?? true },
             boardView: setup.boardView,
-            modifier: setup.modifier)
+            modifier: setup.modifier,
+            seatLimit: seatLimit)
     }
 
     private func makeClientSession() -> ClientSession {

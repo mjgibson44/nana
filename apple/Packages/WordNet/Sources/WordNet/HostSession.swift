@@ -141,8 +141,13 @@ public final class HostSession {
     /// people's words in each other's way, which is a different game from the
     /// one this setting is offering.
     public var maxPlayers: Int {
-        state.isSharedBoard ? min(rules.maxPlayers, OCCUPY_MAX_PLAYERS) : rules.maxPlayers
+        let cap = state.isSharedBoard ? min(rules.maxPlayers, OCCUPY_MAX_PLAYERS) : rules.maxPlayers
+        return min(cap, seatLimit ?? cap)
     }
+
+    /// A tighter cap the host chose for this room — two, for a duel. Nil
+    /// leaves the mode's own.
+    public let seatLimit: Int?
 
     public var minPlayers: Int { rules.minPlayers }
     /// The host's dictionary, consulted only when refereeing a word onto a
@@ -208,8 +213,10 @@ public final class HostSession {
         /// play by, so they seed the snapshot here and change through
         /// `setBoardView` / `setModifier` while the lobby is still a lobby.
         boardView: BattleBoardView = .separate,
-        modifier: SoloModifier = .none
+        modifier: SoloModifier = .none,
+        seatLimit: Int? = nil
     ) {
+        self.seatLimit = seatLimit
         self.transport = transport
         self.displayName = displayName
         self.makeSeed = makeSeed

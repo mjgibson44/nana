@@ -2,67 +2,54 @@ import SwiftUI
 import WordCore
 
 /// The screen the app opens on: the game's name, and the ways to play, each
-/// spelled out in tiles. A Solo game the OS took away mid-run is picked back
-/// up behind the SOLO door (`SoloSetupScreen`), with the rest of that game's
-/// choices, rather than from a row up here.
+/// spelled out in tiles.
 struct HomeScreen: View {
-    /// The name, as the home screen spells it. One place to change.
-    static let title = "TIMETILES"
+    /// The name, as the home screen spells it: one word, set on two lines.
+    static let titleLines = ["TIME", "TILES"]
 
-    /// Whether today's puzzle is still to be played. Played out, the door
-    /// still opens — onto the day you had, not a second go at it.
-    var dailyPlayed: Bool = false
-    /// How many days in a row, shown on the door once there is a run worth
-    /// keeping. The reason to come back tomorrow belongs where you'd see it
-    /// on the way past, not on a stats page.
-    var dailyStreak: Int = 0
     var onSolo: () -> Void
-    var onDaily: () -> Void = {}
+    var onDuel: () -> Void
     var onBattle: () -> Void
-    var onOccupy: () -> Void = {}
 
     var body: some View {
         ScreenColumn {
             Spacer()
-            // The doors come in groups, a section gap apart: the ones you
-            // play alone, and the ones that need other people. Inside a group
-            // the rows sit tile-tight, so the grouping is what the eye reads
-            // first.
-            VStack(spacing: Spacing.section) {
-                TileTitle(text: Self.title)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, Spacing.tileGap)
-                VStack(spacing: Spacing.tileGap) {
-                    TileWordButton(text: "SOLO", action: onSolo)
-                    TileWordButton(
-                        text: "DAILY", style: dailyPlayed ? .dim : .accent, action: onDaily)
-                    if dailyStreak > 1 {
-                        Text("\(dailyStreak) day streak")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Palette.inkSoft)
-                            .accessibilityLabel("\(dailyStreak) day streak")
-                    }
-                }
-                VStack(spacing: Spacing.tileGap) {
-                    TileWordButton(text: "BATTLE", action: onBattle)
-                    // Occupy's door is closed for now — its ideas live on as
-                    // Battle's shared board rather than as a mode of their
-                    // own (`OCCUPY_DOOR_ENABLED`). The group survives it: one
-                    // row is still the group of doors that need other people,
-                    // and it takes another back when one earns it.
-                    if OCCUPY_DOOR_ENABLED {
-                        TileWordButton(text: "OCCUPY", action: onOccupy)
-                    }
-                }
+            VStack(spacing: Spacing.menuButtonGap) {
+                title
+                MenuButton(title: "Solo", action: onSolo)
+                MenuButton(title: "Duel", action: onDuel)
+                MenuButton(title: "Battle", action: onBattle)
             }
             Spacer()
         }
     }
+
+    /// TIME over TILES, both starting from the same left edge, with a clock
+    /// tile closing out TIME so the two lines are the same five tiles wide
+    /// and the name sits as one block.
+    private var title: some View {
+        VStack(alignment: .leading, spacing: Spacing.tileGap) {
+            HStack(spacing: Spacing.tileGap) {
+                TileWord(text: Self.titleLines[0], style: .accent, size: Spacing.headerTile)
+                RoundedRectangle(cornerRadius: Spacing.tileRadius, style: .continuous)
+                    .fill(TileStyle.accent.fill)
+                    .overlay {
+                        Image(systemName: "clock")
+                            .font(.system(size: Spacing.headerTile * 0.5, weight: .bold))
+                            .foregroundStyle(TileStyle.accent.ink)
+                    }
+                    .frame(width: Spacing.headerTile, height: Spacing.headerTile)
+            }
+            TileWord(text: Self.titleLines[1], style: .accent, size: Spacing.headerTile)
+        }
+        .padding(.bottom, Spacing.headerGap)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Time Tiles")
+        .accessibilityAddTraits(.isHeader)
+    }
 }
 
 #Preview {
-    HomeScreen(
-        dailyPlayed: false, dailyStreak: 4,
-        onSolo: {}, onDaily: {}, onBattle: {}, onOccupy: {})
+    HomeScreen(onSolo: {}, onDuel: {}, onBattle: {})
         .preferredColorScheme(.dark)
 }
