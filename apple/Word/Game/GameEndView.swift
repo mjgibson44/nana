@@ -1,7 +1,7 @@
 import SwiftUI
 import WordCore
 
-/// The end of a game: the score in big tiles (or, in a battle, the placing),
+/// The end of a game: the score in big type (or, in a battle, the placing),
 /// the ways onward, and straight under them who placed where and the words
 /// this player put down — all on the first screenful, scrolling only if the
 /// word list runs long. It also serves a buried battle player while the
@@ -122,47 +122,41 @@ struct GameEndView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// The headline block: the score, and the ways off this screen, each row
-    /// centred under the last.
+    /// The headline block: the screen's name in tiles, the result on its
+    /// own in big plain type with room round it, and the ways off this
+    /// screen as plain buttons — tiles are for names, buttons for pressing.
     private var block: some View {
-        TileBlock {
-            TileTitle(text: "GAME END")
+        VStack(spacing: Spacing.menuButtonGap) {
+            ScreenHeader("GAME END")
+                // The result supplies its own air; the header's full gap on
+                // top of that would push the buttons off a small phone.
+                .padding(.bottom, -Spacing.headerGap)
 
-            // The number is the headline, so it gets a section's air under it
-            // rather than sitting a tile-gap off the buttons that leave the
-            // screen.
-            Group {
-                if let placing {
-                    BigTile(text: placing)
-                        .accessibilityLabel("You finished \(placing)")
-                } else {
-                    let digits = String(score).map(String.init)
-                    let unit = digits.count > 5 ? Spacing.tile * 0.6 : Spacing.tile
-                    HStack(spacing: Spacing.tileGap) {
-                        ForEach(Array(digits.enumerated()), id: \.offset) { _, digit in
-                            BigTile(text: digit, unit: unit)
-                        }
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Final score \(score)")
-                }
-            }
-            .padding(.bottom, Spacing.section - Spacing.tileGap)
+            Text(placing ?? "\(score)")
+                .font(.system(size: 88, weight: .heavy, design: .rounded))
+                .foregroundStyle(Palette.accent)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.vertical, Spacing.section * 1.5)
+                .accessibilityLabel(placing.map { "You finished \($0)" } ?? "Final score \(score)")
 
             if let restart {
-                TileWordButton(text: "RESTART", action: restart)
+                MenuButton(title: "Restart", style: .primary, action: restart)
             }
-            TileWordButton(text: "SEE GAME", action: onSeeGame)
+            MenuButton(title: "See game", action: onSeeGame)
             if let onLobby {
-                TileWordButton(text: "LOBBY", action: onLobby)
+                MenuButton(title: "Lobby", action: onLobby)
             }
             if let onLeave {
-                TileWordButton(text: leaveLabel, action: onLeave)
+                MenuButton(title: leaveLabel, action: onLeave)
             }
             if let note {
                 Text(note)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Palette.inkSoft)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
                     .padding(.top, 4)
             }
         }
