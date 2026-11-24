@@ -6,15 +6,18 @@
 //
 //   swift apple/tools/make-icon.swift
 //
-// A placeholder, honestly: it is the game's visual language (ink on paper,
-// bordered tiles, heavy rounded type) rather than a designed mark. Good enough
-// for TestFlight; worth replacing before the App Store.
+// TI/ME in four tiles, in the game's own palette: the dark board, the
+// dark-green word tiles and their light-green letters (Palette.swift's `bg`,
+// `accentBg` and `accent`) — the same tiles the home screen spells TIME TILES
+// in. The first App Store icon, picked from variations on the original
+// ink-on-paper one when the app went dark.
 
 import AppKit
 
-let ink = NSColor(srgbRed: 0x16 / 255, green: 0x16 / 255, blue: 0x16 / 255, alpha: 1)
-let paper = NSColor(srgbRed: 0xF4 / 255, green: 0xF4 / 255, blue: 0xF3 / 255, alpha: 1)
-let tileFace = NSColor.white
+/// Palette.swift's tokens, by value: this script runs outside the app.
+let ink = NSColor(srgbRed: 0xB6 / 255, green: 0xDA / 255, blue: 0x97 / 255, alpha: 1)  // accent
+let paper = NSColor(srgbRed: 0x15 / 255, green: 0x11 / 255, blue: 0x10 / 255, alpha: 1)  // bg
+let tileFace = NSColor(srgbRed: 0x25 / 255, green: 0x3F / 255, blue: 0x18 / 255, alpha: 1)  // accentBg
 
 /// One 2×2 block of tiles spelling the game's first word.
 let letters = [["T", "I"], ["M", "E"]]
@@ -73,10 +76,9 @@ func drawIcon(pixels: Int, inset: CGFloat, squircle: Bool) -> NSBitmapImageRep {
 
     // Four tiles, laid out inside the plate.
     let field = plate.insetBy(dx: plate.width * 0.13, dy: plate.height * 0.13)
-    let gap = field.width * 0.055
+    let gap = field.width * 0.0385
     let tile = (field.width - gap) / 2
-    let radius = tile * 0.17
-    let border = max(1, tile * 0.075)
+    let radius = tile * 0.12
 
     for (row, line) in letters.enumerated() {
         for (column, letter) in line.enumerated() {
@@ -86,11 +88,9 @@ func drawIcon(pixels: Int, inset: CGFloat, squircle: Bool) -> NSBitmapImageRep {
             let rect = CGRect(x: x, y: y, width: tile, height: tile)
 
             let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+            // Filled, not outlined: the game's tiles have no border.
             tileFace.setFill()
             path.fill()
-            ink.setStroke()
-            path.lineWidth = border
-            path.stroke()
 
             let font = roundedFont(size: tile * 0.62)
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink]
