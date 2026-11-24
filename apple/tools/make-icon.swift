@@ -6,18 +6,17 @@
 //
 //   swift apple/tools/make-icon.swift
 //
-// TI/ME in four tiles, in the game's own palette: the dark board, the
-// dark-green word tiles and their light-green letters (Palette.swift's `bg`,
-// `accentBg` and `accent`) — the same tiles the home screen spells TIME TILES
-// in. The first App Store icon, picked from variations on the original
-// ink-on-paper one when the app went dark.
+// TI/ME in four white tiles with dark letters on the game's dark board
+// (Palette.swift's `bg`). The original ink-on-paper icon inverted: it doesn't
+// copy the dark-green home-screen tiles, because the icon needs far more
+// contrast against the board than the in-app tiles do.
 
 import AppKit
 
-/// Palette.swift's tokens, by value: this script runs outside the app.
-let ink = NSColor(srgbRed: 0xB6 / 255, green: 0xDA / 255, blue: 0x97 / 255, alpha: 1)  // accent
+/// Palette.swift's `bg`, by value: this script runs outside the app.
 let paper = NSColor(srgbRed: 0x15 / 255, green: 0x11 / 255, blue: 0x10 / 255, alpha: 1)  // bg
-let tileFace = NSColor(srgbRed: 0x25 / 255, green: 0x3F / 255, blue: 0x18 / 255, alpha: 1)  // accentBg
+let ink = paper
+let tileFace = NSColor.white
 
 /// One 2×2 block of tiles spelling the game's first word.
 let letters = [["T", "I"], ["M", "E"]]
@@ -76,9 +75,9 @@ func drawIcon(pixels: Int, inset: CGFloat, squircle: Bool) -> NSBitmapImageRep {
 
     // Four tiles, laid out inside the plate.
     let field = plate.insetBy(dx: plate.width * 0.13, dy: plate.height * 0.13)
-    let gap = field.width * 0.0385
+    let gap = field.width * 0.055
     let tile = (field.width - gap) / 2
-    let radius = tile * 0.12
+    let radius = tile * 0.17
 
     for (row, line) in letters.enumerated() {
         for (column, letter) in line.enumerated() {
