@@ -17,7 +17,7 @@ import AppKit
 /// Palette.swift's tokens, by value: this script runs outside the app.
 let ink = NSColor(srgbRed: 0xB6 / 255, green: 0xDA / 255, blue: 0x97 / 255, alpha: 1)  // accent
 let paper = NSColor(srgbRed: 0x15 / 255, green: 0x11 / 255, blue: 0x10 / 255, alpha: 1)  // bg
-let tileFace = NSColor(srgbRed: 0x25 / 255, green: 0x3F / 255, blue: 0x18 / 255, alpha: 1)  // accentBg
+let tileFace = NSColor(srgbRed: 0x1A / 255, green: 0x2D / 255, blue: 0x11 / 255, alpha: 1)  // accentBg, darkened
 
 /// One 2×2 block of tiles spelling the game's first word.
 let letters = [["T", "I"], ["M", "E"]]
@@ -78,7 +78,7 @@ func drawIcon(pixels: Int, inset: CGFloat, squircle: Bool) -> NSBitmapImageRep {
     let field = plate.insetBy(dx: plate.width * 0.13, dy: plate.height * 0.13)
     let gap = field.width * 0.0385
     let tile = (field.width - gap) / 2
-    let radius = tile * 0.12
+    let radius = tile * 0.05  // plain boxes: only a hint of rounding
 
     for (row, line) in letters.enumerated() {
         for (column, letter) in line.enumerated() {
