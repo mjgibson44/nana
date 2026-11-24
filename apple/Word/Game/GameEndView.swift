@@ -122,16 +122,11 @@ struct GameEndView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// The headline block: the screen's name in tiles, the result on its
-    /// own in big plain type with room round it, and the ways off this
-    /// screen as plain buttons — tiles are for names, buttons for pressing.
+    /// The headline block: the result on its own in big plain type with room
+    /// round it — it is the screen's whole message, so it needs no title over
+    /// it — and the ways off this screen as plain buttons.
     private var block: some View {
         VStack(spacing: Spacing.menuButtonGap) {
-            ScreenHeader("GAME END")
-                // The result supplies its own air; the header's full gap on
-                // top of that would push the buttons off a small phone.
-                .padding(.bottom, -Spacing.headerGap)
-
             Text(placing ?? "\(score)")
                 .font(.system(size: 88, weight: .heavy, design: .rounded))
                 .foregroundStyle(Palette.accent)
