@@ -309,6 +309,38 @@ final class GameModel {
     /// The game never calls this — prizes are the clock's to light and the
     /// player's to claim. It exists so a test can start from a board that
     /// would otherwise take a minute of real play to arrive at.
+    /// Which step of `tutorialScript` the tutorial is on.
+    private(set) var tutorialStep = 0
+    /// Every step's word is down: the finish card is up.
+    private(set) var tutorialFinished = false
+
+    var isTutorial: Bool { mode == .tutorial }
+
+    /// The step being played, while the tutorial is running.
+    var tutorialCurrent: TutorialStep? {
+        guard isTutorial, !tutorialFinished, tutorialScript.indices.contains(tutorialStep)
+        else { return nil }
+        return tutorialScript[tutorialStep]
+    }
+
+    /// The word row holds exactly what the step asks for — letters and gap in
+    /// the right order — so all that's left is to place it.
+    var tutorialRowReady: Bool {
+        guard let step = tutorialCurrent else { return false }
+        return pickList.map(\.letter) == step.pattern
+    }
+
+    /// The next thing the step's word wants in the row is a gap: the cue to
+    /// light the gap button.
+    var tutorialWantsGap: Bool {
+        guard let step = tutorialCurrent else { return false }
+        let built = pickList.map(\.letter)
+        guard built.count < step.pattern.count,
+            Array(step.pattern.prefix(built.count)) == built
+        else { return false }
+        return step.pattern[built.count] == nil
+    }
+
     func setPrizes(_ next: PrizeField) {
         prizes = next
     }
@@ -552,7 +584,7 @@ final class GameModel {
     /// refused word is held up in red counts too: it is the game answering,
     /// and a tap landing in the middle of it would be answering back.
     var canAcceptInput: Bool {
-        !isComplete && !isPaused && splash == nil && !showSummary && !spectating && !aimRejected
+        !isComplete && !isPaused && splash == nil && !showSummary && !spectating && !aimRejected && !tutorialFinished
     }
 
     var canPause: Bool { mode == .endless && !isComplete && !isPaused && splash == nil }
@@ -687,7 +719,7 @@ final class GameModel {
         // A full pile is the normal state of an Occupy hand, not a warning —
         // and of a Daily's opening hand, which arrives holding the whole
         // puzzle and cannot bury anybody.
-        if mode == .occupy || mode == .daily { return .ok }
+        if mode == .occupy || mode == .daily || mode == .tutorial { return .ok }
         if rack.count >= pileUrgent { return .urgent }
         if rack.count >= pileWarn { return .warn }
         return .ok
@@ -701,7 +733,7 @@ final class GameModel {
     /// letters the puzzle was never cut from. (`recordStroke` finishes the
     /// day instead, and `DailyResult` pays the all-tiles bonus.)
     var boardClearReady: Bool {
-        mode != .daily && !isComplete && boardScore.bonusEarned
+        mode != .daily && mode != .tutorial && !isComplete && boardScore.bonusEarned
     }
 
     /// Seconds until the next batch lands, whichever clock is running.
@@ -778,6 +810,55 @@ final class GameModel {
         setBoard(built.board)
         rack = built.letters
         resetPlayState()
+    }
+
+    /// The first-time walkthrough: three words, no clock, no drip. Each step
+    /// deals just the tiles its word needs (`tutorialScript`), and the next
+    /// step's tiles arrive the moment its word is down.
+    func newTutorial(now: Date = .now) {
+        seed = "tutorial"
+        mode = .tutorial
+        modifier = .none
+        prizes = PrizeField()
+        day = nil
+        dailyDeal = nil
+        strokes = 0
+        clearBattle()
+        // Clockless, and no opening card: nothing arrives on a timer.
+        solo = SoloSession(tutorialAt: now)
+        gameSerial += 1
+        setBoard(TileMap())
+        rack = tutorialScript.first?.tiles ?? []
+        resetPlayState()
+    }
+
+    /// Why the tutorial won't take this word, or nil when it's the one the
+    /// step asked for, played the way the step is teaching.
+    private func tutorialRefusal(newRuns: [WordRun], picks: [Pick]) -> String? {
+        guard let step = tutorialCurrent else { return nil }
+        let word = step.word.uppercased()
+        guard newRuns.contains(where: { $0.word == step.word }) else {
+            return "Spell \(word) for this step."
+        }
+        if step.needsGap, !picks.contains(where: { $0.letter == nil }) {
+            let letter = step.borrowed.first?.uppercased() ?? "letter"
+            return "Use a gap for the \(letter) — then tap the \(letter) on the board."
+        }
+        return nil
+    }
+
+    /// The step's word is down: say so, and deal the next step's tiles — or,
+    /// after the last, raise the finish card.
+    private func advanceTutorial() {
+        guard let step = tutorialCurrent else { return }
+        rejectToast(step.done)
+        tutorialStep += 1
+        if tutorialScript.indices.contains(tutorialStep) {
+            appendDealtTiles(tutorialScript[tutorialStep].tiles)
+        } else {
+            tutorialFinished = true
+            cues?.play(.win)
+        }
     }
 
     /// The host said go. Grow the shared deal from the seed and dive in. The
@@ -1093,6 +1174,8 @@ final class GameModel {
         lastPrizeTick = nil
         landings = []
         ringsAnnounced = false
+        tutorialStep = 0
+        tutorialFinished = false
     }
 
     func dismissSplash(at now: Date = .now) {
@@ -1116,8 +1199,9 @@ final class GameModel {
             advancePrizes(at: now)
             return
         }
-        // Occupy's clocks are the host's; nothing lands from them here.
-        if mode == .occupy { return }
+        // Occupy's clocks are the host's; nothing lands from them here. The
+        // tutorial has none at all.
+        if mode == .occupy || mode == .tutorial { return }
         if let tiles = solo.advance(at: now) {
             dealBonusTiles(tiles, message: "+\(tiles) tile\(tiles == 1 ? "" : "s")")
         }
@@ -1163,7 +1247,7 @@ final class GameModel {
     /// game ends only when the pile is actually full. Digging back out
     /// re-arms it, and is the comeback the badge is for.
     private func soundPileAlarm() {
-        guard !isComplete, mode != .occupy, mode != .daily else {
+        guard !isComplete, mode != .occupy, mode != .daily, mode != .tutorial else {
             inTheRed = false
             return
         }
@@ -1183,7 +1267,7 @@ final class GameModel {
     /// worse, either — the pile only ever shrinks from here — so there is
     /// nothing for the rule to protect against.
     private func checkBurial() {
-        guard !isComplete, !spectating, mode != .occupy, mode != .daily,
+        guard !isComplete, !spectating, mode != .occupy, mode != .daily, mode != .tutorial,
             rack.count >= pileLimit
         else { return }
         finishGame(reason: .buried)
@@ -1835,6 +1919,10 @@ final class GameModel {
                     : "\(words.joined(separator: ", ")) aren’t words")
             return false
         }
+        if mode == .tutorial, let refusal = tutorialRefusal(newRuns: newRuns, picks: picksToPlace) {
+            rejectToast(refusal)
+            return false
+        }
 
         // Noted before the board changes: "place an 8-letter word" is about
         // what went down, not what survives on the board at the end.
@@ -1893,6 +1981,7 @@ final class GameModel {
                     "Sent \(attack) tile\(attack == 1 ? "" : "s") across your rivals!")
             }
         }
+        if mode == .tutorial { advanceTutorial() }
         return true
     }
 

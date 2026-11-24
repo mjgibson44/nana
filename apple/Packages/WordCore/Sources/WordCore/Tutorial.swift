@@ -1,10 +1,12 @@
-/// The tutorial's script. Ported from `src/game/tutorial.ts`.
+/// The tutorial's script. Ported from `src/game/tutorial.ts`, and deliberately
+/// diverged from it: on Apple platforms every word after the first borrows its
+/// board letter through a gap tile, so that is what both later steps teach.
 ///
 /// Every step deals exactly the tiles its word needs and waits for that word to
 /// appear on the board before moving on, so each step's instructions can name
-/// real letters the player is looking at. The deals get shorter as they go: step
-/// two is one tile short because its word crosses a letter already down, and step
-/// three is two short because its word has to be played through a gap tile.
+/// real letters the player is looking at. The first word is spelled in full and
+/// placed by itself; each later step is dealt one letter short — the one it has
+/// to borrow from the board, through a gap.
 
 public struct TutorialStep: Equatable {
     /// Tiles dealt into the pile as the step opens, in the order they're read.
@@ -35,15 +37,15 @@ public let tutorialScript: [TutorialStep] = [
         tiles: ["s", "o", "l", "a", "r"], word: "solar", needsGap: false,
         done: "SOLAR is down!"
     ),
-    // No R — ORBIT crosses the one SOLAR just left on the board.
+    // No R — ORBIT borrows the one SOLAR just left on the board, through a gap.
     TutorialStep(
-        tiles: ["o", "b", "i", "t"], word: "orbit", needsGap: false,
-        done: "ORBIT crossed on the R!"
+        tiles: ["o", "b", "i", "t"], word: "orbit", needsGap: true,
+        done: "ORBIT went through the R!"
     ),
-    // No O either, and this time the board's O has to be claimed with a gap.
+    // No O either: the same move again, on the player's own this time.
     TutorialStep(
         tiles: ["p", "l", "e"], word: "pole", needsGap: true,
-        done: "POLE played through the gap — that’s the whole game!"
+        done: "POLE went through the O — that’s the whole game!"
     ),
 ]
 
@@ -151,4 +153,28 @@ public func scriptedPlacement(
         }
     }
     return nil
+}
+
+extension TutorialStep {
+    /// The word as the player builds it in the word row: each letter that
+    /// comes from the pile, and a gap (nil) for each one the step is dealt
+    /// short of — the letter it has to borrow from the board. ORBIT is
+    /// `o, gap, b, i, t`; the opener, dealt whole, has no gaps.
+    ///
+    /// What the tutorial's instructions read the pile against, so they can
+    /// say "now tap the R" the moment the row is right rather than guessing.
+    public var pattern: [String?] {
+        var hand = tiles
+        return word.map { character in
+            let letter = String(character)
+            guard let at = hand.firstIndex(of: letter) else { return nil }
+            hand.remove(at: at)
+            return letter
+        }
+    }
+
+    /// The board letters the step borrows, in the order its word reads them.
+    public var borrowed: [String] {
+        zip(word, pattern).compactMap { letter, pick in pick == nil ? String(letter) : nil }
+    }
 }

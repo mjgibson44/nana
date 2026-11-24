@@ -10,6 +10,9 @@ struct HomeScreen: View {
     var onSolo: () -> Void
     var onDuel: () -> Void
     var onBattle: () -> Void
+    /// The tutorial again, on purpose. It runs by itself before the first
+    /// door a new player opens; this is the way back to it after that.
+    var onHowToPlay: () -> Void = {}
 
     var body: some View {
         ScreenColumn {
@@ -21,6 +24,15 @@ struct HomeScreen: View {
                 MenuButton(title: "Battle", action: onBattle)
             }
             Spacer()
+            Button(action: onHowToPlay) {
+                Text("How to play")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Palette.inkSoft)
+                    .underline()
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 

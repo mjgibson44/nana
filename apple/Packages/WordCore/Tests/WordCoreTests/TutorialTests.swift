@@ -33,9 +33,17 @@ private func playStep(_ board: TileMap, _ stepIndex: Int, _ rack: [String]) thro
         #expect(tutorialScript[0].tiles.joined() == tutorialScript[0].word)
     }
 
-    @Test("asks for a gap tile only on the last step")
-    func asksForAGapTileOnlyOnTheLastStep() {
-        #expect(tutorialScript.map(\.needsGap) == [false, false, true])
+    @Test("asks for a gap tile on every word after the first")
+    func asksForAGapTileOnEveryWordAfterTheFirst() {
+        #expect(tutorialScript.map(\.needsGap) == [false, true, true])
+    }
+
+    @Test("builds each later word with a gap where its borrowed letter goes")
+    func buildsEachLaterWordWithAGapWhereItsBorrowedLetterGoes() {
+        #expect(tutorialScript[0].pattern == ["s", "o", "l", "a", "r"])
+        #expect(tutorialScript[1].pattern == ["o", nil, "b", "i", "t"])
+        #expect(tutorialScript[2].pattern == ["p", nil, "l", "e"])
+        #expect(tutorialScript.map(\.borrowed) == [[], ["r"], ["o"]])
     }
 
     @Test("has something to say the moment each word lands")
@@ -88,6 +96,16 @@ private func playStep(_ board: TileMap, _ stepIndex: Int, _ rack: [String]) thro
             board: board, bounds: boardBounds(board), step: tutorialScript[2], rack: ["p", "l", "e"]
         ))
         #expect(played.picks.map(\.rackIndex).contains(GAP))
+        #expect(played.picks.filter { $0.letter == nil }.count == 1)
+    }
+
+    @Test("plays ORBIT through SOLAR's R with a gap")
+    func playsOrbitThroughSolarsRWithAGap() throws {
+        let board = try playStep([:], 0, tutorialScript[0].tiles)
+        let played = try #require(scriptedPlacement(
+            board: board, bounds: boardBounds(board), step: tutorialScript[1],
+            rack: tutorialScript[1].tiles
+        ))
         #expect(played.picks.filter { $0.letter == nil }.count == 1)
     }
 

@@ -43,15 +43,26 @@ struct RootView: View {
     /// and a match that lands for an abandoned attempt is recognised as such.
     @State private var setupTask: Task<Void, Never>?
     @State private var setupGeneration = 0
+    /// Where a first-time player was heading when the tutorial stepped in —
+    /// they carry on there once it's done. Nil for a tutorial opened from
+    /// HOW TO PLAY, which comes back home.
+    @State private var tutorialThen: Door?
+
+    /// The three ways in from home.
+    enum Door: Equatable {
+        case solo
+        case room(RoomKind)
+    }
 
     var body: some View {
         ZStack {
             switch route {
             case .home:
                 HomeScreen(
-                    onSolo: { route = .soloSetup },
-                    onDuel: { chooseBattle(room: .duel) },
-                    onBattle: { chooseBattle(room: .battle) })
+                    onSolo: { open(.solo) },
+                    onDuel: { open(.room(.duel)) },
+                    onBattle: { open(.room(.battle)) },
+                    onHowToPlay: { startTutorial(then: nil) })
 
             case .soloSetup:
                 SoloSetupScreen(
@@ -81,7 +92,9 @@ struct RootView: View {
                     model: model,
                     battle: battle,
                     onLeave: leaveGame,
-                    onNewGame: startSolo(pace:modifier:))
+                    onNewGame: startSolo(pace:modifier:),
+                    onTutorialDone: finishTutorial,
+                    tutorialPlayLabel: tutorialPlayLabel)
             }
 
             // Battle is the one mode that genuinely needs an identity, so it
@@ -108,9 +121,54 @@ struct RootView: View {
             // screenshotted without a finger on it. Ignored otherwise.
             switch ProcessInfo.processInfo.environment["WORD_AUTOSTART"] {
             case "solo": startSolo(pace: settings.pace, modifier: settings.modifier)
+            case "tutorial": startTutorial(then: nil)
             case "occupy": startLocalOccupy()
             default: break
             }
+        }
+    }
+
+    // MARK: Doors and the tutorial
+
+    /// A door on the home screen. The first one a new player opens is
+    /// fronted by the tutorial, once; after that every door opens straight.
+    private func open(_ door: Door) {
+        if !settings.hasSeenTutorial {
+            startTutorial(then: door)
+        } else {
+            enter(door)
+        }
+    }
+
+    private func enter(_ door: Door) {
+        switch door {
+        case .solo: route = .soloSetup
+        case let .room(room): chooseBattle(room: room)
+        }
+    }
+
+    private func startTutorial(then door: Door?) {
+        tutorialThen = door
+        model.newTutorial()
+        route = .game
+    }
+
+    /// Finished or skipped: on to the door the player picked, or home.
+    private func finishTutorial() {
+        settings.markTutorialSeen()
+        let door = tutorialThen
+        tutorialThen = nil
+        route = .home
+        if let door { enter(door) }
+    }
+
+    /// The finish card's button names where it leads.
+    private var tutorialPlayLabel: String {
+        switch tutorialThen {
+        case .solo: return "Play solo"
+        case .room(.duel): return "On to duel"
+        case .room(.battle): return "On to battle"
+        case nil: return "Done"
         }
     }
 
@@ -328,6 +386,12 @@ struct RootView: View {
         if battle != nil {
             leaveBattle()
             return
+        }
+        // Leaving the tutorial early still counts as having seen it: it
+        // won't step in front of a door again.
+        if model.isTutorial {
+            settings.markTutorialSeen()
+            tutorialThen = nil
         }
         route = .home
     }

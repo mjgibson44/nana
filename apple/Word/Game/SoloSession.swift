@@ -92,6 +92,14 @@ struct SoloSession: Equatable {
         countdown = nil
     }
 
+    /// The tutorial: no countdown, nothing dealt on a clock, and no opening
+    /// card — the banner over the board is where it starts talking.
+    init(tutorialAt _: Date) {
+        pace = .regular
+        countdown = nil
+        splash = nil
+    }
+
     /// A game coming back from a saved blob. The clock returns frozen at the
     /// seconds it had left, behind the resume card, so time away is never
     /// charged and a long absence can't expire the round on arrival.

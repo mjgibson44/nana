@@ -344,6 +344,33 @@ final class ScreenSnapshotTests: XCTestCase {
             name: "battle-lobby-countdown")
     }
 
+    /// The tutorial at every stage a player sees: each step before and after
+    /// the word row is right, the gap button lit, and the finish card.
+    func testTheTutorialRenders() async throws {
+        let model = GameModel()
+        model.newTutorial()
+        await model.loadDictionary()
+        try render(GameScreen(model: model), name: "tutorial-1-spell")
+        TutorialPlayTests.build(tutorialScript[0].pattern, on: model)
+        try render(GameScreen(model: model), name: "tutorial-1-place")
+        model.confirm()
+        model.clearToast(serial: model.toast?.serial ?? 0)
+        try render(GameScreen(model: model), name: "tutorial-2-spell")
+        TutorialPlayTests.build([tutorialScript[1].pattern[0]], on: model)
+        try render(GameScreen(model: model), name: "tutorial-2-gap")
+        TutorialPlayTests.build(Array(tutorialScript[1].pattern.dropFirst()), on: model)
+        try render(GameScreen(model: model), name: "tutorial-2-place")
+        TutorialPlayTests.landThroughBoard(tutorialScript[1], on: model)
+        model.clearToast(serial: model.toast?.serial ?? 0)
+        try render(GameScreen(model: model), name: "tutorial-3-spell")
+        TutorialPlayTests.build(tutorialScript[2].pattern, on: model)
+        try render(GameScreen(model: model), name: "tutorial-3-place")
+        TutorialPlayTests.landThroughBoard(tutorialScript[2], on: model)
+        XCTAssertTrue(model.tutorialFinished)
+        try render(
+            GameScreen(model: model, tutorialPlayLabel: "Play solo"), name: "tutorial-done")
+    }
+
     func testBattleEntryRenders() throws {
         for room in [RoomKind.duel, .battle] {
             let name = room.rawValue
