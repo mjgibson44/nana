@@ -225,6 +225,13 @@ struct GameScreen: View {
                 camera.newGame(bounds: model.bounds, anchor: model.startCell, opening: .opener)
             }
         }
+        #if DEBUG
+        .onChange(of: model.debugRecentreSerial) {
+            // The demo's "show the whole board" — the Daily's opening framing.
+            camera.newGame(bounds: model.bounds, anchor: model.dayCentre, opening: .centred)
+            camera.autoFit(box: model.tileBounds)
+        }
+        #endif
         #if os(iOS)
         .onChange(of: sizeClass, initial: true) { _, sizeClass in
             camera.cellBase = sizeClass == .compact ? CELL_BASE_COMPACT : CELL_BASE_REGULAR

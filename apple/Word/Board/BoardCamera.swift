@@ -16,7 +16,13 @@ final class BoardCamera {
     static let openingColumns = 16
     /// Where the start square sits in the opening view: this many cells in
     /// from the left edge, so the opener reads left to right from there.
-    static let openingInset = 2
+    ///
+    /// Four, not two: an opener is usually five to seven letters, and two in
+    /// left it hugging the left side of the screen, so players panned it to
+    /// the middle by hand almost every game. Four in puts a typical opener
+    /// about on the centre line, and still leaves room on the right for a
+    /// twelve-letter one (4 + 12 = `openingColumns`).
+    static let openingInset = 4
 
     var zoom: Double = 1
     var offset: CGPoint = .zero
@@ -197,10 +203,35 @@ final class BoardCamera {
             let target = autoFitZoom(
                 tileBox: box, viewport: viewport, cellBase: cellBase, currentZoom: zoom),
             target < zoom
-        else { return }
+        else {
+            reveal(box)
+            return
+        }
         let focus = captureFocus(offset: offset, metrics: metrics, tileBox: box, viewport: viewport)
         zoom = target
         offset = restoreOffset(focus: focus, metrics: metrics, tileBox: box, viewport: viewport)
+    }
+
+    /// The crossword fits at this zoom, but part of it may be scrolled out of
+    /// view — a word landed in a column half off the edge. Pan the least
+    /// distance that brings every tile back on screen, with half a cell to
+    /// spare, and otherwise leave the view exactly where the player put it.
+    private func reveal(_ box: Bounds) {
+        let first = metrics.rect(of: Cell(row: box.minRow, col: box.minCol))
+        let last = metrics.rect(of: Cell(row: box.maxRow, col: box.maxCol))
+        let margin = metrics.step / 2
+        func nudge(_ current: Double, low: Double, high: Double, span: Double) -> Double {
+            // Wider than the screen: autoFit's business, not this.
+            guard high - low + 2 * margin <= span else { return current }
+            if low - margin < current { return low - margin }
+            if high + margin > current + span { return high + margin - span }
+            return current
+        }
+        let next = clamped(
+            CGPoint(
+                x: nudge(offset.x, low: first.minX, high: last.maxX, span: viewport.width),
+                y: nudge(offset.y, low: first.minY, high: last.maxY, span: viewport.height)))
+        if next != offset { offset = next }
     }
 
     private func clamped(_ candidate: CGPoint) -> CGPoint {

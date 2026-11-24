@@ -309,6 +309,28 @@ final class GameModel {
     /// The game never calls this — prizes are the clock's to light and the
     /// player's to claim. It exists so a test can start from a board that
     /// would otherwise take a minute of real play to arrive at.
+    // MARK: Capture hooks (debug builds only)
+
+    #if DEBUG
+    /// How far ahead of the wall clock this game believes it is. The demo
+    /// player pushes it forward to play minutes of a game in an instant —
+    /// every drip lands exactly as it would have — and to park the next deal
+    /// a few seconds away for filming.
+    var debugTimeShift: TimeInterval = 0
+    /// Bumped to ask the board to frame every tile, centred.
+    private(set) var debugRecentreSerial = 0
+    func debugRecentre() { debugRecentreSerial += 1 }
+    #endif
+
+    /// The game's own idea of now: the wall clock, plus any debug shift.
+    private func shifted(_ now: Date) -> Date {
+        #if DEBUG
+        return now.addingTimeInterval(debugTimeShift)
+        #else
+        return now
+        #endif
+    }
+
     /// Which step of `tutorialScript` the tutorial is on.
     private(set) var tutorialStep = 0
     /// Every step's word is down: the finish card is up.
@@ -738,6 +760,7 @@ final class GameModel {
 
     /// Seconds until the next batch lands, whichever clock is running.
     func secondsToNextTiles(at now: Date) -> Int? {
+        let now = shifted(now)
         if mode == .occupy { return nil }
         if let battle {
             return isComplete ? nil : battle.secondsToNextDrip(at: now)
@@ -759,7 +782,7 @@ final class GameModel {
     }
 
     func remainingSeconds(at now: Date) -> Int? {
-        solo.remaining(at: now).map { Int(ceil($0)) }
+        solo.remaining(at: shifted(now)).map { Int(ceil($0)) }
     }
 
     // MARK: Game lifecycle
@@ -1179,21 +1202,22 @@ final class GameModel {
     }
 
     func dismissSplash(at now: Date = .now) {
-        solo.dismissSplash(at: now)
+        solo.dismissSplash(at: shifted(now))
     }
 
     func pause(at now: Date = .now) {
         guard canPause else { return }
-        solo.pause(at: now)
+        solo.pause(at: shifted(now))
     }
 
     func resume(at now: Date = .now) {
-        solo.resume(at: now)
+        solo.resume(at: shifted(now))
     }
 
     /// Called by the UI heartbeat. The session machine changes its deadline
     /// before emitting, so the same expiry can never deal twice.
     func advanceClock(at now: Date = .now) {
+        let now = shifted(now)
         if mode == .battle {
             advanceBattle(at: now)
             advancePrizes(at: now)

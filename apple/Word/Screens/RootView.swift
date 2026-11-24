@@ -37,6 +37,13 @@ struct RootView: View {
     @State private var battleError: String?
     @State private var partyCode: String?
     @State private var battleDoorNotice = false
+    #if DEBUG
+    /// The self-playing Solo game of `WORD_AUTOSTART=demo`, for store capture.
+    @State private var demo: DemoPlayer?
+    /// Everything the battle demo has to keep alive: the rival's session,
+    /// its headless board, and its player.
+    @State private var demoRival: [AnyObject] = []
+    #endif
     /// The stand-in rival of a `WORD_AUTOSTART=occupy` game.
     @State private var localRival: BattleSession?
     /// The road into a battle that's underway, so backing out can cancel it —
@@ -122,6 +129,17 @@ struct RootView: View {
             switch ProcessInfo.processInfo.environment["WORD_AUTOSTART"] {
             case "solo": startSolo(pace: settings.pace, modifier: settings.modifier)
             case "tutorial": startTutorial(then: nil)
+            #if DEBUG
+            case "demo":
+                // A fixed deal, so every capture plays the same game.
+                let seed = ProcessInfo.processInfo.environment["WORD_DEMO_SEED"] ?? "timetiles"
+                model.newGame(seed: seed, pace: .regular)
+                route = .game
+                let player = DemoPlayer(model: model)
+                demo = player
+                Task { await player.run() }
+            case "battle-demo": startBattleDemo()
+            #endif
             case "occupy": startLocalOccupy()
             default: break
             }
@@ -229,6 +247,60 @@ struct RootView: View {
             }
         }
     }
+
+    #if DEBUG
+    /// A development hook for store capture: `WORD_AUTOSTART=battle-demo`
+    /// opens a live two-player battle on an in-memory mesh against a rival
+    /// with no screen. Both boards warm up a few words in an instant, and
+    /// after `WORD_DEMO_ATTACK_AT` seconds (default 4) the rival lands the
+    /// longest word it can, sending tiles across — the "Incoming!" moment.
+    private func startBattleDemo() {
+        let environment = ProcessInfo.processInfo.environment
+        let attackAt = environment["WORD_DEMO_ATTACK_AT"].flatMap(Double.init) ?? 4
+        let names = ["me": "You", "rival": environment["WORD_DEMO_RIVAL"] ?? "Sam"]
+        let mesh = MemoryMesh()
+        let hostTransport = mesh.add("me")
+        let rivalTransport = mesh.add("rival")
+        let rivalModel = GameModel()
+        let host = BattleSession(
+            role: .host, mode: .battle, transport: hostTransport, model: model,
+            displayName: { names[$0] ?? "Player" })
+        let rival = BattleSession(
+            role: .client, mode: .battle, transport: rivalTransport, model: rivalModel,
+            displayName: { names[$0] ?? "Player" })
+        mesh.connect("me")
+        mesh.connect("rival")
+        host.onGameStart = { route = .game }
+        host.onReturnToLobby = { route = .battleLobby }
+        host.run()
+        rival.run()
+        battle = host
+        battleMode = .battle
+        let rivalPlayer = DemoPlayer(
+            model: rivalModel, config: DemoPlayer.Config(tap: 0.01, beat: 0.01))
+        let mine = DemoPlayer(model: model, config: DemoPlayer.Config())
+        demoRival = [rival, rivalModel, rivalPlayer, mine]
+        Task {
+            await model.loadDictionary()
+            await rivalModel.loadDictionary()
+            host.start()
+            while model.mode != .battle || rivalModel.mode != .battle || rivalModel.rack.isEmpty {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            // Both boards a few words in; this one keeps a pile in hand, so
+            // the attack lands on someone with something to lose.
+            rivalPlayer.warmUp(3)
+            mine.warmUp(4)
+            if let toast = model.toast { model.clearToast(serial: toast.serial) }
+            // Once the board is on screen — a recentre before then has no
+            // camera to move.
+            try? await Task.sleep(for: .milliseconds(600))
+            model.debugRecentre()
+            try? await Task.sleep(for: .milliseconds(Int(attackAt * 1000)))
+            await rivalPlayer.showOne(longest: true)
+        }
+    }
+    #endif
 
     /// A development hook: `WORD_AUTOSTART=occupy` opens straight onto an
     /// Occupy board against a rival who never plays — two sessions on an
