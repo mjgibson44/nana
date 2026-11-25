@@ -32,9 +32,8 @@ the release.
    `https://www.mjgibson.com/privacy` serves the home page (the site is a client-side app
    that answers every path), so check the rendered page in a browser, not with `curl`.
    **This blocks submission**: Apple rejects a listing whose privacy URL isn't a policy.
-2. [ ] **Confirm a 1.0.0 build is on TestFlight.** The first build after #65 merges
-   should be 1.0.0 (build ~95). Check App Store Connect → TestFlight, or the Release run's
-   log for `UPLOAD SUCCEEDED`.
+2. [x] **A 1.0.0 build is on TestFlight**: build **99**, uploaded when #65 merged
+   (2026-11-24). Pick that one in step 10, or any later 1.0.0 build.
 3. [ ] **Sign in to App Store Connect** (Matt — Apple ID + two-factor). Accept any
    pending agreement banner there or on developer.apple.com; a missing agreement makes
    both the web UI and the API refuse.
@@ -70,9 +69,9 @@ printed above the key list). CI has both as Actions secrets, which can't be read
 
 ## Store assets
 
-Made on 2026-11-24 and **not in git**. They live in the worktree that made them:
-`/Users/mgibson/nana/.claude/worktrees/app-simplify-ui-redesign-8896af/release/`.
-If that folder is gone, regenerate them (below) — every capture is reproducible.
+Made on 2026-11-24 and committed under [`release/`](../release/) at the repo root, with
+the listing draft (`release/app-store-listing.md`). Paths below are relative to it. Every
+capture is reproducible (below) if any need re-shooting.
 
 | Slot | File | What it shows |
 |---|---|---|
@@ -86,8 +85,10 @@ If that folder is gone, regenerate them (below) — every capture is reproducibl
 
 Screenshots are 1320×2868 (6.9" iPhone; App Store Connect scales them down for smaller
 iPhones). Previews are 886×1920, 30fps H.264 with a silent stereo track, inside Apple's
-15–30s window. `screenshots-ipad/` and `icon-variations/` are leftovers from before the
-iPhone-only and icon decisions — not needed.
+15–30s window. `screenshots-ipad/` and `icon-variations/` are kept from before the iPhone-only and
+icon decisions (`icon-variations/comparison.png` shows the six icons considered) — not
+needed for this release. `design-reviews/` holds the renders reviewed while the menus,
+tutorial and results screens were redesigned; reference only.
 
 **Caveats:** screenshots 1–5 were taken before the latest changes landed — the opening
 camera now starts the first word four cells in (affects 02-play slightly) and the icon
