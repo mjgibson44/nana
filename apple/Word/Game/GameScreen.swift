@@ -36,6 +36,10 @@ struct GameScreen: View {
     @State private var clockNow = Date.now
     /// The tile-lettered menu, in place of the platform's.
     @State private var menuOpen = false
+    /// The tutorial's finish card is up. It follows the last word landing
+    /// by a beat (`tutorialFinishDelay`), so the word is seen settling on
+    /// the board before anything covers it.
+    @State private var tutorialCardShown = false
     /// Whether the Daily's FINISH DAY row has been tapped once and is asking
     /// whether that was meant. Cleared whenever the menu closes, so it never
     /// comes back already armed.
@@ -134,7 +138,7 @@ struct GameScreen: View {
                 .transition(.opacity)
             }
 
-            if model.tutorialFinished {
+            if model.tutorialFinished, tutorialCardShown {
                 TutorialFinishView(playLabel: tutorialPlayLabel, onPlay: onTutorialDone)
                     .transition(.opacity)
             }
@@ -189,6 +193,20 @@ struct GameScreen: View {
             }
             model.finishRejectedAim(serial: serial)
             focusGame()
+        }
+        // The last tutorial word lands and stays in view, the camera
+        // bringing it in, before the finish card covers the board.
+        .task(id: model.tutorialFinished) {
+            guard model.tutorialFinished else {
+                tutorialCardShown = false
+                return
+            }
+            do {
+                try await Task.sleep(for: .seconds(Self.tutorialFinishDelay))
+            } catch {
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.3)) { tutorialCardShown = true }
         }
         .task(id: model.boardClearReady) {
             guard model.boardClearReady else { return }
@@ -258,8 +276,17 @@ struct GameScreen: View {
         }
     }
 
+    /// How long the finished tutorial board stays up before the finish card.
+    static let tutorialFinishDelay: Double = 1.8
+
     /// The tutorial's instructions for the step in hand, or nil outside it.
+    /// Once the last word is down it says so, while the board stays up.
     private var tutorialBanner: TutorialBannerView? {
+        if model.isTutorial, model.tutorialFinished {
+            return TutorialBannerView(
+                step: TUTORIAL_STEPS - 1, total: TUTORIAL_STEPS,
+                title: "All done", instruction: Text("Every word is down."))
+        }
         guard let step = model.tutorialCurrent else { return nil }
         let content = TutorialBannerView.content(
             for: step, at: model.tutorialStep, rowReady: model.tutorialRowReady)

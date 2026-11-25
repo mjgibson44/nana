@@ -365,8 +365,10 @@ final class ScreenSnapshotTests: XCTestCase {
         try render(GameScreen(model: model), name: "tutorial-3-place")
         TutorialPlayTests.landThroughBoard(tutorialScript[2], on: model)
         XCTAssertTrue(model.tutorialFinished)
+        // The board stays up with the last word on it; the card follows.
         try render(
             GameScreen(model: model, tutorialPlayLabel: "Play solo"), name: "tutorial-done")
+        try render(TutorialFinishView(playLabel: "Play solo") {}, name: "tutorial-finish-card")
     }
 
     func testBattleEntryRenders() throws {

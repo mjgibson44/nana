@@ -302,28 +302,6 @@ extension MenuFooter where Primary == EmptyView {
     }
 }
 
-/// A word in tiles that does something when pressed. The whole row is the
-/// target, blanks included.
-struct TileWordButton: View {
-    var text: String
-    var style: TileStyle = .plain
-    var size: CGFloat = Spacing.tile
-    var disabled = false
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            TileWord(text: text, style: style, size: size)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PressedTileStyle())
-        .disabled(disabled)
-        .opacity(disabled ? 0.35 : 1)
-        .accessibilityLabel(text.capitalized)
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
 /// A tile two rows tall and two wide: the results screen's score digits and
 /// the battle placing.
 struct BigTile: View {
