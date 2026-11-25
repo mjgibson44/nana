@@ -74,10 +74,9 @@ struct PauseView: View {
     var body: some View {
         ScreenColumn {
             Spacer()
-            TileBlock {
-                TileTitle(text: "PAUSED")
-                    .padding(.bottom, Spacing.section - Spacing.tileGap)
-                TileWordButton(text: "RESUME", action: onResume)
+            VStack(spacing: Spacing.menuButtonGap) {
+                ScreenHeader("PAUSED")
+                MenuButton(title: "Resume", systemImage: "play.fill", style: .primary, action: onResume)
                     .focused($resumeFocused)
                     .keyboardShortcut(.cancelAction)
             }
@@ -89,11 +88,11 @@ struct PauseView: View {
     }
 }
 
-/// The game menu, in the game's own lettering rather than the system's.
+/// The game menu, dressed like the menu screens rather than the system's:
+/// its name in tiles over plain `MenuButton`s.
 ///
-/// It replaced a `Menu` full of `Button`s: on a screen where every other
-/// control is a word spelled in tiles, a platform context menu was the one
-/// thing that looked borrowed. Speed left with it — a game's pace is chosen
+/// It replaced a `Menu` full of `Button`s, which was the one thing on the
+/// game screen that looked borrowed. Speed left with it — a game's pace is chosen
 /// before it starts (`SoloSetupScreen`), not changed halfway through, because
 /// changing it here silently dealt a whole new game.
 struct GameMenuView: View {
@@ -114,17 +113,15 @@ struct GameMenuView: View {
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onClose)
                 .accessibilityHidden(true)
-            TileBlock {
-                TileTitle(text: "MENU")
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, Spacing.section - Spacing.tileGap)
+            VStack(spacing: Spacing.menuButtonGap) {
+                ScreenHeader("MENU")
                 ForEach(items) { item in
-                    TileWordButton(
-                        text: item.title, style: item.accent ? .accentButton : .plain,
+                    MenuButton(
+                        title: item.title, style: item.accent ? .primary : .secondary,
                         action: item.action)
                 }
-                TileWordButton(text: "CLOSE", action: onClose)
-                    .padding(.top, Spacing.section - Spacing.tileGap)
+                MenuButton(title: "Close", systemImage: "xmark", action: onClose)
+                    .padding(.top, Spacing.section - Spacing.menuButtonGap)
                     .keyboardShortcut(.cancelAction)
             }
             .padding(Spacing.margin)
@@ -184,7 +181,10 @@ struct NoticeCard: View {
                     .foregroundStyle(Palette.ink)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 300)
-                TileWordButton(text: dismissLabel, action: onDismiss)
+                MenuButton(
+                    title: dismissLabel,
+                    systemImage: dismissLabel == "BACK" ? "chevron.left" : nil,
+                    action: onDismiss)
             }
             .padding(Spacing.margin)
         }
