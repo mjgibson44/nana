@@ -7,6 +7,10 @@ struct WordApp: App {
             ContentView()
                 // The game is one dark theme, by design.
                 .preferredColorScheme(.dark)
+                #if os(iOS)
+                // The game owns the whole screen: no clock or battery across the top.
+                .statusBarHidden()
+                #endif
                 // A floor small enough that a Mac window can always be dragged
                 // smaller: the board scrolls and zooms, so it never needs room
                 // for the whole lattice — but nothing below this leaves space
